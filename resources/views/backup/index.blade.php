@@ -6,6 +6,8 @@
     $connected = $google_drive->isConnected();
     // signed in, but Drive access was left unticked on Google's screen
     $no_access = $connected && ! $google_drive->hasDriveAccess();
+    // names of the zips already in Drive, so server rows don't offer to send them again
+    $in_drive = collect($drive_files)->pluck('name')->flip();
     $last_backup = $backups[0]['last_modified'] ?? null;
 @endphp
 
@@ -117,7 +119,9 @@
                         <a class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-accent"
                              href="{{action([\App\Http\Controllers\BackUpController::class, 'download'], [$backup['file_name']])}}"><i
                                   class="fa fa-cloud-download"></i> @lang('lang_v1.download')</a>
-                        @if ($connected && ! $no_access)
+                        @if ($connected && ! $no_access && $in_drive->has($backup['file_name']))
+                          <span class="label label-success" title="Already in Google Drive"><i class="fa fa-check"></i> In Drive</span>
+                        @elseif ($connected && ! $no_access)
                           <button type="button" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-success js-job"
                                   data-url="{{ action([\App\Http\Controllers\GoogleDriveController::class, 'send'], [$backup['file_name']]) }}">
                             <i class="fab fa-google"></i> Send to Drive</button>
