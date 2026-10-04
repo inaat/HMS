@@ -39,6 +39,15 @@ class WhatsappApiService
         return $this->makeApiCall($apiURL, 'get');
     }
 
+    // returns instance_data.phone_connected / instance_data.user; error=true when
+    // the instance key doesn't exist on the gateway yet
+    public function instanceInfo($instance)
+    {
+        $apiURL = $this->baseUrl . '/instance/info?key=' . $instance;
+
+        return $this->makeApiCall($apiURL, 'get');
+    }
+
     public function sendTestMsg($instance, $number, $text)
     {
         $apiURL = $this->baseUrl . '/message/text?key=' . $instance;

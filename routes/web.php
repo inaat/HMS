@@ -408,6 +408,8 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::resource('selling-price-group', SellingPriceGroupController::class);
 
     Route::resource('notification-templates', NotificationTemplateController::class)->only(['index', 'store']);
+    Route::get('whatsapp', [\App\Http\Controllers\WhatsappController::class, 'index']);
+    Route::get('whatsapp/qr-status', [\App\Http\Controllers\WhatsappController::class, 'qrStatus']);
     Route::get('notification/get-template/{transaction_id}/{template_for}', [NotificationController::class, 'getTemplate']);
     Route::post('notification/send', [NotificationController::class, 'send']);
 
