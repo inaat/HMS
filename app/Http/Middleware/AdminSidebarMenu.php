@@ -109,6 +109,13 @@ class AdminSidebarMenu
                                 ['icon' => '', 'active' => request()->segment(1) == 'customer-group']
                             );
                         }
+                        if (auth()->user()->can('customer.view')) {
+                            $sub->url(
+                                action([\App\Http\Controllers\DefaulterController::class, 'index']),
+                                'Top Defaulters',
+                                ['icon' => '', 'active' => request()->segment(1) == 'top-defaulters']
+                            );
+                        }
                         if (auth()->user()->can('supplier.create') || auth()->user()->can('customer.create')) {
                             $sub->url(
                                 action([\App\Http\Controllers\ContactController::class, 'getImportContacts']),
