@@ -45,4 +45,11 @@ class GoogleDriveSetting extends Model
     {
         return ! empty($this->refresh_token);
     }
+
+    // connected, and the user actually ticked Drive access on Google's screen
+    public function hasDriveAccess(): bool
+    {
+        return $this->isConnected()
+            && (empty($this->scope) || \App\Services\GoogleDriveService::hasDriveScope($this->scope));
+    }
 }

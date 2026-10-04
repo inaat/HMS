@@ -4,6 +4,8 @@
 @section('content')
 @php
     $connected = $google_drive->isConnected();
+    // signed in, but Drive access was left unticked on Google's screen
+    $no_access = $connected && ! $google_drive->hasDriveAccess();
     $last_backup = $backups[0]['last_modified'] ?? null;
 @endphp
 
@@ -50,7 +52,7 @@
   <div class="bk-chips">
     <div class="bk-chip"><small>Last backup</small><b>{{ $last_backup ? Carbon::createFromTimestamp($last_backup)->diffForHumans() : 'Never' }}</b></div>
     <div class="bk-chip"><small>On this server</small><b>{{ count($backups) }}</b></div>
-    <div class="bk-chip"><small>Google Drive</small><b>{{ $connected ? 'Connected' : 'Not connected' }}</b></div>
+    <div class="bk-chip"><small>Google Drive</small><b>{{ $no_access ? 'No Drive access' : ($connected ? 'Connected' : 'Not connected') }}</b></div>
     @if ($connected && $google_drive->last_upload_at)
       <div class="bk-chip"><small>Last sent to Drive</small><b>{{ $google_drive->last_upload_at->diffForHumans() }}</b></div>
     @endif
@@ -65,7 +67,7 @@
                   data-url="{{ action([\App\Http\Controllers\BackUpController::class, 'run']) }}" data-drive="0">
             <i class="fa fa-play-circle"></i> Back up now
           </button>
-          @if ($connected)
+          @if ($connected && ! $no_access)
             <button type="button" class="tw-dw-btn tw-dw-btn-accent tw-font-bold tw-text-white tw-rounded-full js-job"
                     data-url="{{ action([\App\Http\Controllers\BackUpController::class, 'run']) }}" data-drive="1">
               <i class="fab fa-google"></i> Back up + send to Drive
@@ -115,7 +117,7 @@
                         <a class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-accent"
                              href="{{action([\App\Http\Controllers\BackUpController::class, 'download'], [$backup['file_name']])}}"><i
                                   class="fa fa-cloud-download"></i> @lang('lang_v1.download')</a>
-                        @if ($connected)
+                        @if ($connected && ! $no_access)
                           <button type="button" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-success js-job"
                                   data-url="{{ action([\App\Http\Controllers\GoogleDriveController::class, 'send'], [$backup['file_name']]) }}">
                             <i class="fab fa-google"></i> Send to Drive</button>
@@ -170,6 +172,18 @@
             @else
               Google Drive is not set up yet: add GOOGLE_DRIVE_CLIENT_ID and GOOGLE_DRIVE_CLIENT_SECRET to .env.
             @endif
+          </div>
+        @elseif ($no_access)
+          <div class="alert alert-warning">
+            <p>
+              <b>{{ $google_drive->connected_email }}</b> is signed in, but Google Drive access was not allowed,
+              so backups can't be uploaded.
+            </p>
+            <p>Click <b>Reconnect</b> and, on the Google screen, make sure the box for <b>Google Drive files</b> is ticked.</p>
+            <br>
+            <a class="tw-dw-btn tw-dw-btn-primary tw-text-white" href="{{ action([\App\Http\Controllers\GoogleDriveController::class, 'connect']) }}">
+              <i class="fab fa-google"></i> Reconnect Google Drive
+            </a>
           </div>
         @else
           <p>

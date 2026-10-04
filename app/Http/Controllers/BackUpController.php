@@ -71,7 +71,7 @@ class BackUpController extends Controller
         $drive_ready = app(GoogleDriveService::class)->isConfigured($google_drive);
         $drive_files = [];
         $drive_error = null;
-        if ($google_drive->isConnected()) {
+        if ($google_drive->hasDriveAccess()) {
             try {
                 $drive_files = app(GoogleDriveService::class)->listFiles($google_drive);
             } catch (\Exception $e) {

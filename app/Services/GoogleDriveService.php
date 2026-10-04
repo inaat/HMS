@@ -14,13 +14,14 @@ class GoogleDriveService
     const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
     const TOKEN_URL = 'https://oauth2.googleapis.com/token';
     const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
-    const USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
+    const ABOUT_URL = 'https://www.googleapis.com/drive/v3/about';
     const FILES_URL = 'https://www.googleapis.com/drive/v3/files';
     const UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
 
     // drive.file only sees files this app created, so pruning can never touch
-    // anything else in the user's Drive
-    const SCOPES = 'openid email https://www.googleapis.com/auth/drive.file';
+    // anything else in the user's Drive. Asked for alone: with extra scopes
+    // (openid/email) Google shows per-scope checkboxes and Drive can be left out.
+    const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 
     const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
@@ -74,7 +75,6 @@ class GoogleDriveService
             // offline + consent so Google always hands back a refresh_token
             'access_type' => 'offline',
             'prompt' => 'consent',
-            'include_granted_scopes' => 'true',
             'state' => $state,
         ]);
     }
@@ -105,8 +105,12 @@ class GoogleDriveService
             throw new \Exception('Google did not return a refresh token, so scheduled uploads could not keep working. Remove the app from your Google account permissions and connect again.');
         }
 
+        if (! empty($token['scope']) && ! static::hasDriveScope($token['scope'])) {
+            throw new \Exception('Google Drive access was not granted. Connect again and, on the Google screen, tick the box that allows access to Google Drive files.');
+        }
+
         $email = Http::withToken($token['access_token'])->timeout(30)
-            ->get(self::USERINFO_URL)->json('email');
+            ->get(self::ABOUT_URL, ['fields' => 'user(emailAddress)'])->json('user.emailAddress');
 
         $setting->update([
             'access_token' => $token['access_token'],
@@ -139,8 +143,17 @@ class GoogleDriveService
         ]);
     }
 
+    public static function hasDriveScope($scope)
+    {
+        return in_array(self::SCOPES, preg_split('/\s+/', (string) $scope));
+    }
+
     protected function accessToken(GoogleDriveSetting $setting)
     {
+        if ($setting->scope && ! static::hasDriveScope($setting->scope)) {
+            throw new \Exception('This Google connection has no Drive access. Click "Disconnect", then "Connect Google Drive" and allow access to Google Drive files.');
+        }
+
         if ($setting->access_token && $setting->expires_at && $setting->expires_at->isFuture()) {
             return $setting->access_token;
         }
@@ -379,9 +392,14 @@ class GoogleDriveService
         } catch (\Exception $e) {
             \Log::emergency('Google Drive backup upload: '.$e->getMessage());
 
+            // Google's own message instead of Laravel's truncated "HTTP request returned..." dump
+            $message = $e instanceof \Illuminate\Http\Client\RequestException
+                ? ($e->response->json('error.message') ?: $e->getMessage())
+                : $e->getMessage();
+
             $setting->update([
                 'last_upload_at' => now(),
-                'last_upload_status' => 'Failed: '.$e->getMessage(),
+                'last_upload_status' => 'Failed: '.$message,
             ]);
 
             return false;
