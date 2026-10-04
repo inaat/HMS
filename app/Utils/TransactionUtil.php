@@ -6071,7 +6071,7 @@ class TransactionUtil extends Util
     
     We have received a payment of: {$parent_payment->amount}.
     Remaining Balance: {$this->getContactDue($contact->id)}
-    Business Name : Fine Corporation (فائن کارپوریشن)
+    Business Name : {$contact->business->name}
     Developed By Skyline WebSolution
 
     ");
@@ -6621,7 +6621,7 @@ class TransactionUtil extends Util
         
         We have received a payment of: {$parent_payment->amount}.
         Remaining Balance: {$this->getContactDue($contact->id)}
-        Business Name: Fine Corporation (فائن کارپوریشن)
+        Business Name: {$contact->business->name}
         Developed By Skyline WebSolution
         ";
 
