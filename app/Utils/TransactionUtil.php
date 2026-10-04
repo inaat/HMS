@@ -6066,7 +6066,7 @@ class TransactionUtil extends Util
     $whatsappApiService = new WhatsappApiService();
 
     // Call the sendTestMsg method
-    $response = $whatsappApiService->sendTestMsg('Fine', $contact->mobile, "
+    $response = $whatsappApiService->sendTestMsg(\App\WhatsappDevice::instanceFor($contact->business_id), $contact->mobile, "
     Dear {$contact->name},
     
     We have received a payment of: {$parent_payment->amount}.
@@ -6497,7 +6497,7 @@ class TransactionUtil extends Util
                 $filename = basename($receipt_details->invoice_no . '.pdf');
                 $whatsappApiService = new WhatsappApiService();
                 // Send the document via WhatsApp
-                $response = $whatsappApiService->sendDocument('Fine', $filePath, $receipt_details->customer_mobile, $filename, $receipt_details->invoice_no);
+                $response = $whatsappApiService->sendDocument(\App\WhatsappDevice::instanceFor($business_id), $filePath, $receipt_details->customer_mobile, $filename, $receipt_details->invoice_no);
                 
                 // Fetch the transaction details
                 $transaction = Transaction::where('business_id', $business_id)
@@ -6626,7 +6626,7 @@ class TransactionUtil extends Util
         ";
 
         // Send WhatsApp message
-        $response = $whatsappApiService->sendTestMsg('Fine', $contact->mobile, $message);
+        $response = $whatsappApiService->sendTestMsg(\App\WhatsappDevice::instanceFor($contact->business_id), $contact->mobile, $message);
     }
 
     return $parent_payment;

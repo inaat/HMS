@@ -3,12 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Services\WhatsappApiService;
+use App\WhatsappDevice;
+use Illuminate\Http\Request;
 
 class WhatsappController extends Controller
 {
-    // same instance key TransactionUtil sends invoices/messages through
-    const INSTANCE = 'Fine';
-
     protected $whatsappApiService;
 
     public function __construct(WhatsappApiService $whatsappApiService)
@@ -16,43 +15,98 @@ class WhatsappController extends Controller
         $this->whatsappApiService = $whatsappApiService;
     }
 
-    public function index()
+    public function index(Request $request)
     {
         if (! auth()->user()->can('send_notification')) {
             abort(403, 'Unauthorized action.');
         }
 
-        return view('whatsapp.index')->with('instance', self::INSTANCE);
+        $business_id = $request->session()->get('user.business_id');
+
+        // makes sure the business has at least one device to link
+        WhatsappDevice::forBusiness($business_id);
+
+        $devices = WhatsappDevice::where('business_id', $business_id)->orderBy('id')->get();
+
+        return view('whatsapp.index')->with('devices', $devices);
+    }
+
+    public function store(Request $request)
+    {
+        if (! auth()->user()->can('send_notification')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $request->validate(['name' => 'required|string|max:191']);
+
+        WhatsappDevice::createFor($request->session()->get('user.business_id'), $request->input('name'));
+
+        return redirect()->back()->with('status', ['success' => 1, 'msg' => __('lang_v1.added_success')]);
+    }
+
+    public function update(Request $request, $id)
+    {
+        if (! auth()->user()->can('send_notification')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $request->validate(['name' => 'required|string|max:191']);
+
+        $this->device($request, $id)->update($request->only(['name']));
+
+        return redirect()->back()->with('status', ['success' => 1, 'msg' => __('lang_v1.updated_success')]);
+    }
+
+    public function destroy(Request $request, $id)
+    {
+        if (! auth()->user()->can('send_notification')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $this->device($request, $id)->delete();
+
+        return redirect()->back()->with('status', ['success' => 1, 'msg' => __('lang_v1.deleted_success')]);
     }
 
     /**
-     * Polled by the page: reports whether the phone is connected, otherwise
-     * returns a fresh QR code (base64 image) to scan.
+     * Polled by the page: reports whether the device's phone is connected,
+     * otherwise returns a fresh QR code (base64 image) to scan.
      */
-    public function qrStatus()
+    public function qrStatus(Request $request, $id)
     {
         if (! auth()->user()->can('send_notification')) {
             abort(403, 'Unauthorized action.');
         }
 
+        $device = $this->device($request, $id);
+
         try {
-            $info = $this->whatsappApiService->instanceInfo(self::INSTANCE);
+            $info = $this->whatsappApiService->instanceInfo($device->instance);
 
             // instance not created on the gateway yet
             if (empty($info) || ! empty($info['error'])) {
-                $this->whatsappApiService->instanceInit(self::INSTANCE);
+                $this->whatsappApiService->instanceInit($device->instance);
             } elseif (! empty($info['instance_data']['phone_connected'])) {
+                $number = explode(':', $info['instance_data']['user']['id'] ?? '')[0];
+                $device->update(['status' => 'connected', 'number' => $number ?: $device->number]);
+
                 return response()->json([
                     'connected' => true,
-                    'number' => explode(':', $info['instance_data']['user']['id'] ?? '')[0],
+                    'number' => $device->number,
                 ]);
             }
 
-            $qr = $this->whatsappApiService->getQrCodebase64(self::INSTANCE);
+            $qr = $this->whatsappApiService->getQrCodebase64($device->instance);
 
             // the gateway answers qrbase64 with error=true once the phone is connected
             if (! empty($qr['error'])) {
-                return response()->json(['connected' => true]);
+                $device->update(['status' => 'connected']);
+
+                return response()->json(['connected' => true, 'number' => $device->number]);
+            }
+
+            if ($device->status == 'connected') {
+                $device->update(['status' => 'disconnected']);
             }
 
             return response()->json([
@@ -64,5 +118,11 @@ class WhatsappController extends Controller
 
             return response()->json(['connected' => false, 'qrcode' => null, 'msg' => __('messages.something_went_wrong')], 500);
         }
+    }
+
+    protected function device(Request $request, $id): WhatsappDevice
+    {
+        return WhatsappDevice::where('business_id', $request->session()->get('user.business_id'))
+            ->findOrFail($id);
     }
 }

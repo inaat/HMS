@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\WhatsappApiService;
 use App\Utils\ContactUtil;
 use App\Utils\TransactionUtil;
+use App\WhatsappDevice;
 use Illuminate\Http\Request;
 
 /**
@@ -14,9 +15,6 @@ use Illuminate\Http\Request;
  */
 class DefaulterController extends Controller
 {
-    // same instance key TransactionUtil sends payment messages through
-    const WHATSAPP_INSTANCE = 'Fine';
-
     protected $contactUtil;
 
     protected $transactionUtil;
@@ -97,7 +95,7 @@ class DefaulterController extends Controller
         ]);
 
         try {
-            $response = $this->whatsappApiService->sendTestMsg(self::WHATSAPP_INSTANCE, $contact->whatsapp, $text);
+            $response = $this->whatsappApiService->sendTestMsg(WhatsappDevice::instanceFor($business_id), $contact->whatsapp, $text);
         } catch (\Exception $e) {
             \Log::emergency('Defaulter WhatsApp reminder: '.$e->getMessage());
 
