@@ -155,10 +155,14 @@ $(document).ready(function() {
     set_default_customer();
 
     if ($('#search_product').length) {
+        //Recent search results (short-lived so stock qty stays fresh) and the in-flight request
+        var product_search_cache = {};
+        var product_search_xhr = null;
+
         //Add Product
         $('#search_product')
             .autocomplete({
-                delay: 1000,
+                delay: 250,
                 source: function(request, response) {
                     var price_group = '';
                     var search_fields = [];
@@ -169,17 +173,32 @@ $(document).ready(function() {
                     if ($('#price_group').length > 0) {
                         price_group = $('#price_group').val();
                     }
-                    $.getJSON(
-                        '/products/list',
-                        {
-                            price_group: price_group,
-                            location_id: $('input#location_id').val(),
-                            term: request.term,
-                            not_for_selling: 0,
-                            search_fields: search_fields
-                        },
-                        response
-                    );
+                    var params = {
+                        price_group: price_group,
+                        location_id: $('input#location_id').val(),
+                        term: request.term,
+                        not_for_selling: 0,
+                        search_fields: search_fields
+                    };
+                    var cache_key = JSON.stringify(params);
+                    var cached = product_search_cache[cache_key];
+                    if (cached && Date.now() - cached.time < 60000) {
+                        response(cached.data);
+                        return;
+                    }
+
+                    if (product_search_xhr) {
+                        product_search_xhr.abort();
+                    }
+                    product_search_xhr = $.getJSON('/products/list', params)
+                        .done(function(data) {
+                            product_search_cache[cache_key] = { time: Date.now(), data: data };
+                            response(data);
+                        })
+                        .fail(function() {
+                            //Stale/aborted callbacks are ignored by autocomplete; this just clears its loading state
+                            response([]);
+                        });
                 },
                 minLength: 2,
                 response: function(event, ui) {

@@ -1595,10 +1595,33 @@ class ProductUtil extends Util
      * Filters product as per the given inputs and return the details.
      *
      * @param  string  $search_type (like or exact)
+     * @param  int|null  $limit  max rows to return (null = all)
      * @return object
      */
-    public function filterProduct($business_id, $search_term, $location_id = null, $not_for_selling = null, $price_group_id = null, $product_types = [], $search_fields = [], $check_qty = false, $search_type = 'like')
+    public function filterProduct($business_id, $search_term, $location_id = null, $not_for_selling = null, $price_group_id = null, $product_types = [], $search_fields = [], $check_qty = false, $search_type = 'like', $limit = null)
     {
+        $search_term = trim((string) $search_term);
+        $product_ids = null;
+
+        if ($search_term !== '' && $search_type == 'like') {
+            //Barcode / exact sku fast path (uses index)
+            $sku_fields = array_values(array_intersect(['sku', 'sub_sku'], $search_fields));
+            if (! empty($sku_fields) && strpos($search_term, ' ') === false) {
+                $exact = $this->filterProduct($business_id, $search_term, $location_id, $not_for_selling, $price_group_id, $product_types, $sku_fields, $check_qty, 'exact', $limit);
+                if ($exact->isNotEmpty()) {
+                    return $exact;
+                }
+            }
+
+            //Indexed search: find matching product ids first, then join details only for them
+            if (empty(array_diff($search_fields, ['name', 'sku', 'sub_sku']))) {
+                $product_ids = $this->searchProductIds($business_id, $search_term, $location_id, $not_for_selling, $product_types, $search_fields);
+                if (empty($product_ids)) {
+                    return collect();
+                }
+            }
+        }
+
         $query = Product::join('variations', 'products.id', '=', 'variations.product_id')
                 ->active()
                 ->whereNull('variations.deleted_at')
@@ -1646,9 +1669,11 @@ class ProductUtil extends Util
         }
 
         //Include search
-        if (! empty($search_term)) {
+        if (! is_null($product_ids)) {
+            $query->whereIn('products.id', $product_ids);
+        } elseif (! empty($search_term)) {
 
-            //Search with like condition
+            //Search with like condition (custom fields / lot)
             if ($search_type == 'like') {
                 $query->where(function ($query) use ($search_term, $search_fields) {
                     if (in_array('name', $search_fields)) {
@@ -1710,7 +1735,8 @@ class ProductUtil extends Util
         }
 
         if (! empty($location_id)) {
-            $query->ForLocation($location_id);
+            $query->join('product_locations as PL', 'products.id', '=', 'PL.product_id')
+                ->where('PL.location_id', $location_id);
         }
 
         $query->select(
@@ -1736,8 +1762,75 @@ class ProductUtil extends Util
 
         $query->groupBy('variations.id');
 
+        if (! empty($limit)) {
+            $query->limit($limit);
+        }
+
         return $query->orderBy('VLD.qty_available', 'desc')
                         ->get();
+    }
+
+    /**
+     * Finds ids of products matching the search term using indexes only (no joins to
+     * stock/price tables). Name/sku use the ngram fulltext index, so any part of a word matches.
+     *
+     * @return array
+     */
+    private function searchProductIds($business_id, $search_term, $location_id, $not_for_selling, $product_types, $search_fields, $max = 200)
+    {
+        $base = function ($query) use ($business_id, $location_id, $not_for_selling, $product_types) {
+            $query->where('products.business_id', $business_id)
+                ->where('products.is_inactive', 0)
+                ->where('products.type', '!=', 'modifier');
+
+            if (! is_null($not_for_selling)) {
+                $query->where('products.not_for_selling', $not_for_selling);
+            }
+            if (! empty($product_types)) {
+                $query->whereIn('products.type', $product_types);
+            }
+            if (! empty($location_id)) {
+                $query->join('product_locations as PL', 'products.id', '=', 'PL.product_id')
+                    ->where('PL.location_id', $location_id);
+            }
+
+            return $query;
+        };
+
+        $ids = [];
+
+        if (array_intersect(['name', 'sku'], $search_fields)) {
+            $words = [];
+            //Fulltext ignores punctuation and 1-char pieces, so only send letter/digit runs of 2+
+            foreach (preg_split('/[^\p{L}\p{N}]+/u', $search_term, -1, PREG_SPLIT_NO_EMPTY) as $word) {
+                if (mb_strlen($word) >= 2) {
+                    $words[] = '+"'.$word.'"';
+                }
+            }
+
+            $query = $base(DB::table('products'));
+            if (! empty($words)) {
+                $query->whereRaw('MATCH(products.name, products.sku) AGAINST(? IN BOOLEAN MODE)', [implode(' ', $words)]);
+            } else {
+                $query->where(function ($q) use ($search_term) {
+                    $q->where('products.name', 'like', '%'.$search_term.'%')
+                        ->orWhere('products.sku', 'like', '%'.$search_term.'%');
+                });
+            }
+            $ids = $query->limit($max)->pluck('products.id')->all();
+        }
+
+        if (in_array('sub_sku', $search_fields) && count($ids) < $max) {
+            $ids = array_merge($ids, $base(DB::table('products'))
+                ->join('variations as SV', 'products.id', '=', 'SV.product_id')
+                ->whereNull('SV.deleted_at')
+                ->where('SV.sub_sku', 'like', $search_term.'%')
+                ->limit($max)
+                ->pluck('products.id')
+                ->all());
+        }
+
+        return array_values(array_unique($ids));
     }
 
     public function getProductStockDetails($business_id, $filters, $for)
