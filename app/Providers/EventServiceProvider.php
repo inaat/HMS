@@ -27,6 +27,23 @@ class EventServiceProvider extends ServiceProvider
         \App\Events\TransactionPaymentDeleted::class => [
             \App\Listeners\DeleteAccountTransaction::class,
         ],
+
+        \Spatie\Backup\Events\DumpingDatabase::class => [
+            \App\Listeners\ReportBackupProgress::class,
+        ],
+
+        \Spatie\Backup\Events\BackupManifestWasCreated::class => [
+            \App\Listeners\ReportBackupProgress::class,
+        ],
+
+        \Spatie\Backup\Events\BackupZipWasCreated::class => [
+            \App\Listeners\ReportBackupProgress::class,
+        ],
+
+        \Spatie\Backup\Events\BackupWasSuccessful::class => [
+            \App\Listeners\ReportBackupProgress::class,
+            \App\Listeners\UploadBackupToGoogleDrive::class,
+        ],
     ];
 
     /**

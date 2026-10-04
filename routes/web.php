@@ -400,6 +400,16 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::get('backup/{id}/delete', [BackUpController::class, 'delete'])->name('delete_backup');
     Route::resource('backup', BackUpController::class)->only('index', 'create', 'store');
 
+    Route::get('google-drive/connect', [\App\Http\Controllers\GoogleDriveController::class, 'connect']);
+    Route::get('oauth/google/callback', [\App\Http\Controllers\GoogleDriveController::class, 'callback']);
+    Route::post('google-drive/disconnect', [\App\Http\Controllers\GoogleDriveController::class, 'disconnect']);
+    Route::post('google-drive/settings', [\App\Http\Controllers\GoogleDriveController::class, 'saveCredentials']);
+    Route::post('backup/run', [BackUpController::class, 'run']);
+    Route::get('backup/progress/{token}', [BackUpController::class, 'progress'])->where('token', '[a-z0-9]{8,64}');
+    Route::post('google-drive/send/{file_name}', [\App\Http\Controllers\GoogleDriveController::class, 'send']);
+    Route::get('google-drive/files/{id}/download', [\App\Http\Controllers\GoogleDriveController::class, 'downloadFile']);
+    Route::post('google-drive/files/{id}/delete', [\App\Http\Controllers\GoogleDriveController::class, 'deleteFile']);
+
     Route::get('selling-price-group/activate-deactivate/{id}', [SellingPriceGroupController::class, 'activateDeactivate']);
     Route::get('update-product-price', [SellingPriceGroupController::class, 'updateProductPrice'])->name('update-product-price');
     Route::get('export-product-price', [SellingPriceGroupController::class, 'export']);

@@ -31,4 +31,13 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    // OAuth app used to copy backups to Google Drive (see GoogleDriveService)
+    'google_drive' => [
+        'client_id' => env('GOOGLE_DRIVE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_DRIVE_CLIENT_SECRET'),
+        // must be listed under "Authorized redirect URIs" in Google Cloud Console;
+        // falls back to this app's own /oauth/google/callback
+        'redirect' => env('GOOGLE_REDIRECT_URI'),
+    ],
+
 ];

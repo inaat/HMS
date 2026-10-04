@@ -2,7 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Listeners\UploadBackupToGoogleDrive;
+use App\Services\BackupProgress;
+use App\Services\GoogleDriveService;
 use App\Utils\Util;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Log;
 use Storage;
@@ -63,8 +67,87 @@ class BackUpController extends Controller
         
         // $backup_clean_cron_job_command = $this->commonUtil->getBackupCleanCronJobCommand();
 
+        $google_drive = \App\GoogleDriveSetting::current();
+        $drive_ready = app(GoogleDriveService::class)->isConfigured($google_drive);
+        $drive_files = [];
+        $drive_error = null;
+        if ($google_drive->isConnected()) {
+            try {
+                $drive_files = app(GoogleDriveService::class)->listFiles($google_drive);
+            } catch (\Exception $e) {
+                $drive_error = $e->getMessage();
+            }
+        }
+
         return view('backup.index')
-            ->with(compact('backups', 'cron_job_command'));
+            ->with(compact('backups', 'cron_job_command', 'google_drive', 'drive_ready', 'drive_files', 'drive_error'));
+    }
+
+    /**
+     * Runs a backup over ajax so the page can show progress
+     * (polled from progress() with the same token).
+     */
+    public function run(Request $request)
+    {
+        if (! auth()->user()->can('backup')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $notAllowed = $this->commonUtil->notAllowedInDemo();
+        if (! empty($notAllowed)) {
+            return response()->json(['ok' => false, 'message' => 'Feature disabled in demo!!']);
+        }
+
+        @set_time_limit(0);
+
+        $to_drive = (bool) $request->input('drive');
+        BackupProgress::start($request->input('progress'));
+        BackupProgress::set(3, 'Preparing backup...');
+
+        UploadBackupToGoogleDrive::$enabled = $to_drive;
+        UploadBackupToGoogleDrive::$result = null;
+
+        try {
+            $exit_code = Artisan::call('backup:run');
+            $output = Artisan::output();
+            Log::info("Backpack\BackupManager -- new backup started from admin interface \r\n".$output);
+
+            if ($exit_code != 0) {
+                $message = 'Backup failed: '.trim(collect(explode("\n", trim($output)))->last());
+                BackupProgress::finish(false, $message);
+
+                return response()->json(['ok' => false, 'message' => $message]);
+            }
+
+            BackupProgress::set(97, 'Removing old backups on this server...');
+            Artisan::call('backup:clean');
+        } catch (\Exception $e) {
+            BackupProgress::finish(false, 'Backup failed: '.$e->getMessage());
+
+            return response()->json(['ok' => false, 'message' => 'Backup failed: '.$e->getMessage()]);
+        }
+
+        $ok = true;
+        $message = 'Backup created.';
+        if ($to_drive) {
+            $ok = UploadBackupToGoogleDrive::$result === true;
+            $message = $ok
+                ? 'Backup created and sent to Google Drive.'
+                : 'Backup created, but sending it to Google Drive failed: '.(\App\GoogleDriveSetting::current()->last_upload_status ?: 'Google Drive is not connected.');
+        }
+
+        BackupProgress::finish($ok, $message);
+
+        return response()->json(['ok' => $ok, 'message' => $message]);
+    }
+
+    public function progress($token)
+    {
+        if (! auth()->user()->can('backup')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        return response()->json(BackupProgress::get($token));
     }
 
     /**
