@@ -93,7 +93,7 @@ class WhatsappApiService
  public function sendDocument($instance,$filePath,$number,$filename,$caption,$typeId='user'){
     $apiURL = $this->baseUrl . '/message/doc?key=' . $instance;
 
-    $response = Http::timeout(60)->attach(
+    $response = $this->http()->attach(
         'file',
         file_get_contents($filePath),
         basename($filePath) // Use basename() to get the file name
@@ -153,7 +153,7 @@ class WhatsappApiService
  {
      $apiURL = $this->baseUrl . '/message/' . $endpoint . '?key=' . $instance;
 
-     $response = Http::timeout(60)->attach(
+     $response = $this->http()->attach(
          'file',
          file_get_contents($filePath),
          basename($filePath)
@@ -181,7 +181,7 @@ class WhatsappApiService
         // call waiting indefinitely — on Windows nothing rescues it either, since
         // Laravel's own job $timeout relies on pcntl_alarm(), which doesn't exist
         // on Windows at all
-        $http = Http::withoutVerifying()->timeout(60)->withHeaders($headers);
+        $http = $this->http()->withHeaders($headers);
 
         if ($method === 'post') {
             return $http->post($url, $data)->json();
@@ -191,5 +191,15 @@ class WhatsappApiService
 
         // Handle other HTTP methods if needed
         return null;
+    }
+
+    /**
+     * Verifies the gateway's SSL certificate against the CA bundle shipped in
+     * resources/certs, not php.ini's curl.cainfo: that path is absolute and
+     * breaks (cURL error 77) whenever Laragon is installed on another drive.
+     */
+    private function http()
+    {
+        return Http::withOptions(['verify' => resource_path('certs/cacert.pem')])->timeout(60);
     }
 }
