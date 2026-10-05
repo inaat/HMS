@@ -6883,29 +6883,52 @@ class TransactionUtil extends Util
         return $registers;
     }
 
+    /**
+     * Sends the receipt PDF to the customer's WhatsApp.
+     *
+     * @return array ['success' => bool, 'msg' => string]
+     */
     function sendReceiptViaWhatsApp($receipt_details, $business_id, $transaction_id) {
-        // Check if customer mobile number length is greater than 10
-        if (strlen($receipt_details->customer_mobile) > 10) {
-            // Check if internet is available
-            if ($this->isInternetAvailable()) {
-                // Generate the PDF report
-                $this->reportPDF($receipt_details->invoice_no, 'samplereport.css', $receipt_details, 'sale_pos.receipts.pdf', 'save', 'a4');
-                
-                // Define file path and filename
-                $filePath = public_path($receipt_details->invoice_no . '.pdf');
-                $filename = basename($receipt_details->invoice_no . '.pdf');
-                $whatsappApiService = new WhatsappApiService();
-                // Send the document via WhatsApp
-                $response = $whatsappApiService->sendDocument(\App\WhatsappDevice::instanceFor($business_id), $filePath, $receipt_details->customer_mobile, $filename, $receipt_details->invoice_no);
-                
-                // Fetch the transaction details
-                $transaction = Transaction::where('business_id', $business_id)
-                    ->where('id', $transaction_id)
-                    ->with(['location'])
-                    ->first();
-                
-                // Log the activity of sending the PDF notification
-                $this->activityLog($transaction, 'pdf_notification_sent', null, [], false, $business_id);
+        // 03001234567 / +92 300 1234567 -> 923001234567 (same as ledger and defaulter reminders)
+        $number = \App\Http\Controllers\DefaulterController::whatsappNumber($receipt_details->customer_mobile);
+        if (empty($number)) {
+            return ['success' => false, 'msg' => 'Customer has no valid mobile number'];
+        }
+        if (! $this->isInternetAvailable()) {
+            return ['success' => false, 'msg' => 'No internet connection'];
+        }
+
+        // The PDF is written to public/; delete it after sending so receipts are not downloadable from the website
+        $filePath = public_path($receipt_details->invoice_no . '.pdf');
+        $filename = basename($receipt_details->invoice_no . '.pdf');
+
+        try {
+            $this->reportPDF($receipt_details->invoice_no, 'samplereport.css', $receipt_details, 'sale_pos.receipts.pdf', 'save', 'a4');
+
+            $response = (new WhatsappApiService())->sendDocument(\App\WhatsappDevice::instanceFor($business_id), $filePath, $number, $filename, $receipt_details->invoice_no);
+
+            if (! empty($response['error'])) {
+                return ['success' => false, 'msg' => 'WhatsApp: '.($response['message'] ?? 'sending failed')];
+            }
+
+            $transaction = Transaction::where('business_id', $business_id)
+                ->where('id', $transaction_id)
+                ->with(['location'])
+                ->first();
+            $this->activityLog($transaction, 'pdf_notification_sent', null, [], false, $business_id);
+
+            return ['success' => true, 'msg' => 'Receipt sent on WhatsApp'];
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            \Log::warning('WhatsApp receipt not sent (gateway not responding): '.$e->getMessage());
+
+            return ['success' => false, 'msg' => 'WhatsApp server is not responding, receipt not sent'];
+        } catch (\Exception $e) {
+            \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
+
+            return ['success' => false, 'msg' => 'Receipt not sent on WhatsApp'];
+        } finally {
+            if (file_exists($filePath)) {
+                @unlink($filePath);
             }
         }
     }

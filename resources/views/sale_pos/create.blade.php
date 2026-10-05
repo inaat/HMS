@@ -256,9 +256,13 @@ function formatCurrency(amount) {
             var url = $(this).attr('href');
             var btn = $(this);
             btn.html('<i class="fas fa-spinner fa-spin"></i>');
-            $.get(url, function() {
+            $.get(url, function(result) {
                 btn.html('<i class="fab fa-whatsapp"></i> WhatsApp');
-                toastr.success('WhatsApp sent successfully!');
+                if (result && result.success === false) {
+                    toastr.error(result.msg);
+                } else {
+                    toastr.success((result && result.msg) ? result.msg : 'WhatsApp sent successfully!');
+                }
             }).fail(function() {
                 btn.html('<i class="fab fa-whatsapp"></i> WhatsApp');
                 toastr.error('Failed to send WhatsApp.');

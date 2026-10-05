@@ -3380,9 +3380,9 @@ foreach ($contact_ids as $item) {
             $transaction_id, $location_id, $invoice_layout, $business_details, $location_details, 'browser'
         );
 
-        $this->transactionUtil->sendReceiptViaWhatsApp($receipt_details, $business_id, $transaction_id);
+        $result = $this->transactionUtil->sendReceiptViaWhatsApp($receipt_details, $business_id, $transaction_id);
 
-        return response()->json(['success' => true]);
+        return response()->json($result);
     }
 
 

@@ -395,7 +395,11 @@
             btn.html('<i class="fas fa-spinner fa-spin"></i>');
             $.get(url, function(response) {
                 btn.html('<i class="fab fa-whatsapp"></i>');
-                toastr.success('WhatsApp sent successfully!');
+                if (response && response.success === false) {
+                    toastr.error(response.msg);
+                } else {
+                    toastr.success((response && response.msg) ? response.msg : 'WhatsApp sent successfully!');
+                }
             }).fail(function() {
                 btn.html('<i class="fab fa-whatsapp"></i>');
                 toastr.error('Failed to send WhatsApp.');
