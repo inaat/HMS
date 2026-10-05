@@ -117,6 +117,12 @@
 		<small class="text-muted p-1">
 			@if($product->enable_stock)
 			{{ @num_format($product->qty_available) }} {{$product->unit}} @lang('lang_v1.in_stock')
+			@php
+				$stock_in_sub_unit = app(\App\Utils\ProductUtil::class)->stockInBiggestSubUnit(session('user.business_id'), $product->qty_available, $product->sub_unit_ids ?? null, $product->unit);
+			@endphp
+			@if(! empty($stock_in_sub_unit))
+				({{ $stock_in_sub_unit }})
+			@endif
 			@else
 				--
 			@endif

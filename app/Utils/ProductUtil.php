@@ -68,6 +68,11 @@ class ProductUtil extends Util
         $whole = floor($abs_qty / $multiplier);
         $remainder = round($abs_qty - ($whole * $multiplier), 4);
 
+        //Less than one full sub unit: nothing to add to the base unit text
+        if ($whole == 0) {
+            return null;
+        }
+
         $text = $this->num_f($whole, false, null, true).' '.$biggest->short_name;
         if ($remainder > 0) {
             $text .= ' + '.$this->num_f($remainder, false, null, true).' '.$base_unit_name;
@@ -551,6 +556,7 @@ class ProductUtil extends Util
             DB::raw("IF(pv.is_dummy = 0, CONCAT(p.name, 
                     ' (', pv.name, ':',variations.name, ')'), p.name) AS product_name"),
             'p.id as product_id',
+            'p.sub_unit_ids',
             'p.brand_id',
             'p.category_id',
             'p.tax as tax_id',
