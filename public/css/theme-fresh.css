@@ -189,6 +189,27 @@ body.theme-fresh footer {
 /* dashboard: the light page now shows through behind the stat cards */
 body.theme-fresh .dash-v2 { background: transparent; }
 
+/* ---------- responsive ---------- */
+/* tablets: header buttons a little tighter, cards a bit less rounded */
+@media (max-width: 991.98px) {
+    body.theme-fresh .app-header > div { padding-left: 12px !important; padding-right: 12px !important; }
+    body.theme-fresh .app-header [class*="tw-ring-white/10"],
+    body.theme-fresh .app-header details > summary { padding: 6px 9px !important; }
+    body.theme-fresh .app-widget,
+    body.theme-fresh .box { border-radius: 12px !important; }
+}
+/* phones: header buttons wrap instead of overflowing, wide tables scroll inside their card */
+@media (max-width: 575.98px) {
+    body.theme-fresh .app-header > div > div { flex-wrap: wrap; gap: 8px !important; }
+    body.theme-fresh .app-header [class*="tw-ring-white/10"],
+    body.theme-fresh .app-header details > summary { padding: 5px 8px !important; font-size: 12px; }
+    body.theme-fresh .app-widget,
+    body.theme-fresh .box { border-radius: 10px !important; }
+    body.theme-fresh .app-widget .table-responsive,
+    body.theme-fresh .box .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    body.theme-fresh .content-header h1 { font-size: 20px !important; }
+}
+
 @media print {
     body.theme-fresh, body.theme-fresh main { background: #fff !important; }
 }

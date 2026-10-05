@@ -838,7 +838,7 @@
             $.getJSON('/home/dashboard-chart', { location_id: $('#dashboard_location').val() || '' }, function(d) {
                 var labels = d.labels || [];
                 Highcharts.chart('dv_daily_chart', {
-                    chart: { type: 'column', backgroundColor: 'transparent', height: 240, spacingTop: 4 },
+                    chart: { type: 'column', backgroundColor: 'transparent', spacingTop: 4 },
                     credits: { enabled: false },
                     exporting: { enabled: false },
                     title: { text: null },
