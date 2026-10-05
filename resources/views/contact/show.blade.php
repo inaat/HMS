@@ -554,7 +554,8 @@ $(document).on('click', '#send_ledger_whatsapp', function() {
         location_id: $('#ledger_location').val()
     };
 
-    btn.prop('disabled', true);
+    var original_html = btn.html();
+    btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Sending...');
     $.ajax({
         method: 'POST',
         url: "{{ action([\App\Http\Controllers\ContactController::class, 'sendLedgerWhatsapp']) }}",
@@ -571,7 +572,7 @@ $(document).on('click', '#send_ledger_whatsapp', function() {
             toastr.error("{{ __('messages.something_went_wrong') }}");
         },
         complete: function() {
-            btn.prop('disabled', false);
+            btn.prop('disabled', false).html(original_html);
         }
     });
 });
