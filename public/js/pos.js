@@ -1280,7 +1280,25 @@ $(document).ready(function() {
     //Press enter on search product to jump into last quantty and vice-versa
     $('#search_product').keydown(function(e) {
         var key = e.which;
-   
+
+        //Enter (scanners send it after the barcode): add the product now, skip the autocomplete wait
+        if (key === 13) {
+            var autocomplete = $(this).data('ui-autocomplete');
+            var term = $.trim($(this).val());
+            var menu_item_active = autocomplete && autocomplete.menu.active;
+            if (!menu_item_active && term.length >= 2 && term.indexOf(' ') === -1) {
+                e.preventDefault();
+                if (autocomplete) {
+                    clearTimeout(autocomplete.searching);
+                    autocomplete.requestIndex++; //ignore any search already in flight
+                    $(this).autocomplete('close');
+                }
+                $(this).val('');
+                pos_scan_barcode(term);
+                return;
+            }
+        }
+
         if (key === 118) {
             e.preventDefault();
             $('button.pos-express-finalize[data-pay_method="cash"]').trigger('click');
@@ -1628,7 +1646,19 @@ function get_recent_transactions(status, element_obj) {
 }
 
 //variation_id is null when weighing_scale_barcode is used.
-function pos_product_row(variation_id = null, purchase_line_id = null, weighing_scale_barcode = null, quantity = 1) {
+//Barcode => variation id for products already scanned on this page (repeat scans need no server call)
+var pos_scanned_barcodes = {};
+
+//Barcode scanner / Enter in search box: add the product in one request
+function pos_scan_barcode(barcode) {
+    if (pos_scanned_barcodes[barcode]) {
+        pos_product_row(pos_scanned_barcodes[barcode]);
+    } else {
+        pos_product_row(null, null, null, 1, barcode);
+    }
+}
+
+function pos_product_row(variation_id = null, purchase_line_id = null, weighing_scale_barcode = null, quantity = 1, barcode = null) {
 
     //Get item addition method
     var item_addtn_method = 0;
@@ -1736,6 +1766,7 @@ function pos_product_row(variation_id = null, purchase_line_id = null, weighing_
                 price_group: price_group,
                 purchase_line_id: purchase_line_id,
                 weighing_scale_barcode: weighing_scale_barcode,
+                barcode: barcode,
                 quantity: quantity,
                 is_sales_order: is_sales_order,
                 disable_qty_alert: disable_qty_alert,
@@ -1743,6 +1774,27 @@ function pos_product_row(variation_id = null, purchase_line_id = null, weighing_
             },
             dataType: 'json',
             success: function(result) {
+                if (barcode && result.not_found) {
+                    //Not a barcode/sku: fall back to normal name search
+                    $('input#search_product').val(barcode).autocomplete('search', barcode);
+                    return;
+                }
+
+                if (barcode && result.variation_id) {
+                    pos_scanned_barcodes[barcode] = result.variation_id;
+
+                    //Already in the cart and "increase quantity" mode: just add 1 to that row
+                    if ($('#item_addition_method').length && $('#item_addition_method').val() != 0) {
+                        var existing_row = $('#pos_table tbody .row_variation_id').filter(function() {
+                            return $(this).val() == result.variation_id;
+                        });
+                        if (existing_row.length) {
+                            pos_product_row(result.variation_id);
+                            return;
+                        }
+                    }
+                }
+
                 if (result.success) {
                     $('table#pos_table tbody')
                         .append(result.html_content)

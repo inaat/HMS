@@ -1749,6 +1749,17 @@ class SellPosController extends Controller
                 $is_direct_sell = true;
             }
 
+            //Barcode scan: resolve the variation here so a scan needs one request instead of two
+            $barcode = trim((string) request()->get('barcode', ''));
+            if ($variation_id == 'null' && $barcode !== '') {
+                $business_id = request()->session()->get('user.business_id');
+                $found = $this->productUtil->filterProduct($business_id, $barcode, $location_id, 0, null, [], ['sku', 'sub_sku'], false, 'exact', 1)->first();
+                if (empty($found)) {
+                    return ['success' => false, 'not_found' => true];
+                }
+                $variation_id = $found->variation_id;
+            }
+
             if ($variation_id == 'null' && !empty($weighing_barcode)) {
                 $product_details = $this->__parseWeighingBarcode($weighing_barcode);
                 if ($product_details['success']) {
@@ -1763,6 +1774,7 @@ class SellPosController extends Controller
             }
 
             $output = $this->getSellLineRow($variation_id, $location_id, $quantity, $row_count, $is_direct_sell);
+            $output['variation_id'] = $variation_id;
 
             if ($this->transactionUtil->isModuleEnabled('modifiers') && !$is_direct_sell) {
                 $variation = Variation::find($variation_id);
