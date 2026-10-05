@@ -593,6 +593,41 @@ tr.details td.details-control {
 .icheckbox_square-blue, .iradio_square-blue{
     margin-right: 10px;
 }
+/* iCheck boxes drawn with CSS (the skin images public/images/vendor/icheck/... are not in this install) */
+.icheckbox_square-blue, .iradio_square-blue{
+    background: #fff !important;
+    border: 2px solid #2489c5 !important;
+    width: 20px;
+    height: 20px;
+    position: relative;
+    box-sizing: border-box;
+}
+.icheckbox_square-blue{ border-radius: 3px; }
+.iradio_square-blue{ border-radius: 50%; }
+.icheckbox_square-blue.hover, .iradio_square-blue.hover{ border-color: #1a6a9a !important; }
+.icheckbox_square-blue.checked{ background: #2489c5 !important; }
+.icheckbox_square-blue.checked:after{
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 1px;
+    width: 6px;
+    height: 11px;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+.iradio_square-blue.checked:after{
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #2489c5;
+}
+.icheckbox_square-blue.disabled, .iradio_square-blue.disabled{ opacity: 0.5; cursor: default; }
 .header-right-div{
     right: 10px;
     float: right;

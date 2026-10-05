@@ -47,6 +47,8 @@
 
             <button type="button" class="btn btn-default btn-xs" id="send_ledger"><i class="fas fa-envelope"></i></button>
 
+            <button type="button" class="btn btn-success btn-xs" id="send_ledger_whatsapp" title="Send ledger PDF on WhatsApp"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+
             <button type="button" class="btn btn-success btn-xs" id="send_ledger_whatsapp" title="Send on WhatsApp"><i class="fab fa-whatsapp"></i> WhatsApp</button>
         </div>
     </div>

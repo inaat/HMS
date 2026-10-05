@@ -577,6 +577,49 @@ $(document).on('click', '#send_ledger_whatsapp', function() {
     });
 });
 
+//Send the ledger (simple table) as PDF to the contact's WhatsApp
+$(document).on('click', '#send_ledger_whatsapp', function() {
+    var btn = $(this);
+    var start_date = $('#ledger_date_range').data('daterangepicker').startDate.format('YYYY-MM-DD');
+    var end_date = $('#ledger_date_range').data('daterangepicker').endDate.format('YYYY-MM-DD');
+    var location_id = $('#ledger_location').val();
+
+    swal({
+        title: LANG.sure,
+        text: 'Send the ledger PDF ({{ $contact->name }}) to WhatsApp {{ $contact->mobile }}?',
+        icon: 'info',
+        buttons: true,
+    }).then(function(ok) {
+        if (!ok) {
+            return;
+        }
+        var btn_html = btn.html();
+        btn.prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Sending...');
+        $.ajax({
+            method: 'POST',
+            url: '/contacts/send-ledger-whatsapp',
+            dataType: 'json',
+            data: {
+                _token: '{{ csrf_token() }}',
+                contact_id: '{{ $contact->id }}',
+                start_date: start_date,
+                end_date: end_date,
+                location_id: location_id
+            },
+            success: function(result) {
+                if (result.success) {
+                    toastr.success(result.msg);
+                } else {
+                    toastr.error(result.msg);
+                }
+            },
+            complete: function() {
+                btn.prop('disabled', false).html(btn_html);
+            }
+        });
+    });
+});
+
 $(document).on('click', '#print_ledger_pdf', function() {
     var start_date = $('#ledger_date_range').data('daterangepicker').startDate.format('YYYY-MM-DD');
     var end_date = $('#ledger_date_range').data('daterangepicker').endDate.format('YYYY-MM-DD');
