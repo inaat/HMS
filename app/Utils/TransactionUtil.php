@@ -21,6 +21,7 @@ use App\Restaurant\ResTable;
 use App\TaxRate;
 use App\Transaction;
 use App\TransactionPayment;
+use App\ReturnSellLine;
 use App\TransactionSellLine;
 use App\TransactionSellLinesPurchaseLines;
 use App\Variation;
@@ -5854,11 +5855,11 @@ class TransactionUtil extends Util
 
             if ($transaction->type == 'sell_return') {
                 if (! empty($transaction->return_parent_id)) {
-                    $temp_array['others'] .= ' <span class="label bg-blue" style="display: inline-block; white-space: normal;">Return of invoice: '.e($return_parent_invoices[$transaction->return_parent_id] ?? '').'</span>';
+                    $temp_array['others'] .= ' <span class="label bg-blue" style="background-color: #0073b7; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; display: inline-block; white-space: normal;">Return of invoice: '.e($return_parent_invoices[$transaction->return_parent_id] ?? '').'</span>';
                 } else {
                     $sources = $without_invoice_sources[$transaction->id] ?? [];
                     //Shown under the type: "Sell Return [Without invoice]"
-                    $temp_array['type_badge'] = '<span class="label bg-purple">Without invoice</span>';
+                    $temp_array['type_badge'] = '<span class="label bg-purple" style="background-color: #605ca8; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; display: inline-block; white-space: normal;">Without invoice</span>';
                     if (! empty($sources)) {
                         $shown = array_slice($sources, 0, 5);
                         $temp_array['others'] .= ' <small>Items from invoice: '.e(implode(', ', $shown)).(count($sources) > 5 ? ' +'.(count($sources) - 5).' more' : '').'</small>';
@@ -5890,6 +5891,10 @@ class TransactionUtil extends Util
 
                 $temp_array['sell_lines'] = $transaction->sell_lines;
                 $temp_array['purchase_lines'] = $transaction->purchase_lines;
+
+                if ($transaction->type == 'sell_return') {
+                    $temp_array['return_lines'] = $this->getSellReturnLinesForLedger($transaction);
+                }
             }
 
             $ledger[] = $temp_array;
@@ -5947,7 +5952,7 @@ class TransactionUtil extends Util
             $note = $payment->note;
             if ($payment->transaction_type == 'sell_return') {
                 //Money paid back to the customer for a return
-                $note .= ' <span class="label bg-orange" style="display: inline-block; white-space: normal;">Return refund: '.e($ref_no).'</span>';
+                $note .= ' <span class="label bg-orange" style="background-color: #f39c12; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; display: inline-block; white-space: normal;">Return refund: '.e($ref_no).'</span>';
             } elseif (! empty($ref_no)) {
                 $note .= '<small>'.__('account.payment_for').': '.$ref_no.'</small>';
             }
@@ -5961,7 +5966,7 @@ class TransactionUtil extends Util
             }
 
             if (! empty($refunded_returns[$payment->id])) {
-                $note .= ' <span class="label bg-orange" style="display: inline-block; white-space: normal;">Return refund: '.e($refunded_returns[$payment->id]).'</span>';
+                $note .= ' <span class="label bg-orange" style="background-color: #f39c12; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; display: inline-block; white-space: normal;">Return refund: '.e($refunded_returns[$payment->id]).'</span>';
             }
             $ddd=$transaction_types['payment'];
            if($payment->payment_type == "credit"){
@@ -6929,6 +6934,68 @@ class TransactionUtil extends Util
         }
 
         return $sell_return;
+    }
+
+    /**
+     * Products of a sell return for the ledger: returned qty of the invoice's lines (normal return)
+     * or its own return_sell_lines at the return price (return without invoice)
+     *
+     * @return array of [product, qty, unit, price, subtotal]
+     */
+    public function getSellReturnLinesForLedger($sell_return)
+    {
+        $name = function ($product, $variation) {
+            $text = $product->name ?? '';
+            if (($product->type ?? '') == 'variable' && ! empty($variation)) {
+                $text .= ' - '.($variation->product_variation->name ?? '').' - '.$variation->name;
+            }
+
+            return $text;
+        };
+
+        $lines = [];
+        if (! empty($sell_return->return_parent_id)) {
+            $sell_lines = TransactionSellLine::with(['product.unit', 'sub_unit', 'variations.product_variation'])
+                            ->where('transaction_id', $sell_return->return_parent_id)
+                            ->where('quantity_returned', '>', 0)
+                            ->get();
+            $without_invoice = $this->getWithoutInvoiceReturnedQty($sell_lines->pluck('id')->all());
+            foreach ($sell_lines as $line) {
+                $qty = $line->quantity_returned - ($without_invoice[$line->id] ?? 0);
+                if ($qty <= 0) {
+                    continue;
+                }
+                $multiplier = ! empty($line->sub_unit) ? $line->sub_unit->base_unit_multiplier : 1;
+                $price = $line->unit_price_inc_tax * $multiplier;
+                $qty = $multiplier != 0 ? $qty / $multiplier : $qty;
+                $lines[] = [
+                    'product' => $name($line->product, $line->variations),
+                    'qty' => $qty,
+                    'unit' => ! empty($line->sub_unit) ? $line->sub_unit->short_name : ($line->product->unit->short_name ?? ''),
+                    'price' => $price,
+                    'subtotal' => $qty * $price,
+                ];
+            }
+        } else {
+            $return_lines = ReturnSellLine::with(['product.unit', 'variations.product_variation'])
+                            ->where('return_transaction_id', $sell_return->id)
+                            ->get()
+                            ->groupBy('variation_id');
+            foreach ($return_lines as $rows) {
+                $first = $rows->first();
+                $qty = $rows->sum('quantity');
+                $subtotal = $rows->sum(fn ($r) => $r->quantity * $r->unit_price);
+                $lines[] = [
+                    'product' => $name($first->product, $first->variations),
+                    'qty' => $qty,
+                    'unit' => $first->product->unit->short_name ?? '',
+                    'price' => $qty != 0 ? $subtotal / $qty : 0,
+                    'subtotal' => $subtotal,
+                ];
+            }
+        }
+
+        return $lines;
     }
 
     /**

@@ -13,6 +13,10 @@
     .simple-ledger .sl-total td { font-weight: bold; background: #f4f4f4; }
     .simple-ledger .sl-due { font-size: 14px; font-weight: bold; }
     .simple-ledger .sl-muted { color: #666; font-size: 11px; }
+    /* mPDF has no Roboto and would fall back to a serif font: use its built-in sans font */
+    @if(!empty($for_pdf)) .simple-ledger, .simple-ledger table, .simple-ledger td, .simple-ledger th { font-family: dejavusans; }
+    .simple-ledger .sl-bordered td, .simple-ledger .sl-bordered th, .simple-ledger .sl-item td, .simple-ledger .sl-item-head td { font-size: 10pt; }
+    .simple-ledger .sl-muted { font-size: 8pt; } @endif
 </style>
 
 @php
@@ -81,11 +85,11 @@
                 <th style="width: 4%;">#</th>
                 <th style="width: 14%;">@lang('lang_v1.date')</th>
                 <th style="width: 11%;">@lang('purchase.ref_no')</th>
-                <th style="width: 13%;">@lang('lang_v1.type')</th>
-                <th style="width: 11%;">@lang('lang_v1.payment_method')</th>
-                <th style="width: 12%;">@lang('account.debit')</th>
-                <th style="width: 12%;">@lang('account.credit')</th>
-                <th style="width: 12%;">@lang('lang_v1.balance')</th>
+                <th style="width: 11%;">@lang('lang_v1.type')</th>
+                <th style="width: 9%;">Method</th>
+                <th style="width: 13%;">@lang('account.debit')</th>
+                <th style="width: 13%;">@lang('account.credit')</th>
+                <th style="width: 14%;">@lang('lang_v1.balance')</th>
                 <th style="width: 11%;">@lang('report.others')</th>
             </tr>
         </thead>
