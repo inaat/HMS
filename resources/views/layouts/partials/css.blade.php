@@ -78,4 +78,4 @@
 
 
 {{-- "Fresh green" theme (public/css/theme-fresh.css), scoped to body.theme-fresh --}}
-<link rel="stylesheet" href="{{ asset('css/theme-fresh.css?v='.$asset_v) }}">
+<link rel="stylesheet" href="{{ asset('css/theme-fresh.css') }}?v={{ file_exists(public_path('css/theme-fresh.css')) ? filemtime(public_path('css/theme-fresh.css')) : 1 }}">

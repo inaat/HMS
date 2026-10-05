@@ -42,11 +42,12 @@
         color: #fff; flex: none; }
     .dash-v2 .dv-stat .txt { min-width: 0; }
     .dash-v2 .dv-stat .lbl { font-size: 12px; font-weight: 600; line-height: 1.25; }
-    .dash-v2 .dv-stat .num { font-size: 19px; font-weight: 700; margin: 0; line-height: 1.25; font-variant-numeric: tabular-nums;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--dv-ink); }
+    /* amounts are never cut off: they shrink with the card width and wrap if still too long */
+    .dash-v2 .dv-stat .num { font-size: clamp(14px, 1.25vw, 19px); font-weight: 700; margin: 0; line-height: 1.25;
+        font-variant-numeric: tabular-nums; white-space: normal; overflow-wrap: anywhere; color: var(--dv-ink); }
     .dash-v2 .dv-stat .sub { font-size: 11px; color: var(--dv-muted); margin: 0; line-height: 1.2; }
     .dash-v2 .dv-stat.big .ic { width: 46px; height: 46px; font-size: 20px; }
-    .dash-v2 .dv-stat.big .num { font-size: 22px; font-weight: 800; }
+    .dash-v2 .dv-stat.big .num { font-size: clamp(16px, 1.45vw, 22px); font-weight: 800; }
     .dash-v2 .t-blue   { background: var(--dv-blue-soft);   border-color: #d5e6f6; } .dash-v2 .t-blue .ic { background: var(--dv-blue); }     .dash-v2 .t-blue .lbl { color: var(--dv-blue); }
     .dash-v2 .t-green  { background: var(--dv-green-soft);  border-color: #cfe9dc; } .dash-v2 .t-green .ic { background: var(--dv-green); }   .dash-v2 .t-green .lbl { color: #1d7a52; }
     .dash-v2 .t-orange { background: var(--dv-orange-soft); border-color: #f7dfc2; } .dash-v2 .t-orange .ic { background: var(--dv-orange); } .dash-v2 .t-orange .lbl { color: #b2641a; }
@@ -68,7 +69,7 @@
     .dash-v2 .dv-acc { display: grid; gap: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .dash-v2 .dv-acc .dv-stat { padding: 9px 10px; gap: 10px; }
     .dash-v2 .dv-acc .dv-stat .ic { width: 32px; height: 32px; font-size: 14px; border-radius: 9px; }
-    .dash-v2 .dv-acc .dv-stat .num { font-size: 15.5px; }
+    .dash-v2 .dv-acc .dv-stat .num { font-size: clamp(13px, 1vw, 15.5px); }
 
     /* financial overview donut */
     .dash-v2 .dv-donut-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
@@ -79,14 +80,42 @@
     .dash-v2 .dv-legend .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
     .dash-v2 .dv-legend .v { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
 
+    /* ---------- responsive ---------- */
+    /* small laptops: stat cards 4 -> 2 columns in the panel, donut panel under the overview */
+    @media (max-width: 1399.98px) {
+        .dash-v2 .dv-acc { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    /* tablets landscape: top cards 2 per row, panels stacked; donut + legend side by side again (full width) */
     @media (max-width: 1199.98px) {
-        .dash-v2 .dv-grid, .dash-v2 .dv-acc { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .dash-v2 .dv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .dash-v2 .dv-acc { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         .dash-v2 .dv-row { grid-template-columns: minmax(0, 1fr); }
     }
-    @media (max-width: 575.98px) {
-        .dash-v2 { padding: 10px 12px 4px; }
-        .dash-v2 .dv-grid, .dash-v2 .dv-acc { grid-template-columns: minmax(0, 1fr); }
+    /* tablets portrait: header controls on their own row, full width */
+    @media (max-width: 991.98px) {
+        .dash-v2 .dv-acc { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .dash-v2 .dv-tools { margin-left: 0; width: 100%; }
+        .dash-v2 .dv-location { flex: 1 1 220px; min-width: 0; }
+        .dash-v2 #dv_daily_chart { height: 220px !important; }
+    }
+    /* phones: one column everywhere, compact header, donut centered above its legend */
+    @media (max-width: 575.98px) {
+        .dash-v2 { padding: 10px 10px 4px; }
+        .dash-v2 .dv-grid, .dash-v2 .dv-acc { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+        .dash-v2 .dv-head { gap: 10px; }
+        .dash-v2 .dv-avatar { width: 42px; height: 42px; font-size: 15px; }
         .dash-v2 .dv-title h2 { font-size: 19px; }
+        .dash-v2 .dv-title .hello, .dash-v2 .dv-title .sub { font-size: 12.5px; }
+        .dash-v2 .dv-tools { gap: 8px; }
+        .dash-v2 .dv-location, .dash-v2 #dashboard_date_filter { flex: 1 1 100%; justify-content: center; }
+        .dash-v2 .dv-pill { flex: 1 1 100%; justify-content: center; }
+        .dash-v2 .dv-stat, .dash-v2 .dv-acc .dv-stat { padding: 10px 12px; }
+        .dash-v2 .dv-stat .num, .dash-v2 .dv-acc .dv-stat .num { font-size: 17px; }
+        .dash-v2 .dv-stat.big .num { font-size: 19px; }
+        .dash-v2 .dv-panel { padding: 10px; border-radius: 12px; }
+        .dash-v2 .dv-donut-wrap { flex-direction: column; align-items: stretch; }
+        .dash-v2 #dv_fin_donut { margin: 0 auto; width: 170px; height: 170px; }
+        .dash-v2 .dv-legend { min-width: 0; }
+        .dash-v2 #dv_daily_chart { height: 200px !important; }
     }
 </style>
