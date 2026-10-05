@@ -42,6 +42,9 @@
         @endif
         <div class="col-sm-12">
             <button type="button" class="tw-dw-btn tw-dw-btn-primary tw-text-white tw-dw-btn-sm pull-right tw-m-2" data-toggle="modal" data-target="#add_discount_modal">@lang('lang_v1.add_discount')</button>
+            @if(in_array($contact->type, ['customer', 'both']))
+                <a href="{{action([\App\Http\Controllers\TransactionPaymentController::class, 'getPayContactDue'], [$contact->id])}}?type=sell" class="pay_sale_due tw-dw-btn tw-dw-btn-success tw-text-white tw-dw-btn-sm pull-right tw-m-2"><i class="fas fa-money-bill-alt" aria-hidden="true"></i> @lang('purchase.add_payment')</a>
+            @endif
         </div>
     </div>
 </div>
