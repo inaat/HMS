@@ -39,6 +39,17 @@
                     <span class="display_currency" data-currency_symbol="true">{{$data['total_builty']}}</span>
                 </td>
             </tr>
+            @if(! empty($data['without_invoice_return_adjustment']) && abs($data['without_invoice_return_adjustment']) >= 0.01)
+            <tr>
+                <th>
+                    Without-invoice return price difference:
+                    <br><small class="text-muted">Sale price of returned items minus the return price credited (added to net profit)</small>
+                </th>
+                <td>
+                    <span class="display_currency" data-currency_symbol="true">{{$data['without_invoice_return_adjustment']}}</span>
+                </td>
+            </tr>
+            @endif
     <tr>
         <th>{{ __('lang_v1.total_purchase_shipping_charge') }}:</th>
         <td>

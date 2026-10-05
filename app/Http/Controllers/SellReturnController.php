@@ -244,12 +244,22 @@ class SellReturnController extends Controller
                             ->with(['sell_lines', 'location', 'return_parent', 'contact', 'tax', 'sell_lines.sub_unit', 'sell_lines.product', 'sell_lines.product.unit'])
                             ->find($id);
 
+        //Qty already returned without invoice: not part of this return, and cannot be returned again
+        $without_invoice_returned = $this->transactionUtil->getWithoutInvoiceReturnedQty($sell->sell_lines->pluck('id')->all());
+
         foreach ($sell->sell_lines as $key => $value) {
+            $wi_qty = $without_invoice_returned[$value->id] ?? 0;
             if (! empty($value->sub_unit_id)) {
                 $formated_sell_line = $this->transactionUtil->recalculateSellLineTotals($business_id, $value);
                 $sell->sell_lines[$key] = $formated_sell_line;
+                $multiplier = ! empty($value->sub_unit) ? $value->sub_unit->base_unit_multiplier : 1;
+                $wi_qty = $multiplier != 0 ? $wi_qty / $multiplier : $wi_qty;
             }
 
+            $sell->sell_lines[$key]->without_invoice_returned = $wi_qty;
+            $sell->sell_lines[$key]->this_return_qty = max(0, $sell->sell_lines[$key]->quantity_returned - $wi_qty);
+            $sell->sell_lines[$key]->returnable_qty = max(0, $sell->sell_lines[$key]->quantity - $wi_qty);
+            $sell->sell_lines[$key]->formatted_returnable_qty = $this->transactionUtil->num_f($sell->sell_lines[$key]->returnable_qty, false, null, true);
             $sell->sell_lines[$key]->formatted_qty = $this->transactionUtil->num_f($value->quantity, false, null, true);
         }
 
@@ -349,6 +359,12 @@ class SellReturnController extends Controller
             $sells->where('created_by', request()->session()->get('user.id'));
         }
         $sell = $query->first();
+
+        //Show only this return's qty: qty returned without invoice belongs to those returns
+        $without_invoice_returned = $this->transactionUtil->getWithoutInvoiceReturnedQty($sell->sell_lines->pluck('id')->all());
+        foreach ($sell->sell_lines as $line) {
+            $line->quantity_returned = max(0, $line->quantity_returned - ($without_invoice_returned[$line->id] ?? 0));
+        }
 
         foreach ($sell->sell_lines as $key => $value) {
             if (! empty($value->sub_unit_id)) {

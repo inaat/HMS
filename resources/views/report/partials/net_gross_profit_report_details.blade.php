@@ -27,7 +27,7 @@
     {{ __('report.net_profit') }}: 
     <span class="display_currency" data-currency_symbol="true">{{$data['net_profit']}}</span>
 </h3>
-<small class="help-block">@lang('lang_v1.gross_profit') + (@lang('lang_v1.total_sell_shipping_charge') + @lang('lang_v1.sell_additional_expense') + @lang('report.total_stock_recovered') + @lang('lang_v1.total_purchase_discount') + @lang('lang_v1.total_sell_round_off') 
+<small class="help-block">@lang('lang_v1.gross_profit') @if(! empty($data['without_invoice_return_adjustment']) && abs($data['without_invoice_return_adjustment']) >= 0.01) + Without-invoice return price difference @endif + (@lang('lang_v1.total_sell_shipping_charge') + @lang('lang_v1.sell_additional_expense') + @lang('report.total_stock_recovered') + @lang('lang_v1.total_purchase_discount') + @lang('lang_v1.total_sell_round_off') 
 @foreach($data['right_side_module_data'] as $module_data)
     @if(!empty($module_data['add_to_net_profit']))
         + {{$module_data['label']}} 

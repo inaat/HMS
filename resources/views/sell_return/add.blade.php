@@ -103,7 +103,10 @@
 								<td>{{ $sell_line->formatted_qty }} {{$unit_name}}</td>
 
 								<td>
-									<input type="text" name="products[{{$loop->index}}][quantity]" value="{{@format_quantity($sell_line->quantity_returned)}}" class="form-control input-sm input_number return_qty input_quantity" data-rule-abs_digit="{{$check_decimal}}" data-msg-abs_digit="@lang('lang_v1.decimal_value_not_allowed')" data-rule-max-value="{{$sell_line->quantity}}" data-msg-max-value="@lang('validation.custom-messages.quantity_not_available', ['qty' => $sell_line->formatted_qty, 'unit' => $unit_name ])">
+									<input type="text" name="products[{{$loop->index}}][quantity]" value="{{@format_quantity($sell_line->this_return_qty)}}" class="form-control input-sm input_number return_qty input_quantity" data-rule-abs_digit="{{$check_decimal}}" data-msg-abs_digit="@lang('lang_v1.decimal_value_not_allowed')" data-rule-max-value="{{$sell_line->returnable_qty}}" data-msg-max-value="@lang('validation.custom-messages.quantity_not_available', ['qty' => $sell_line->formatted_returnable_qty, 'unit' => $unit_name ])" @if($sell_line->returnable_qty <= 0) readonly @endif>
+									@if($sell_line->without_invoice_returned > 0)
+										<small class="text-warning"><i class="fa fa-info-circle"></i> {{ @format_quantity($sell_line->without_invoice_returned) }} {{ $unit_name }} already returned without invoice</small>
+									@endif
 									<input name="products[{{$loop->index}}][unit_price_inc_tax]" type="hidden" class="unit_price" value="{{@num_format($sell_line->unit_price_inc_tax)}}">
 									<input name="products[{{$loop->index}}][sell_line_id]" type="hidden" value="{{$sell_line->id}}">
 								</td>

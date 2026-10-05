@@ -1252,7 +1252,8 @@ class TransactionUtil extends Util
             $output['invoice_no_prefix'] = $il->cn_no_label;
 
             //Parent sell details(return_parent_id)
-            $output['parent_invoice_no'] = Transaction::find($transaction->return_parent_id)->invoice_no;
+            //Returns without invoice have no parent sale
+            $output['parent_invoice_no'] = optional(Transaction::find($transaction->return_parent_id))->invoice_no;
             $output['parent_invoice_no_prefix'] = $il->invoice_no_prefix;
         } elseif ($transaction->status == 'draft' && $transaction->sub_status == 'proforma' && ! empty($il->common_settings['proforma_heading'])) {
             $output['invoice_heading'] = $il->common_settings['proforma_heading'];
@@ -1382,7 +1383,32 @@ class TransactionUtil extends Util
             $output['total_line_discount'] = ! empty($total_line_discount) ? $this->num_f($total_line_discount, true, $business_details) : 0;
         } elseif ($transaction_type == 'sell_return') {
             $parent_sell = Transaction::find($transaction->return_parent_id);
-            $lines = $parent_sell->sell_lines;
+            if (! empty($parent_sell)) {
+                $lines = $parent_sell->sell_lines;
+                //Qty returned without invoice belongs to those returns, not to this one
+                $without_invoice_returned = $this->getWithoutInvoiceReturnedQty($lines->pluck('id')->all());
+                foreach ($lines as $line) {
+                    $line->quantity_returned = max(0, $line->quantity_returned - ($without_invoice_returned[$line->id] ?? 0));
+                }
+            } else {
+                //Return without invoice: its lines, at the return price
+                $lines = collect();
+                $return_lines = DB::table('return_sell_lines')->where('return_transaction_id', $transaction->id)->get()->groupBy('transaction_sell_id');
+                foreach (TransactionSellLine::whereIn('id', $return_lines->keys())->get() as $line) {
+                    $rows = $return_lines[$line->id];
+                    $qty = $rows->sum('quantity');
+                    $price = $qty != 0 ? $rows->sum(fn ($r) => $r->quantity * $r->unit_price) / $qty : 0;
+                    $line->quantity_returned = $qty;
+                    $line->sub_unit_id = null;
+                    $line->unit_price = $price;
+                    $line->unit_price_inc_tax = $price;
+                    $line->unit_price_before_discount = $price;
+                    $line->item_tax = 0;
+                    $line->tax_id = null;
+                    $line->line_discount_amount = 0;
+                    $lines->push($line);
+                }
+            }
 
             foreach ($lines as $key => $value) {
                 if (! empty($value->sub_unit_id)) {
@@ -5786,7 +5812,19 @@ class TransactionUtil extends Util
         $opening_balance = 0;
         $opening_balance_paid = 0;
         $ledger_discount = 0;
-        
+
+        //Sell returns: invoice they return, or (without invoice) the invoices the goods came from
+        $sell_returns = $transactions->where('type', 'sell_return');
+        $return_parent_invoices = Transaction::whereIn('id', $sell_returns->pluck('return_parent_id')->filter()->unique())->pluck('invoice_no', 'id');
+        $without_invoice_sources = DB::table('return_sell_lines as rsl')
+                                    ->join('transactions as src', 'src.id', '=', 'rsl.transaction_id')
+                                    ->whereIn('rsl.return_transaction_id', $sell_returns->whereNull('return_parent_id')->pluck('id'))
+                                    ->select('rsl.return_transaction_id', 'src.invoice_no')
+                                    ->distinct()
+                                    ->get()
+                                    ->groupBy('return_transaction_id')
+                                    ->map(fn ($rows) => $rows->pluck('invoice_no')->all());
+
         foreach ($transactions as $transaction) {
             if ($transaction->type == 'opening_balance') {
                 //Skip opening balance, it will be added in the end
@@ -5813,6 +5851,20 @@ class TransactionUtil extends Util
                 'transaction_id' => $transaction->id,
                 'transaction_type' => $transaction->type,
             ];
+
+            if ($transaction->type == 'sell_return') {
+                if (! empty($transaction->return_parent_id)) {
+                    $temp_array['others'] .= ' <span class="label bg-blue" style="display: inline-block; white-space: normal;">Return of invoice: '.e($return_parent_invoices[$transaction->return_parent_id] ?? '').'</span>';
+                } else {
+                    $sources = $without_invoice_sources[$transaction->id] ?? [];
+                    //Shown under the type: "Sell Return [Without invoice]"
+                    $temp_array['type_badge'] = '<span class="label bg-purple">Without invoice</span>';
+                    if (! empty($sources)) {
+                        $shown = array_slice($sources, 0, 5);
+                        $temp_array['others'] .= ' <small>Items from invoice: '.e(implode(', ', $shown)).(count($sources) > 5 ? ' +'.(count($sources) - 5).' more' : '').'</small>';
+                    }
+                }
+            }
 
             if ($format == 'format_2') {
                 $temp_array['final_total'] = $transaction->final_total;
@@ -5893,7 +5945,10 @@ class TransactionUtil extends Util
 
             $ref_no = in_array($payment->transaction_type, ['sell', 'sell_return']) ? $payment->invoice_no : $payment->ref_no;
             $note = $payment->note;
-            if (! empty($ref_no)) {
+            if ($payment->transaction_type == 'sell_return') {
+                //Money paid back to the customer for a return
+                $note .= ' <span class="label bg-orange" style="display: inline-block; white-space: normal;">Return refund: '.e($ref_no).'</span>';
+            } elseif (! empty($ref_no)) {
                 $note .= '<small>'.__('account.payment_for').': '.$ref_no.'</small>';
             }
 
@@ -5911,7 +5966,7 @@ class TransactionUtil extends Util
             $ddd=$transaction_types['payment'];
            if($payment->payment_type == "credit"){
               $ddd=$transaction_types['payment'].' In';
-           }elseif($payment->payment_type == "debit"){
+           }elseif($payment->payment_type == "debit" || $payment->transaction_type == 'sell_return'){
             $ddd=$transaction_types['payment'].' Out';
            }
             $ledger[] = [
@@ -6166,6 +6221,56 @@ class TransactionUtil extends Util
     }
 
     //
+    /**
+     * Profit correction for sell returns made without an invoice.
+     * Gross profit removes the returned qty from the old sale at the old sale price (on the sale's date);
+     * the customer is credited the return price. Per line: qty x (sale price - return price), on the sale's date,
+     * plus any gap between the return total and its lines, on the return's date. Positive = profit goes up.
+     *
+     * @return float
+     */
+    public function getWithoutInvoiceReturnAdjustment($business_id, $start_date, $end_date, $location_id = null, $user_id = null, $permitted_locations = null)
+    {
+        $apply_filters = function ($query, $alias) use ($start_date, $end_date, $location_id, $user_id, $permitted_locations) {
+            $query->whereDate("$alias.transaction_date", '>=', $start_date)
+                ->whereDate("$alias.transaction_date", '<=', $end_date);
+            if (! empty($location_id)) {
+                $query->where("$alias.location_id", $location_id);
+            }
+            if (! empty($permitted_locations) && $permitted_locations != 'all') {
+                $query->whereIn("$alias.location_id", $permitted_locations);
+            }
+            if (! empty($user_id)) {
+                $query->where("$alias.created_by", $user_id);
+            }
+
+            return $query;
+        };
+
+        //Price difference, dated like the gross profit it corrects (the old sale)
+        $price_diff = $apply_filters(
+            DB::table('return_sell_lines as rsl')
+                ->join('transaction_sell_lines as sl', 'sl.id', '=', 'rsl.transaction_sell_id')
+                ->join('transactions as sale', 'sale.id', '=', 'sl.transaction_id')
+                ->join('transactions as ret', 'ret.id', '=', 'rsl.return_transaction_id')
+                ->where('sale.business_id', $business_id)
+                ->where('ret.type', 'sell_return'),
+            'sale'
+        )->sum(DB::raw('rsl.quantity * ((sl.unit_price_inc_tax - COALESCE(sl.item_tax, 0)) - COALESCE(rsl.unit_price, 0))'));
+
+        //Return total vs. its lines (discount / rounding on the return), dated on the return
+        $header_diff = $apply_filters(
+            DB::table('transactions as ret')
+                ->join(DB::raw('(SELECT return_transaction_id, SUM(quantity * COALESCE(unit_price, 0)) AS lines_total FROM return_sell_lines GROUP BY return_transaction_id) as rl'), 'rl.return_transaction_id', '=', 'ret.id')
+                ->where('ret.business_id', $business_id)
+                ->where('ret.type', 'sell_return')
+                ->whereNull('ret.return_parent_id'),
+            'ret'
+        )->sum(DB::raw('rl.lines_total - ret.total_before_tax'));
+
+        return (float) $price_diff + (float) $header_diff;
+    }
+
     public function getProfitLossDetails($business_id, $location_id, $start_date, $end_date, $user_id = null, $permitted_locations = null)
     {
         //For Opening stock date should be 1 day before
@@ -6242,6 +6347,10 @@ class TransactionUtil extends Util
             ->whereDate('builty.recevied_date', '>=', $start_date)
             ->whereDate('builty.recevied_date', '<=', $end_date)
             ->sum('builty.amount');
+
+        //Returns without invoice: gross profit takes the returned qty off the old sale at its sale price,
+        //but the customer was credited the return price; add the difference so profit follows the credit
+        $data['without_invoice_return_adjustment'] = $this->getWithoutInvoiceReturnAdjustment($business_id, $start_date, $end_date, $location_id, $user_id, $permitted_locations);
 
         $data['total_purchase_shipping_charge'] = ! empty($purchase_details['total_shipping_charges']) ? $purchase_details['total_shipping_charges'] : 0;
         $data['total_sell_shipping_charge'] = ! empty($sell_details['total_shipping_charges']) ? $sell_details['total_shipping_charges'] : 0;
@@ -6339,7 +6448,7 @@ class TransactionUtil extends Util
         //                         + $data['total_purchase_discount']
         //                         + $data['total_purchase_return']
         //                         - $data['total_sell_return'];
-        $data['net_profit'] = $module_total + $gross_profit
+        $data['net_profit'] = $module_total + $gross_profit + $data['without_invoice_return_adjustment']
                                 + ($data['total_sell_round_off'] + $data['total_recovered'] + $data['total_sell_shipping_charge'] + $data['total_purchase_discount'] + $data['total_sell_additional_expense'] + $data['total_sell_return_discount']
                                 ) - ($data['total_reward_amount'] + $data['total_expense'] + $data['total_adjustment'] + $data['total_transfer_shipping_charges'] + $data['total_purchase_shipping_charge'] + $data['total_purchase_additional_expense'] + $data['total_sell_discount']
                                 + $data['total_builty']
@@ -6795,6 +6904,8 @@ class TransactionUtil extends Util
         foreach ($product_lines as $product_line) {
             $returns[$product_line['sell_line_id']] = $uf_number ? $this->num_uf($product_line['quantity']) : $product_line['quantity'];
         }
+        //Qty already returned through returns without invoice stays returned on top of this return
+        $without_invoice_returned = $this->getWithoutInvoiceReturnedQty($sell->sell_lines->pluck('id')->all());
         foreach ($sell->sell_lines as $sell_line) {
             if (array_key_exists($sell_line->id, $returns)) {
                 $multiplier = 1;
@@ -6802,7 +6913,7 @@ class TransactionUtil extends Util
                     $multiplier = $sell_line->sub_unit->base_unit_multiplier;
                 }
 
-                $quantity = $returns[$sell_line->id] * $multiplier;
+                $quantity = $returns[$sell_line->id] * $multiplier + ($without_invoice_returned[$sell_line->id] ?? 0);
 
                 $quantity_before = $sell_line->quantity_returned;
 
@@ -6818,6 +6929,28 @@ class TransactionUtil extends Util
         }
 
         return $sell_return;
+    }
+
+    /**
+     * Quantity of each sell line returned through returns without invoice (return_sell_lines), in base unit
+     *
+     * @param  array  $sell_line_ids
+     * @return array sell_line_id => quantity
+     */
+    public function getWithoutInvoiceReturnedQty($sell_line_ids)
+    {
+        if (empty($sell_line_ids)) {
+            return [];
+        }
+
+        return DB::table('return_sell_lines as rsl')
+                ->join('transactions as ret', 'ret.id', '=', 'rsl.return_transaction_id')
+                ->whereIn('rsl.transaction_sell_id', $sell_line_ids)
+                ->groupBy('rsl.transaction_sell_id')
+                ->select('rsl.transaction_sell_id', DB::raw('SUM(rsl.quantity) as qty'))
+                ->pluck('qty', 'transaction_sell_id')
+                ->map(fn ($qty) => (float) $qty)
+                ->all();
     }
 
     /**

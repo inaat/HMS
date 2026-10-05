@@ -99,7 +99,7 @@
                     <td class="sl-center">{{ $loop->iteration }}</td>
                     <td>{{ @format_datetime($data['date']) }}</td>
                     <td>{{ $data['ref_no'] }}</td>
-                    <td>{{ $data['type'] }}@if(!empty($data['location']) && empty($location))<br><span class="sl-muted">{{ $data['location'] }}</span>@endif</td>
+                    <td>{{ $data['type'] }}@if(!empty($data['type_badge']))<br>{!! $data['type_badge'] !!}@endif @if(!empty($data['location']) && empty($location))<br><span class="sl-muted">{{ $data['location'] }}</span>@endif</td>
                     <td>{{ $data['payment_method'] }}</td>
                     <td class="sl-amount">@if($data['debit'] !== '') @format_currency($data['debit']) @endif</td>
                     <td class="sl-amount">@if($data['credit'] !== '') @format_currency($data['credit']) @endif</td>

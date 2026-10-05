@@ -94,7 +94,7 @@
 				<tr @if(!empty($for_pdf) && $loop->iteration % 2 == 0) class="odd" @endif>
 					<td class="row-border">{{@format_datetime($data['date'])}}</td>
 					<td>{{$data['ref_no']}}</td>
-					<td>{{$data['type']}}</td>
+					<td>{{$data['type']}}@if(!empty($data['type_badge']))<br>{!! $data['type_badge'] !!}@endif</td>
 					<td>{{$data['location']}}</td>
 					<td>{{$data['payment_status']}}</td>
 					{{--<td class="ws-nowrap align-right">@if($data['total'] !== '') @format_currency($data['total']) @endif</td>--}}
