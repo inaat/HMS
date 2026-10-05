@@ -629,6 +629,13 @@ class AdminSidebarMenu
                                 'Stock link check',
                                 ['icon' => '', 'active' => request()->segment(2) == 'stock-link-check']
                             );
+                        }
+                        if (auth()->user()->can('stock_report.view') || auth()->user()->can('purchase.view')) {
+                            $sub->url(
+                                action([\App\Http\Controllers\ReportController::class, 'missingPurchases']),
+                                'Missing purchases',
+                                ['icon' => '', 'active' => request()->segment(2) == 'missing-purchases']
+                            );
                         }                        if (config('constants.show_report_606') == true) {
                             $sub->url(
                                 action([\App\Http\Controllers\ReportController::class, 'purchaseReport']),

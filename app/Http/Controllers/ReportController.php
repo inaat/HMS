@@ -139,6 +139,25 @@ class ReportController extends Controller
     }
 
     /**
+     * Missing purchases: products with negative stock or sales made without stock
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function missingPurchases(Request $request)
+    {
+        if (! auth()->user()->can('stock_report.view') && ! auth()->user()->can('purchase.view')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+        $location_id = $request->input('location_id');
+        $rows = $this->transactionUtil->getMissingPurchases($business_id, $location_id);
+        $business_locations = BusinessLocation::forDropdown($business_id, true);
+
+        return view('report.missing_purchases', compact('rows', 'business_locations', 'location_id'));
+    }
+
+    /**
      * Repairs the mismatches shown by stockLinkCheck()
      *
      * @return array
@@ -151,23 +170,6 @@ class ReportController extends Controller
 
         $business_id = $request->session()->get('user.business_id');
 
-        //Automatic backup of the two tables the repair changes (CREATE TABLE commits, so before the transaction)
-        $suffix = date('Ymd_His');
-        $backups = [
-            'transaction_sell_lines_purchase_lines' => 'bak_tspl_'.$suffix,
-            'purchase_lines' => 'bak_purchase_lines_'.$suffix,
-            'variation_location_details' => 'bak_vld_'.$suffix,
-        ];
-        try {
-            foreach ($backups as $table => $backup) {
-                DB::statement("CREATE TABLE `{$backup}` AS SELECT * FROM `{$table}`");
-            }
-        } catch (\Exception $e) {
-            \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
-
-            return ['success' => false, 'msg' => 'Backup failed, nothing was changed'];
-        }
-
         try {
             DB::beginTransaction();
             $summary = $this->transactionUtil->repairSellPurchaseMapping($business_id);
@@ -179,9 +181,9 @@ class ReportController extends Controller
             return ['success' => false, 'msg' => __('messages.something_went_wrong')];
         }
 
-        \Log::info('Stock links repaired', ['business_id' => $business_id, 'user_id' => auth()->id(), 'backup_tables' => array_values($backups)] + $summary);
+        \Log::info('Stock links repaired', ['business_id' => $business_id, 'user_id' => auth()->id()] + $summary);
 
-        return ['success' => true, 'msg' => $summary['sell_lines_repaired'].' sell line(s), '.$summary['overlinked_purchase_lines'].' purchase line(s) and '.$summary['stock_corrected'].' stock row(s) repaired. Backup: '.implode(', ', $backups)];
+        return ['success' => true, 'msg' => ($summary['sell_lines_repaired'] + $summary['unlinked_sell_lines']).' sell line(s), '.$summary['overlinked_purchase_lines'].' purchase line(s) and '.$summary['stock_corrected'].' stock row(s) repaired'];
     }
 
     /**

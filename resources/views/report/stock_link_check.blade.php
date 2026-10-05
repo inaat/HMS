@@ -13,7 +13,7 @@
             @php
                 $extra = $issues->filter(fn ($i) => $i->linked_qty > $i->quantity);
             @endphp
-            @if($can_repair && ($extra->isNotEmpty() || $overlinked->isNotEmpty() || $stock_mismatches->isNotEmpty()))
+            @if($can_repair && ($issues->isNotEmpty() || $overlinked->isNotEmpty() || $stock_mismatches->isNotEmpty()))
                 <button type="button" class="tw-dw-btn tw-dw-btn-warning tw-text-white tw-dw-btn-sm" id="repair_stock_links" style="margin-bottom: 10px;">
                     <i class="fa fa-wrench"></i> Repair
                 </button>
@@ -95,10 +95,8 @@
                     Each sold quantity should be linked once to the purchase it came from. These lines are linked to more
                     (or less) than they sold, mostly duplicate links created when an invoice was edited. This makes purchase
                     stock look used up and cost / profit wrong.
-                    @if($extra->isNotEmpty())
-                        <br><strong>Repair</strong> removes the extra linked quantity, recalculates the purchase lines and links
-                        freed stock to sales that were sold without stock. Invoices and stock quantities are not changed.
-                    @endif
+                    <br><strong>Repair</strong> removes extra linked quantity, links missing quantity to purchases with free stock
+                    (or marks it "sold without stock") and recalculates the purchase lines. Invoices are not changed.
                 </div>
 
                 <div class="table-responsive">
@@ -110,7 +108,7 @@
                                 <th>Product</th>
                                 <th>Sold</th>
                                 <th>Linked</th>
-                                <th>Difference</th>
+                                <th>Problem</th>
                                 <th>Link rows</th>
                             </tr>
                         </thead>
@@ -125,7 +123,11 @@
                                     <td>{{ @format_quantity($issue->quantity) }} {{ $issue->unit }}</td>
                                     <td>{{ @format_quantity($issue->linked_qty) }} {{ $issue->unit }}</td>
                                     <td class="{{ $issue->linked_qty > $issue->quantity ? 'text-danger' : 'text-warning' }}">
-                                        {{ $issue->linked_qty > $issue->quantity ? '+' : '' }}{{ @format_quantity($issue->linked_qty - $issue->quantity) }}
+                                        @if($issue->linked_qty > $issue->quantity)
+                                            {{ @format_quantity($issue->linked_qty - $issue->quantity) }} {{ $issue->unit }} linked extra
+                                        @else
+                                            {{ @format_quantity($issue->quantity - $issue->linked_qty) }} {{ $issue->unit }} not linked
+                                        @endif
                                     </td>
                                     <td>{{ $issue->link_rows }}</td>
                                 </tr>
@@ -145,7 +147,7 @@
         var btn = $(this);
         swal({
             title: LANG.sure,
-            text: 'A backup is made automatically, then links and stock are repaired. Continue?',
+            text: 'Repair purchase links and stock?',
             icon: 'warning',
             buttons: true,
             dangerMode: true,
@@ -153,7 +155,8 @@
             if (!ok) {
                 return;
             }
-            btn.prop('disabled', true);
+            var btn_html = btn.html();
+            btn.prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Repairing... please wait, this can take a few minutes');
             $.ajax({
                 method: 'POST',
                 url: '/reports/stock-link-check/repair',
@@ -164,12 +167,12 @@
                         toastr.success(result.msg);
                         setTimeout(function() { location.reload(); }, 1200);
                     } else {
-                        btn.prop('disabled', false);
+                        btn.prop('disabled', false).html(btn_html);
                         toastr.error(result.msg);
                     }
                 },
                 error: function() {
-                    btn.prop('disabled', false);
+                    btn.prop('disabled', false).html(btn_html);
                 }
             });
         });

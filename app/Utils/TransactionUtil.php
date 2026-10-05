@@ -3652,6 +3652,46 @@ class TransactionUtil extends Util
             }
         }
 
+        //Sell lines linked to less than they sold (or not linked at all): link the missing quantity to
+        //purchases with free stock (FIFO/LIFO), anything left goes to purchase line 0 (sold without stock)
+        $missing_lines = TransactionSellLine::join('transactions as t', 't.id', '=', 'transaction_sell_lines.transaction_id')
+            ->join('products as p', 'p.id', '=', 'transaction_sell_lines.product_id')
+            ->join('business as b', 'b.id', '=', 't.business_id')
+            ->where('t.type', 'sell')
+            ->where('t.status', 'final')
+            ->where('p.enable_stock', 1)
+            ->where('p.type', '!=', 'combo')
+            ->when(! empty($business_id), fn ($q) => $q->where('t.business_id', $business_id))
+            ->select(
+                'transaction_sell_lines.id',
+                'transaction_sell_lines.product_id',
+                'transaction_sell_lines.variation_id',
+                'transaction_sell_lines.quantity',
+                't.business_id',
+                't.location_id',
+                'b.accounting_method',
+                DB::raw('(SELECT COALESCE(SUM(x.quantity), 0) FROM transaction_sell_lines_purchase_lines x WHERE x.sell_line_id = transaction_sell_lines.id) as linked_qty')
+            )
+            ->havingRaw('linked_qty < transaction_sell_lines.quantity - 0.0001')
+            ->orderBy('t.transaction_date')
+            ->get();
+        $linked_missing_qty = 0;
+        foreach ($missing_lines as $missing) {
+            $line = new TransactionSellLine();
+            $line->id = $missing->id;
+            $line->product_id = $missing->product_id;
+            $line->variation_id = $missing->variation_id;
+            $line->quantity = $missing->quantity - $missing->linked_qty;
+            $linked_missing_qty += $line->quantity;
+
+            $this->mapPurchaseSell([
+                'id' => $missing->business_id,
+                'accounting_method' => $missing->accounting_method,
+                'location_id' => $missing->location_id,
+                'pos_settings' => ['allow_overselling' => 1],
+            ], [$line], 'purchase', false);
+        }
+
         //quantity_sold must equal what is really linked to the purchase line
         $mismatched = PurchaseLine::join('transactions as t', 't.id', '=', 'purchase_lines.transaction_id')
             ->when(! empty($business_id), fn ($q) => $q->where('t.business_id', $business_id))
@@ -3696,9 +3736,53 @@ class TransactionUtil extends Util
             'extra_qty_removed' => $removed_qty,
             'overlinked_purchase_lines' => $overlinked->count(),
             'qty_moved_to_line0' => $moved_to_line0,
+            'unlinked_sell_lines' => $missing_lines->count(),
+            'unlinked_qty_linked' => $linked_missing_qty,
             'purchase_lines_recalculated' => count($affected_purchase_lines),
             'stock_corrected' => $stock_mismatches->count(),
         ];
+    }
+
+    /**
+     * Products whose purchases are missing: negative stock, or sales linked to purchase line 0 (sold without stock).
+     * Entering the missing purchase / opening stock links those sales automatically.
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    public function getMissingPurchases($business_id, $location_id = null)
+    {
+        $sold_without_stock = "(SELECT COALESCE(SUM(x.quantity - x.qty_returned), 0) FROM transaction_sell_lines_purchase_lines x
+                JOIN transaction_sell_lines s ON s.id = x.sell_line_id JOIN transactions t ON t.id = s.transaction_id
+                WHERE x.purchase_line_id = 0 AND s.variation_id = vld.variation_id AND t.location_id = vld.location_id AND t.status = 'final')";
+        $last_sold = "(SELECT MAX(t.transaction_date) FROM transaction_sell_lines_purchase_lines x
+                JOIN transaction_sell_lines s ON s.id = x.sell_line_id JOIN transactions t ON t.id = s.transaction_id
+                WHERE x.purchase_line_id = 0 AND s.variation_id = vld.variation_id AND t.location_id = vld.location_id)";
+
+        return DB::table('variation_location_details as vld')
+            ->join('products as p', 'p.id', '=', 'vld.product_id')
+            ->join('variations as v', 'v.id', '=', 'vld.variation_id')
+            ->leftJoin('units as u', 'u.id', '=', 'p.unit_id')
+            ->leftJoin('business_locations as bl', 'bl.id', '=', 'vld.location_id')
+            ->where('p.business_id', $business_id)
+            ->where('p.enable_stock', 1)
+            ->when(! empty($location_id), fn ($q) => $q->where('vld.location_id', $location_id))
+            ->select(
+                'p.id as product_id',
+                'p.name as product',
+                'p.type',
+                'v.name as variation',
+                'v.sub_sku',
+                'u.short_name as unit',
+                'vld.location_id',
+                'bl.name as location',
+                'vld.qty_available',
+                'v.default_purchase_price',
+                DB::raw("$sold_without_stock as sold_without_stock"),
+                DB::raw("$last_sold as last_sold_without_stock")
+            )
+            ->havingRaw('vld.qty_available < 0 OR sold_without_stock > 0')
+            ->orderByDesc('sold_without_stock')
+            ->get();
     }
 
     /**
