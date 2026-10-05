@@ -79,6 +79,9 @@
                     @if($agents->isNotEmpty())
                         <span class="cmmsn-chip">Commission {{ @num_format($agents->first()->cmmsn_percent) }}%</span>
                     @endif
+                    <button type="button" class="tw-dw-btn tw-dw-btn-sm tw-text-white cmmsn-whatsapp cmmsn-whatsapp-btn no-print" data-agent="{{ $filters['commission_agent'] }}">
+                        <i class="fab fa-whatsapp"></i> Send to agent on WhatsApp
+                    </button>
                 @else
                     <span class="cmmsn-agent-name"><i class="fa fa-users"></i> All agents</span>
                 @endif
@@ -133,6 +136,7 @@
             </table>
 
             @if($brands->isNotEmpty())
+                <div class="cmmsn-print-brands">
                 <h5 class="cmmsn-print-subtitle">Brand wise summary</h5>
                 <table class="table table-bordered cmmsn-table">
                     <thead>
@@ -165,6 +169,51 @@
                         </tr>
                     </tfoot>
                 </table>
+                </div>
+            @endif
+
+            @if($products->isNotEmpty())
+                <div class="cmmsn-print-products">
+                <h5 class="cmmsn-print-subtitle">Product wise summary</h5>
+                <table class="table table-bordered cmmsn-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Product</th>
+                            <th>SKU</th>
+                            <th>Brand</th>
+                            <th class="text-right">Qty sold</th>
+                            <th class="text-right">Qty returned</th>
+                            <th class="text-right">Net sale</th>
+                            <th class="text-right">Commission</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($products->groupBy(fn ($r) => $r->product_id.'_'.$r->sub_sku)->sortByDesc(fn ($rows) => $rows->sum('net_amount')) as $product_rows)
+                            @php $first = $product_rows->first(); @endphp
+                            <tr>
+                                <td>{{ $loop->iteration }}</td>
+                                <td>{{ $first->product }}@if($first->product_type == 'variable') - {{ $first->variation }}@endif</td>
+                                <td>{{ $first->sub_sku }}</td>
+                                <td>{{ $first->brand }}</td>
+                                <td class="text-right">{{ @format_quantity($product_rows->sum('qty_sold')) }} {{ $first->unit }}</td>
+                                <td class="text-right">{{ @format_quantity($product_rows->sum('qty_returned')) }}</td>
+                                <td class="text-right">@format_currency($product_rows->sum('net_amount'))</td>
+                                <td class="text-right">@format_currency($product_rows->sum($commission_of))</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                    <tfoot>
+                        <tr class="cmmsn-total">
+                            <td colspan="4">Total ({{ $products->pluck('product_id')->unique()->count() }} products)</td>
+                            <td class="text-right">{{ @format_quantity($products->sum('qty_sold')) }}</td>
+                            <td class="text-right">{{ @format_quantity($products->sum('qty_returned')) }}</td>
+                            <td class="text-right">@format_currency($products->sum('net_amount'))</td>
+                            <td class="text-right">@format_currency($products->sum($commission_of))</td>
+                        </tr>
+                    </tfoot>
+                </table>
+                </div>
             @endif
             <h5 class="cmmsn-print-subtitle"><span class="cmmsn_print_tab_title"></span></h5>
         </div>
@@ -251,6 +300,7 @@
                                         @endif
                                         <td class="no-print text-center">
                                             <a href="#" class="cmmsn-agent-detail tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary" data-agent="{{ $agent->agent_id }}"><i class="fa fa-eye"></i> Full detail</a>
+                                            <button type="button" class="cmmsn-whatsapp tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-success" data-agent="{{ $agent->agent_id }}" title="Send this agent's report on WhatsApp"><i class="fab fa-whatsapp"></i> WhatsApp</button>
                                         </td>
                                     </tr>
                                 @empty
@@ -564,6 +614,9 @@
     .cmmsn-chip { display: inline-block; padding: 3px 10px; border-radius: 999px; background: #f3f4f6; border: 1px solid #e5e7eb; font-size: 12px; color: #374151; }
     .cmmsn-print-only { display: none; }
     .cmmsn-reset { margin-left: auto; font-size: 13px; }
+    .cmmsn-whatsapp-btn { background: #25d366; border-color: #25d366; }
+    .cmmsn-whatsapp-btn:hover { background: #1ebe5a; border-color: #1ebe5a; }
+    #cmmsn_agents_table td .tw-dw-btn { white-space: nowrap; }
     .cmmsn-stat { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
     .cmmsn-stat-label { display: block; font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; }
     .cmmsn-stat-value { display: block; font-size: 22px; font-weight: 700; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -595,6 +648,9 @@
         .cmmsn-summary-table th { width: 20%; background: #f3f4f6 !important; }
         .cmmsn-payable th, .cmmsn-payable td { font-size: 15px; font-weight: 700; background: #e5e7eb !important; }
         .cmmsn-print-subtitle { font-weight: 700; margin: 10px 0 4px; font-size: 13px; }
+        /* Printing the product / brand tab: skip the same list in the summary */
+        #cmmsn_print_area[data-tab="tab_products"] .cmmsn-print-products,
+        #cmmsn_print_area[data-tab="tab_brands"] .cmmsn-print-brands { display: none !important; }
         .cmmsn-card { box-shadow: none; border: none; }
         .cmmsn-signatures { display: flex !important; justify-content: space-between; margin-top: 50px; }
         .cmmsn-signatures div { width: 28%; border-top: 1px solid #000; text-align: center; padding-top: 4px; font-size: 12px; }
@@ -650,7 +706,9 @@
             $('.nav-tabs a[href="' + location.hash + '"]').tab('show');
         }
         function update_print_title() {
-            $('.cmmsn_print_tab_title').text($('.tab-pane.active').data('title') || '');
+            var $tab = $('.tab-content > .tab-pane.active');
+            $('.cmmsn_print_tab_title').text($tab.data('title') || '');
+            $('#cmmsn_print_area').attr('data-tab', $tab.attr('id') || '');
         }
         $('.nav-tabs a[data-toggle="tab"]').on('shown.bs.tab', function(e) {
             history.replaceState(null, '', location.pathname + location.search + $(e.target).attr('href'));
@@ -679,6 +737,39 @@
             $form.find('select').off('change');
             $('#commission_agent').val(agent).trigger('change');
             submit_report('#tab_lines');
+        });
+
+        //Send one agent's report (with the filters on screen) as a PDF on WhatsApp
+        $(document).on('click', '.cmmsn-whatsapp', function() {
+            var btn = $(this);
+            var data = {};
+            $.each($form.serializeArray(), function(i, field) {
+                data[field.name] = field.value;
+            });
+            data.commission_agent = btn.data('agent');
+            data._token = '{{ csrf_token() }}';
+
+            var original_html = btn.html();
+            btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Sending...');
+            $.ajax({
+                method: 'POST',
+                url: "{{ action([\App\Http\Controllers\ReportController::class, 'sendCommissionAgentReportWhatsapp']) }}",
+                dataType: 'json',
+                data: data,
+                success: function(result) {
+                    if (result.success) {
+                        toastr.success(result.msg);
+                    } else {
+                        toastr.error(result.msg);
+                    }
+                },
+                error: function() {
+                    toastr.error("{{ __('messages.something_went_wrong') }}");
+                },
+                complete: function() {
+                    btn.prop('disabled', false).html(original_html);
+                }
+            });
         });
 
         //Quick search inside a tab

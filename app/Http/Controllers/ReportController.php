@@ -1320,7 +1320,98 @@ class ReportController extends Controller
         }
 
         $business_id = $request->session()->get('user.business_id');
+        $data = $this->commissionAgentReportData($request, $business_id);
 
+        $commission_agents = User::saleCommissionAgentsDropdown($business_id, false);
+        $business_locations = BusinessLocation::forDropdown($business_id, true);
+        $brands_dropdown = Brands::forDropdown($business_id);
+        $categories = Category::forDropdown($business_id, 'product');
+        $products_dropdown = Product::where('business_id', $business_id)
+                    ->select('id', DB::raw("CONCAT(name, ' (', sku, ')') as name"))
+                    ->orderBy('name')
+                    ->pluck('name', 'id');
+
+        return view('report.commission_agent_report', array_merge($data, compact(
+            'commission_agents', 'business_locations', 'brands_dropdown', 'categories', 'products_dropdown'
+        )));
+    }
+
+    /**
+     * Sends one agent's commission report (summary, brand, product and sales detail) as a PDF
+     * to the agent's contact number over WhatsApp, with the filters currently on screen.
+     *
+     * @return array
+     */
+    public function sendCommissionAgentReportWhatsapp(Request $request)
+    {
+        if (! auth()->user()->can('sales_representative.view')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+        $agent = User::where('business_id', $business_id)->where('is_cmmsn_agnt', 1)->find($request->input('commission_agent'));
+        if (empty($agent)) {
+            return ['success' => 0, 'msg' => 'Select a commission agent first.'];
+        }
+
+        $agent_name = trim(implode(' ', array_filter([$agent->surname, $agent->first_name, $agent->last_name])));
+        $number = preg_replace('/[^0-9]/', '', (string) $agent->contact_no);
+        if (empty($number)) {
+            return ['success' => 0, 'msg' => $agent_name.' has no contact number. Add it in Sales Commission Agents.'];
+        }
+
+        $file = null;
+        try {
+            $data = $this->commissionAgentReportData($request, $business_id);
+            $data['agent_name'] = $agent_name;
+            $data['location_name'] = ! empty($data['filters']['location_id']) ? BusinessLocation::where('business_id', $business_id)->where('id', $data['filters']['location_id'])->value('name') : null;
+            $data['brand_name'] = ! empty($data['filters']['brand_id']) ? Brands::where('business_id', $business_id)->where('id', $data['filters']['brand_id'])->value('name') : null;
+            $data['category_name'] = ! empty($data['filters']['category_id']) ? Category::where('business_id', $business_id)->where('id', $data['filters']['category_id'])->value('name') : null;
+            $data['product_name'] = ! empty($data['filters']['product_id']) ? Product::where('business_id', $business_id)->where('id', $data['filters']['product_id'])->value('name') : null;
+            $html = view('report.partials.commission_agent_pdf', $data)->render();
+
+            $mpdf = $this->getMpdf();
+            $mpdf->WriteHTML($html);
+
+            $path = config('constants.mpdf_temp_path');
+            if (! file_exists($path)) {
+                mkdir($path, 0777, true);
+            }
+            $file = $path.'/'.time().'_commission.pdf';
+            $mpdf->Output($file, 'F');
+
+            $period = $this->transactionUtil->format_date($data['filters']['start_date']).' to '.$this->transactionUtil->format_date($data['filters']['end_date']);
+            $filename = 'Commission-'.str_replace(' ', '-', $agent_name).'.pdf';
+            $caption = $agent_name.' - Commission report '.$period
+                ."\nInvoices: ".$data['agents']->sum('invoice_count')
+                ."\nNet sale: ".$this->transactionUtil->num_f($data['agents']->sum('net_amount'), true)
+                ."\nCommission: ".$this->transactionUtil->num_f($data['total_commission'], true);
+
+            $response = (new \App\Services\WhatsappApiService())->sendDocument(\App\WhatsappDevice::instanceFor($business_id), $file, $number, $filename, $caption);
+
+            $output = (empty($response) || ! empty($response['error']))
+                ? ['success' => 0, 'msg' => $response['message'] ?? 'WhatsApp did not accept the message.']
+                : ['success' => 1, 'msg' => 'Commission report sent on WhatsApp to '.$agent_name.' ('.$number.')'];
+        } catch (\Exception $e) {
+            \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
+
+            $output = ['success' => 0, 'msg' => __('messages.something_went_wrong')];
+        }
+
+        if (! empty($file) && file_exists($file)) {
+            unlink($file);
+        }
+
+        return $output;
+    }
+
+    /**
+     * Commission agent report figures for the filters in the request
+     *
+     * @return array filters, agents, brands, products, invoices, lines, calculation_type, total_commission
+     */
+    private function commissionAgentReportData(Request $request, $business_id)
+    {
         $filters = $request->only(['start_date', 'end_date', 'location_id', 'commission_agent', 'brand_id', 'category_id', 'product_id']);
         if (empty($filters['start_date']) || empty($filters['end_date'])) {
             $filters['start_date'] = \Carbon::now()->startOfMonth()->format('Y-m-d');
@@ -1383,20 +1474,9 @@ class ReportController extends Controller
                 $agent->payment_commission = $agent->payment_received * $agent->cmmsn_percent / 100;
             }
         }
+        $total_commission = $calculation_type == 'payment_received' ? $agents->sum('payment_commission') : $agents->sum('commission');
 
-        $commission_agents = User::saleCommissionAgentsDropdown($business_id, false);
-        $business_locations = BusinessLocation::forDropdown($business_id, true);
-        $brands_dropdown = Brands::forDropdown($business_id);
-        $categories = Category::forDropdown($business_id, 'product');
-        $products_dropdown = Product::where('business_id', $business_id)
-                    ->select('id', DB::raw("CONCAT(name, ' (', sku, ')') as name"))
-                    ->orderBy('name')
-                    ->pluck('name', 'id');
-
-        return view('report.commission_agent_report', compact(
-            'filters', 'agents', 'brands', 'products', 'invoices', 'lines', 'calculation_type',
-            'commission_agents', 'business_locations', 'brands_dropdown', 'categories', 'products_dropdown'
-        ));
+        return compact('filters', 'agents', 'brands', 'products', 'invoices', 'lines', 'calculation_type', 'total_commission');
     }
 
     /**
