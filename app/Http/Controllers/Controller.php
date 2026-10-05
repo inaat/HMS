@@ -120,10 +120,11 @@ class Controller extends BaseController
         $my_pdf->filename($name);
         $my_pdf->paper($pagesize, $pagetype);
         $my_pdf->html($html);
-       // dd(url('assets/pdf/'.$designType.'/'.$stylesheet));
-        if (!empty($stylesheet)) {
-            $stylesheet = file_get_contents(url('/pdf/'.$designType.'/'.$stylesheet));
-            return $my_pdf->create($mode, $this->data['panel_title'], $stylesheet);
+        // read from disk, not over HTTP: a request back to our own server fails
+        // whenever APP_URL is wrong, and deadlocks the single-threaded `artisan serve`
+        $stylesheet_path = ! empty($stylesheet) ? resource_path('pdf/'.$designType.'/'.basename($stylesheet)) : null;
+        if (! empty($stylesheet_path) && is_file($stylesheet_path)) {
+            return $my_pdf->create($mode, $this->data['panel_title'], file_get_contents($stylesheet_path));
         } else {
             return $my_pdf->create($mode, $this->data['panel_title']);
         }
