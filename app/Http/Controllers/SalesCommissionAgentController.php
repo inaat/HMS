@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Brands;
+use App\CommissionAgentRule;
+use App\Product;
 use App\User;
 use App\Utils\Util;
 use DataTables;
@@ -41,11 +44,29 @@ class SalesCommissionAgentController extends Controller
                             DB::raw("CONCAT(COALESCE(surname, ''), ' ', COALESCE(first_name, ''), ' ', COALESCE(last_name, '')) as full_name"),
                             'email', 'contact_no', 'address', 'cmmsn_percent', ]);
 
+            //Brand / product rules shown under the default commission %
+            $rules = CommissionAgentRule::with(['brand', 'product'])
+                        ->where('business_id', $business_id)
+                        ->get()
+                        ->groupBy('user_id');
+
             return Datatables::of($users)
+                ->editColumn('cmmsn_percent', function ($row) use ($rules) {
+                    $html = $this->commonUtil->num_f($row->cmmsn_percent).'%';
+                    foreach ($rules[$row->id] ?? [] as $rule) {
+                        $name = ! empty($rule->product_id) ? optional($rule->product)->name : optional($rule->brand)->name;
+                        $value = $rule->type == 'fixed' ? $this->commonUtil->num_f($rule->value).' / unit' : $this->commonUtil->num_f($rule->value).'%';
+                        $html .= '<br><small class="label bg-gray" style="font-weight: normal;">'.e($name).': '.$value.'</small>';
+                    }
+
+                    return $html;
+                })
                 ->addColumn(
                     'action',
                     '@can("user.update")
                     <button type="button" data-href="{{action(\'App\Http\Controllers\SalesCommissionAgentController@edit\', [$id])}}" data-container=".commission_agent_modal" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline  btn-modal tw-dw-btn-primary"><i class="glyphicon glyphicon-edit"></i> @lang("messages.edit")</button>
+                        &nbsp;
+                        <button type="button" data-href="{{action(\'App\Http\Controllers\SalesCommissionAgentController@rules\', [$id])}}" data-container=".commission_agent_modal" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline btn-modal tw-dw-btn-success"><i class="fa fa-percent"></i> Commission rules</button>
                         &nbsp;
                         @endcan
                         @can("user.delete")
@@ -60,7 +81,7 @@ class SalesCommissionAgentController extends Controller
                     $query->whereRaw("CONCAT(COALESCE(surname, ''), ' ', COALESCE(first_name, ''), ' ', COALESCE(last_name, '')) like ?", ["%{$keyword}%"]);
                 })
                 ->removeColumn('id')
-                ->rawColumns(['action'])
+                ->rawColumns(['action', 'cmmsn_percent'])
                 ->make(true);
         }
 
@@ -173,6 +194,92 @@ class SalesCommissionAgentController extends Controller
 
             return $output;
         }
+    }
+
+    /**
+     * Brand / product wise commission rules of an agent (modal)
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function rules($id)
+    {
+        if (! auth()->user()->can('user.update')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = request()->session()->get('user.business_id');
+        $user = User::where('business_id', $business_id)->where('is_cmmsn_agnt', 1)->findOrFail($id);
+
+        $rules = CommissionAgentRule::where('business_id', $business_id)
+                    ->where('user_id', $user->id)
+                    ->orderByRaw('product_id IS NOT NULL')
+                    ->orderBy('id')
+                    ->get();
+
+        $brands = Brands::forDropdown($business_id);
+        $products = Product::where('business_id', $business_id)
+                    ->select('id', DB::raw("CONCAT(name, ' (', sku, ')') as name"))
+                    ->orderBy('name')
+                    ->pluck('name', 'id');
+
+        return view('sales_commission_agent.rules')
+                    ->with(compact('user', 'rules', 'brands', 'products'));
+    }
+
+    /**
+     * Saves all brand / product wise commission rules of an agent (replaces the old ones)
+     *
+     * @param  int  $id
+     * @return array
+     */
+    public function saveRules(Request $request, $id)
+    {
+        if (! auth()->user()->can('user.update')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        try {
+            $business_id = $request->session()->get('user.business_id');
+            $user = User::where('business_id', $business_id)->where('is_cmmsn_agnt', 1)->findOrFail($id);
+
+            $rows = [];
+            $seen = [];
+            foreach ((array) $request->input('rules', []) as $rule) {
+                $applies_to = ($rule['applies_to'] ?? 'brand') == 'product' ? 'product' : 'brand';
+                $target_id = $applies_to == 'product' ? ($rule['product_id'] ?? null) : ($rule['brand_id'] ?? null);
+                if (empty($target_id)) {
+                    continue;
+                }
+
+                //One rule per brand / product: the last one wins
+                $seen[$applies_to.$target_id] = [
+                    'business_id' => $business_id,
+                    'user_id' => $user->id,
+                    'brand_id' => $applies_to == 'brand' ? $target_id : null,
+                    'product_id' => $applies_to == 'product' ? $target_id : null,
+                    'type' => ($rule['type'] ?? 'percentage') == 'fixed' ? 'fixed' : 'percentage',
+                    'value' => $this->commonUtil->num_uf($rule['value'] ?? 0),
+                ];
+            }
+            $rows = array_values($seen);
+
+            DB::beginTransaction();
+            CommissionAgentRule::where('business_id', $business_id)->where('user_id', $user->id)->delete();
+            foreach ($rows as $row) {
+                CommissionAgentRule::create($row);
+            }
+            DB::commit();
+
+            $output = ['success' => true, 'msg' => count($rows).' commission rule(s) saved'];
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
+
+            $output = ['success' => false, 'msg' => __('messages.something_went_wrong')];
+        }
+
+        return $output;
     }
 
     /**

@@ -361,6 +361,8 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::post('/import-products/store', [ImportProductsController::class, 'store']);
 
     //Sales Commission Agent
+    Route::get('/sales-commission-agents/{id}/rules', [SalesCommissionAgentController::class, 'rules']);
+    Route::post('/sales-commission-agents/{id}/rules', [SalesCommissionAgentController::class, 'saveRules']);
     Route::resource('sales-commission-agents', SalesCommissionAgentController::class);
 
     //Stock Transfer

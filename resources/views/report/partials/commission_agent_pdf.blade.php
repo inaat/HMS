@@ -1,5 +1,5 @@
 @php
-    $commission_of = fn ($r) => $r->net_amount * $r->cmmsn_percent / 100;
+    $commission_of = fn ($r) => $r->commission;
     $date_format = session('business.date_format');
     $period = \Carbon::parse($filters['start_date'])->format($date_format).' ~ '.\Carbon::parse($filters['end_date'])->format($date_format);
     $product_groups = $products->groupBy(fn ($r) => $r->product_id.'_'.$r->sub_sku)->sortByDesc(fn ($rows) => $rows->sum('net_amount'));
@@ -37,7 +37,7 @@
     </tr>
     <tr>
         <th>Invoices</th><td>{{ number_format($agents->sum('invoice_count')) }}</td>
-        <th>Commission %</th><td>{{ $agents->isNotEmpty() ? @num_format($agents->first()->cmmsn_percent) : '0' }}%</td>
+        <th>Commission</th><td>{{ $agents->isNotEmpty() ? @num_format($agents->first()->cmmsn_percent) : '0' }}% @if($agents->isNotEmpty() && $agents->first()->rule_count) (+ brand/product rules below) @endif</td>
     </tr>
     <tr>
         <th>Gross sale</th><td>@format_currency($agents->sum('gross_amount'))</td>
@@ -99,6 +99,7 @@
             <th class="r">Qty sold</th>
             <th class="r">Qty returned</th>
             <th class="r">Net sale</th>
+            <th>Rate</th>
             <th class="r">Commission</th>
         </tr>
         @foreach($product_groups as $rows)
@@ -111,6 +112,7 @@
                 <td class="r">{{ @format_quantity($rows->sum('qty_sold')) }} {{ $first->unit }}</td>
                 <td class="r">{{ @format_quantity($rows->sum('qty_returned')) }}</td>
                 <td class="r">@format_currency($rows->sum('net_amount'))</td>
+                <td>{{ $first->rule_text }}</td>
                 <td class="r">@format_currency($rows->sum($commission_of))</td>
             </tr>
         @endforeach
@@ -119,6 +121,7 @@
             <td class="r">{{ @format_quantity($products->sum('qty_sold')) }}</td>
             <td class="r">{{ @format_quantity($products->sum('qty_returned')) }}</td>
             <td class="r">@format_currency($products->sum('net_amount'))</td>
+            <td></td>
             <td class="r">@format_currency($products->sum($commission_of))</td>
         </tr>
     </table>
@@ -145,7 +148,7 @@
                     <td class="r">{{ @format_quantity($row->qty_sold - $row->qty_returned) }}</td>
                     <td class="r">@format_currency($row->unit_price)</td>
                     <td class="r">@format_currency($row->net_amount)</td>
-                    <td class="r">@format_currency($commission_of($row))</td>
+                    <td class="r">@format_currency($commission_of($row)) <span style="color: #666;">({{ $row->rule_text }})</span></td>
                 </tr>
             @endforeach
             <tr class="sub">

@@ -8,7 +8,7 @@
     $location_name = ! empty($filters['location_id']) ? ($business_locations[$filters['location_id']] ?? '') : '';
     $agent_filter_name = ! empty($filters['commission_agent']) ? trim($commission_agents[$filters['commission_agent']] ?? '') : '';
     $product_name = ! empty($filters['product_id']) ? ($products_dropdown[$filters['product_id']] ?? '') : '';
-    $commission_of = fn ($r) => $r->net_amount * $r->cmmsn_percent / 100;
+    $commission_of = fn ($r) => $r->commission;
     $total_commission = $calculation_type == 'payment_received' ? $agents->sum('payment_commission') : $agents->sum('commission');
     $date_text = \Carbon::parse($filters['start_date'])->format(session('business.date_format')).' ~ '.\Carbon::parse($filters['end_date'])->format(session('business.date_format'));
     //One agent selected: open the full sales detail of that agent
@@ -77,7 +77,7 @@
                 @if($agent_filter_name)
                     <span class="cmmsn-agent-name"><i class="fa fa-user"></i> {{ $agent_filter_name }}</span>
                     @if($agents->isNotEmpty())
-                        <span class="cmmsn-chip">Commission {{ @num_format($agents->first()->cmmsn_percent) }}%</span>
+                        <span class="cmmsn-chip">Commission {{ @num_format($agents->first()->cmmsn_percent) }}%@if($agents->first()->rule_count) + {{ $agents->first()->rule_count }} brand/product rules @endif</span>
                     @endif
                     <button type="button" class="tw-dw-btn tw-dw-btn-sm tw-text-white cmmsn-whatsapp cmmsn-whatsapp-btn no-print" data-agent="{{ $filters['commission_agent'] }}">
                         <i class="fab fa-whatsapp"></i> Send to agent on WhatsApp
@@ -107,7 +107,12 @@
                     <th>Invoices</th>
                     <td>{{ number_format($agents->sum('invoice_count')) }}</td>
                     <th>Commission %</th>
-                    <td>{{ $agent_filter_name && $agents->isNotEmpty() ? @num_format($agents->first()->cmmsn_percent).'%' : 'Per agent' }}</td>
+                    <td>
+                        {{ $agent_filter_name && $agents->isNotEmpty() ? @num_format($agents->first()->cmmsn_percent).'%' : 'Per agent' }}
+                        @if($agent_filter_name && $agents->isNotEmpty() && $agents->first()->rule_count)
+                            (+ {{ $agents->first()->rule_count }} brand/product rules)
+                        @endif
+                    </td>
                 </tr>
                 <tr>
                     <th>Gross sale</th>
@@ -287,7 +292,7 @@
                                     <tr>
                                         <td>{{ $loop->iteration }}</td>
                                         <td><strong>{{ $agent->agent_name }}</strong></td>
-                                        <td class="text-right">{{ @num_format($agent->cmmsn_percent) }}%</td>
+                                        <td class="text-right">{{ @num_format($agent->cmmsn_percent) }}%@if($agent->rule_count)<br><small class="text-muted">+ {{ $agent->rule_count }} rules</small>@endif</td>
                                         <td class="text-right">{{ number_format($agent->invoice_count) }}</td>
                                         <td class="text-right">{{ @format_quantity($agent->qty_sold) }}</td>
                                         <td class="text-right">{{ @format_quantity($agent->qty_returned) }}</td>
@@ -372,7 +377,7 @@
                                             <td class="text-right">{{ $row->qty_returned > 0 ? @format_quantity($row->qty_returned) : '' }}</td>
                                             <td class="text-right">@format_currency($row->unit_price)</td>
                                             <td class="text-right">@format_currency($row->net_amount)</td>
-                                            <td class="text-right">@format_currency($commission_of($row))</td>
+                                            <td class="text-right">@format_currency($commission_of($row))<br><small class="text-muted">{{ $row->rule_text }}</small></td>
                                         </tr>
                                     @endforeach
                                     <tr class="cmmsn-subtotal">
@@ -441,7 +446,7 @@
                                             <td class="text-right">{{ @format_quantity($row->qty_returned) }}</td>
                                             <td class="text-right">@format_currency($net_qty != 0 ? $row->net_amount / $net_qty : 0)</td>
                                             <td class="text-right">@format_currency($row->net_amount)</td>
-                                            <td class="text-right">@format_currency($commission_of($row))</td>
+                                            <td class="text-right">@format_currency($commission_of($row))<br><small class="text-muted">{{ $row->rule_text }}</small></td>
                                         </tr>
                                     @endforeach
                                     @if($product_rows->count() > 1)

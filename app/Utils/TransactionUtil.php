@@ -4475,6 +4475,8 @@ class TransactionUtil extends Util
                         't.transaction_date',
                         'ct.name as customer',
                         'ct.supplier_business_name',
+                        'p.id as product_id',
+                        'b.id as brand_id',
                         'p.name as product',
                         'p.type as product_type',
                         'v.name as variation',

@@ -1423,18 +1423,44 @@ class ReportController extends Controller
         $invoices = $details['invoices'];
         $lines = $details['lines'];
 
+        //Commission of each product row and sale line: product rule, else brand rule, else agent %
+        $rules = \App\CommissionAgentRule::forAgents($business_id, $products->pluck('agent_id')->unique()->all());
+        $apply_rule = function ($row) use ($rules) {
+            $rule = $rules[$row->agent_id]['p'.$row->product_id] ?? $rules[$row->agent_id]['b'.$row->brand_id] ?? null;
+            $net_qty = $row->qty_sold - $row->qty_returned;
+            if (empty($rule)) {
+                $row->commission = $row->net_amount * (float) $row->cmmsn_percent / 100;
+                $row->rule_text = $this->transactionUtil->num_f($row->cmmsn_percent).'%';
+            } elseif ($rule->type == 'fixed') {
+                $row->commission = $net_qty * $rule->value;
+                $row->rule_text = $this->transactionUtil->num_f($rule->value).'/unit';
+            } else {
+                $row->commission = $row->net_amount * $rule->value / 100;
+                $row->rule_text = $this->transactionUtil->num_f($rule->value).'%';
+            }
+        };
+        $products->each($apply_rule);
+        $lines->each($apply_rule);
+
+        $line_commission = $lines->groupBy('transaction_id')->map->sum('commission');
+        foreach ($invoices as $invoice) {
+            $invoice->commission = $line_commission[$invoice->transaction_id] ?? 0;
+        }
+        $rule_counts = collect($rules)->map(fn ($r) => count($r));
+
         $commission = function ($row) {
-            return $row->net_amount * (float) $row->cmmsn_percent / 100;
+            return $row->commission;
         };
 
         //Agent wise summary
-        $agents = $products->groupBy('agent_id')->map(function ($rows) use ($invoices, $commission) {
+        $agents = $products->groupBy('agent_id')->map(function ($rows) use ($invoices, $commission, $rule_counts) {
             $first = $rows->first();
 
             return (object) [
                 'agent_id' => $first->agent_id,
                 'agent_name' => $first->agent_name,
                 'cmmsn_percent' => (float) $first->cmmsn_percent,
+                'rule_count' => $rule_counts[$first->agent_id] ?? 0,
                 'invoice_count' => $invoices->where('agent_id', $first->agent_id)->count(),
                 'qty_sold' => $rows->sum('qty_sold'),
                 'qty_returned' => $rows->sum('qty_returned'),
@@ -1471,7 +1497,9 @@ class ReportController extends Controller
             foreach ($agents as $agent) {
                 $payment = $this->transactionUtil->getTotalPaymentWithCommission($business_id, $filters['start_date'], $filters['end_date'], $filters['location_id'] ?? null, $agent->agent_id);
                 $agent->payment_received = (float) ($payment['total_payment_with_commission'] ?? 0);
-                $agent->payment_commission = $agent->payment_received * $agent->cmmsn_percent / 100;
+                //Same effective rate as on the sales, so brand / product rules count here too
+                $rate = $agent->net_amount != 0 ? $agent->commission / $agent->net_amount : $agent->cmmsn_percent / 100;
+                $agent->payment_commission = $agent->payment_received * $rate;
             }
         }
         $total_commission = $calculation_type == 'payment_received' ? $agents->sum('payment_commission') : $agents->sum('commission');
