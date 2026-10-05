@@ -5859,6 +5859,19 @@ class TransactionUtil extends Util
 
         $paymentTypes = $this->payment_types(null, true, $business_id);
 
+        //Sell returns refunded through a Payment Out (paid by its child payments), keyed by payment id
+        $refunded_returns = [];
+        if (! empty($payments) && $payments->isNotEmpty()) {
+            $refunded_returns = TransactionPayment::join('transactions as rt', 'transaction_payments.transaction_id', '=', 'rt.id')
+                                ->whereIn('transaction_payments.parent_id', $payments->where('payment_type', 'debit')->pluck('id'))
+                                ->where('rt.type', 'sell_return')
+                                ->select('transaction_payments.parent_id', 'rt.invoice_no')
+                                ->get()
+                                ->groupBy('parent_id')
+                                ->map(fn ($rows) => $rows->pluck('invoice_no')->unique()->implode(', '))
+                                ->all();
+        }
+
         $total_reverse_payment = 0;
 
         foreach ($payments as $payment) {
@@ -5891,6 +5904,10 @@ class TransactionUtil extends Util
             if ($payment->is_return == 1) {
                 $note .= '<small>('.__('lang_v1.change_return').')</small>';
             }
+
+            if (! empty($refunded_returns[$payment->id])) {
+                $note .= ' <span class="label bg-orange" style="display: inline-block; white-space: normal;">Return refund: '.e($refunded_returns[$payment->id]).'</span>';
+            }
             $ddd=$transaction_types['payment'];
            if($payment->payment_type == "credit"){
               $ddd=$transaction_types['payment'].' In';
@@ -5906,8 +5923,10 @@ class TransactionUtil extends Util
                 'total' => '',
                 'payment_method' => ! empty($paymentTypes[$payment->method]) ? $paymentTypes[$payment->method] : '',
                 'payment_method_key' => $payment->method,
-                'debit' => in_array($payment->transaction_type, ['purchase', 'sell_return']) || ($payment->is_advance == 1 && $contact->type == 'supplier') || (in_array($payment->transaction_type, ['sell', 'purchase_return', 'opening_balance']) && $payment->is_return == 1) || $payment->payment_type == 'debit' ? $payment->amount : '',
-                'credit' => (in_array($payment->transaction_type, ['sell', 'purchase_return', 'opening_balance']) || ($payment->is_advance == 1 && in_array($contact->type, ['customer']))) && $payment->is_return == 0 || $payment->payment_type == 'credit' ? $payment->amount : '',
+                //An explicit Payment In / Out decides the side: e.g. cash refunded to a customer for a sell
+                //return is an advance-type 'debit' payment and must not also be counted as a credit
+                'debit' => $payment->payment_type == 'debit' || ($payment->payment_type != 'credit' && (in_array($payment->transaction_type, ['purchase', 'sell_return']) || ($payment->is_advance == 1 && $contact->type == 'supplier') || (in_array($payment->transaction_type, ['sell', 'purchase_return', 'opening_balance']) && $payment->is_return == 1))) ? $payment->amount : '',
+                'credit' => $payment->payment_type == 'credit' || ($payment->payment_type != 'debit' && (in_array($payment->transaction_type, ['sell', 'purchase_return', 'opening_balance']) || ($payment->is_advance == 1 && in_array($contact->type, ['customer']))) && $payment->is_return == 0) ? $payment->amount : '',
                 'others' => $note,
             ];
         }
