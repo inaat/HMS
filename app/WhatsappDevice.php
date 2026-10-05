@@ -45,11 +45,13 @@ class WhatsappDevice extends Model
         return $device;
     }
 
-    public static function createFor($business_id, $name): self
+    public static function createFor($business_id, $name, $instance = null): self
     {
         return static::create([
             'business_id' => $business_id,
-            'instance' => 'pos_'.$business_id.'_'.Str::lower(Str::random(8)),
+            // random by default so two devices, or two apps on the same gateway,
+            // never share one WhatsApp session by accident
+            'instance' => $instance ?: 'pos_'.$business_id.'_'.Str::lower(Str::random(8)),
             'name' => $name,
             'is_default' => ! static::where('business_id', $business_id)->exists(),
         ]);

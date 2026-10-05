@@ -10,6 +10,14 @@
 
 <!-- Main content -->
 <section class="content">
+    @if($errors->any())
+        <div class="alert alert-danger">
+            @foreach($errors->all() as $error)
+                <div>{{ $error }}</div>
+            @endforeach
+        </div>
+    @endif
+
     @component('components.widget', ['class' => 'box-primary', 'title' => 'Devices'])
         @slot('tool')
             <div class="box-tools">
@@ -56,7 +64,7 @@
                                 <button type="button" class="btn btn-xs btn-success wa-connect" data-id="{{ $device->id }}" data-name="{{ $device->name }}">
                                     <i class="fas fa-qrcode"></i> Connect
                                 </button>
-                                <button type="button" class="btn btn-xs btn-primary wa-edit" data-id="{{ $device->id }}" data-name="{{ $device->name }}">
+                                <button type="button" class="btn btn-xs btn-primary wa-edit" data-id="{{ $device->id }}" data-name="{{ $device->name }}" data-instance="{{ $device->instance }}">
                                     <i class="glyphicon glyphicon-edit"></i> @lang('messages.edit')
                                 </button>
                                 {!! Form::open(['url' => action([\App\Http\Controllers\WhatsappController::class, 'destroy'], [$device->id]), 'method' => 'post', 'class' => 'wa-delete-form', 'style' => 'display: inline;']) !!}
@@ -88,6 +96,11 @@
                         {!! Form::label('name', 'Name:') !!}
                         {!! Form::text('name', null, ['class' => 'form-control', 'required', 'maxlength' => 191, 'placeholder' => 'e.g. Shop phone 2']) !!}
                     </div>
+                    <div class="form-group">
+                        {!! Form::label('instance', 'Gateway key:') !!}
+                        {!! Form::text('instance', null, ['class' => 'form-control', 'maxlength' => 191, 'pattern' => '[A-Za-z0-9_\-]+', 'placeholder' => 'Leave blank to generate one']) !!}
+                        <p class="help-block">Letters, numbers, <code>-</code> and <code>_</code> only. Enter an existing key (e.g. <code>Fine</code>) to reuse a session that is already linked on the gateway.</p>
+                    </div>
                     <p class="text-muted"><small>After saving, press <b>Connect</b> on the new row and scan the QR code with that phone.</small></p>
                 </div>
                 <div class="modal-footer">
@@ -112,6 +125,11 @@
                     <div class="form-group">
                         {!! Form::label('wa_edit_name', 'Name:') !!}
                         {!! Form::text('name', null, ['class' => 'form-control', 'required', 'maxlength' => 191, 'id' => 'wa_edit_name']) !!}
+                    </div>
+                    <div class="form-group">
+                        {!! Form::label('wa_edit_instance', 'Gateway key:') !!}
+                        {!! Form::text('instance', null, ['class' => 'form-control', 'required', 'maxlength' => 191, 'pattern' => '[A-Za-z0-9_\-]+', 'id' => 'wa_edit_instance']) !!}
+                        <p class="help-block">Changing the key switches this device to a different gateway session; press <b>Connect</b> afterwards to check it or scan a new QR code.</p>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -253,6 +271,7 @@
         $('.wa-edit').click(function () {
             $('#wa_edit_form').attr('action', wa_update_url.replace('__ID__', $(this).data('id')));
             $('#wa_edit_name').val($(this).data('name'));
+            $('#wa_edit_instance').val($(this).data('instance'));
             $('#wa_edit_modal').modal('show');
         });
 

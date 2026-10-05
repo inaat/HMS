@@ -37,9 +37,12 @@ class WhatsappController extends Controller
             abort(403, 'Unauthorized action.');
         }
 
-        $request->validate(['name' => 'required|string|max:191']);
+        $request->validate([
+            'name' => 'required|string|max:191',
+            'instance' => 'nullable|alpha_dash|max:191|unique:whatsapp_devices,instance',
+        ]);
 
-        WhatsappDevice::createFor($request->session()->get('user.business_id'), $request->input('name'));
+        WhatsappDevice::createFor($request->session()->get('user.business_id'), $request->input('name'), $request->input('instance'));
 
         return redirect()->back()->with('status', ['success' => 1, 'msg' => __('lang_v1.added_success')]);
     }
@@ -50,9 +53,20 @@ class WhatsappController extends Controller
             abort(403, 'Unauthorized action.');
         }
 
-        $request->validate(['name' => 'required|string|max:191']);
+        $device = $this->device($request, $id);
 
-        $this->device($request, $id)->update($request->only(['name']));
+        $request->validate([
+            'name' => 'required|string|max:191',
+            'instance' => 'required|alpha_dash|max:191|unique:whatsapp_devices,instance,'.$device->id,
+        ]);
+
+        $data = $request->only(['name', 'instance']);
+        // a different key is a different gateway session: its phone and status are unknown
+        if ($data['instance'] != $device->instance) {
+            $data['status'] = 'initiate';
+            $data['number'] = null;
+        }
+        $device->update($data);
 
         return redirect()->back()->with('status', ['success' => 1, 'msg' => __('lang_v1.updated_success')]);
     }
