@@ -56,6 +56,12 @@
     {{-- filters --}}
     @component('components.filters', ['title' => __('report.filters')])
         <form method="GET" action="{{ action([\App\Http\Controllers\DefaulterController::class, 'index']) }}">
+            <div class="col-md-12">
+                <div class="form-group">
+                    <label for="search">Search customer</label>
+                    <input type="text" name="search" id="search" class="form-control" value="{{ $search }}" placeholder="Name, business name, mobile or contact ID">
+                </div>
+            </div>
             <div class="col-md-3">
                 <div class="form-group">
                     <label for="limit">Show</label>

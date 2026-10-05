@@ -3634,7 +3634,12 @@ class TransactionUtil extends Util
                 if ($excess <= 0) {
                     break;
                 }
-                $move = min($excess, $mapping->quantity);
+                //Returned quantity is no longer sold from this purchase line, only the rest can be moved
+                $net_qty = $mapping->quantity - $mapping->qty_returned;
+                if ($net_qty <= 0) {
+                    continue;
+                }
+                $move = min($excess, $net_qty);
                 if ($move == $mapping->quantity) {
                     $mapping->purchase_line_id = 0;
                     $mapping->save();
@@ -3695,12 +3700,13 @@ class TransactionUtil extends Util
         //quantity_sold must equal what is really linked to the purchase line
         $mismatched = PurchaseLine::join('transactions as t', 't.id', '=', 'purchase_lines.transaction_id')
             ->when(! empty($business_id), fn ($q) => $q->where('t.business_id', $business_id))
-            ->whereRaw('ABS(purchase_lines.quantity_sold - (SELECT COALESCE(SUM(x.quantity), 0) FROM transaction_sell_lines_purchase_lines x WHERE x.purchase_line_id = purchase_lines.id AND x.sell_line_id IS NOT NULL)) > 0.0001')
+            ->whereRaw('ABS(purchase_lines.quantity_sold - (SELECT COALESCE(SUM(x.quantity - x.qty_returned), 0) FROM transaction_sell_lines_purchase_lines x WHERE x.purchase_line_id = purchase_lines.id AND x.sell_line_id IS NOT NULL)) > 0.0001')
             ->pluck('purchase_lines.id')->all();
         $affected_purchase_lines = array_values(array_filter(array_unique(array_merge($affected_purchase_lines, $mismatched))));
         foreach ($affected_purchase_lines as $purchase_line_id) {
+            //Sell returns lower quantity_sold (see updateQuantitySoldFromSellLine), so returned qty is not sold
             $linked = TransactionSellLinesPurchaseLines::where('purchase_line_id', $purchase_line_id)
-                ->whereNotNull('sell_line_id')->sum('quantity');
+                ->whereNotNull('sell_line_id')->sum(DB::raw('quantity - qty_returned'));
             PurchaseLine::where('id', $purchase_line_id)->update(['quantity_sold' => $linked]);
         }
 
@@ -3848,7 +3854,7 @@ class TransactionUtil extends Util
                 'purchase_lines.quantity',
                 'purchase_lines.quantity_sold',
                 DB::raw('(purchase_lines.quantity - purchase_lines.quantity_adjusted - purchase_lines.quantity_returned - COALESCE(purchase_lines.mfg_quantity_used, 0)) as available_qty'),
-                DB::raw('(SELECT COALESCE(SUM(x.quantity), 0) FROM transaction_sell_lines_purchase_lines x WHERE x.purchase_line_id = purchase_lines.id AND x.sell_line_id IS NOT NULL) as linked_qty')
+                DB::raw('(SELECT COALESCE(SUM(x.quantity - x.qty_returned), 0) FROM transaction_sell_lines_purchase_lines x WHERE x.purchase_line_id = purchase_lines.id AND x.sell_line_id IS NOT NULL) as linked_qty')
             )
             ->havingRaw('linked_qty > 0 AND linked_qty > available_qty + 0.0001')
             ->orderBy('t.transaction_date')

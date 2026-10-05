@@ -39,8 +39,9 @@ class DefaulterController extends Controller
         $limit = (int) $request->input('limit', 25);
         $min_due = (float) $request->input('min_due', 0);
         $inactive_days = (int) $request->input('inactive_days', 0);
+        $search = trim((string) $request->input('search', ''));
 
-        $all = $this->defaulters($business_id, $min_due, $inactive_days);
+        $all = $this->defaulters($business_id, $min_due, $inactive_days, [], $search);
 
         // counters over every defaulter matching the filters, not just the shown top N
         $today = \Carbon::today();
@@ -58,7 +59,7 @@ class DefaulterController extends Controller
 
         $default_message = "Dear {name},\n\nThis is a reminder that your outstanding balance is {due}.\nLast purchase: {last_sale}.\n\nPlease clear your dues at your earliest convenience.\n\n{business}";
 
-        return view('defaulter.index')->with(compact('defaulters', 'counters', 'limit', 'min_due', 'inactive_days', 'default_message'));
+        return view('defaulter.index')->with(compact('defaulters', 'counters', 'limit', 'min_due', 'inactive_days', 'search', 'default_message'));
     }
 
     /**
@@ -112,11 +113,21 @@ class DefaulterController extends Controller
     /**
      * Customers with a positive due, biggest first.
      */
-    protected function defaulters($business_id, $min_due = 0, $inactive_days = 0, $contact_ids = [])
+    protected function defaulters($business_id, $min_due = 0, $inactive_days = 0, $contact_ids = [], $search = null)
     {
         $query = $this->contactUtil->getContactQuery($business_id, 'customer', $contact_ids)
             ->havingRaw('for_ordering_total_due > ?', [max($min_due, 0.009)])
             ->orderByDesc('for_ordering_total_due');
+
+        //Customer search: name, business name, mobile or contact ID
+        if (! empty($search)) {
+            $query->where(function ($q) use ($search) {
+                $q->where('contacts.name', 'like', '%'.$search.'%')
+                    ->orWhere('contacts.supplier_business_name', 'like', '%'.$search.'%')
+                    ->orWhere('contacts.mobile', 'like', '%'.$search.'%')
+                    ->orWhere('contacts.contact_id', 'like', '%'.$search.'%');
+            });
+        }
 
         if ($inactive_days > 0) {
             $query->havingRaw('(max_transaction_date IS NULL OR max_transaction_date < ?)', [\Carbon::today()->subDays($inactive_days)->format('Y-m-d')]);
