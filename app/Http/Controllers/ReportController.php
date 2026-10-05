@@ -119,6 +119,72 @@ class ReportController extends Controller
     }
 
     /**
+     * Stock link check: sell lines whose quantity does not match transaction_sell_lines_purchase_lines
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function stockLinkCheck(Request $request)
+    {
+        if (! auth()->user()->can('profit_loss_report.view') && ! auth()->user()->can('stock_report.view')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+        $issues = $this->transactionUtil->getSellPurchaseMappingIssues($business_id);
+        $overlinked = $this->transactionUtil->getOverlinkedPurchaseLines($business_id);
+        $stock_mismatches = $this->transactionUtil->getStockMismatches($business_id);
+        $can_repair = auth()->user()->can('purchase.update');
+
+        return view('report.stock_link_check', compact('issues', 'overlinked', 'stock_mismatches', 'can_repair'));
+    }
+
+    /**
+     * Repairs the mismatches shown by stockLinkCheck()
+     *
+     * @return array
+     */
+    public function repairStockLinks(Request $request)
+    {
+        if (! auth()->user()->can('purchase.update')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+
+        //Automatic backup of the two tables the repair changes (CREATE TABLE commits, so before the transaction)
+        $suffix = date('Ymd_His');
+        $backups = [
+            'transaction_sell_lines_purchase_lines' => 'bak_tspl_'.$suffix,
+            'purchase_lines' => 'bak_purchase_lines_'.$suffix,
+            'variation_location_details' => 'bak_vld_'.$suffix,
+        ];
+        try {
+            foreach ($backups as $table => $backup) {
+                DB::statement("CREATE TABLE `{$backup}` AS SELECT * FROM `{$table}`");
+            }
+        } catch (\Exception $e) {
+            \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
+
+            return ['success' => false, 'msg' => 'Backup failed, nothing was changed'];
+        }
+
+        try {
+            DB::beginTransaction();
+            $summary = $this->transactionUtil->repairSellPurchaseMapping($business_id);
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
+
+            return ['success' => false, 'msg' => __('messages.something_went_wrong')];
+        }
+
+        \Log::info('Stock links repaired', ['business_id' => $business_id, 'user_id' => auth()->id(), 'backup_tables' => array_values($backups)] + $summary);
+
+        return ['success' => true, 'msg' => $summary['sell_lines_repaired'].' sell line(s), '.$summary['overlinked_purchase_lines'].' purchase line(s) and '.$summary['stock_corrected'].' stock row(s) repaired. Backup: '.implode(', ', $backups)];
+    }
+
+    /**
      * Shows product report of a business
      *
      * @return \Illuminate\Http\Response

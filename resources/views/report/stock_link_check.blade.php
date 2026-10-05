@@ -1,0 +1,178 @@
+@extends('layouts.app')
+@section('title', 'Stock link check')
+
+@section('content')
+    <section class="content-header">
+        <h1 class="tw-text-xl md:tw-text-3xl tw-font-bold tw-text-black">Stock link check
+            <small>Sell lines vs purchase links</small>
+        </h1>
+    </section>
+
+    <section class="content">
+        @component('components.widget')
+            @php
+                $extra = $issues->filter(fn ($i) => $i->linked_qty > $i->quantity);
+            @endphp
+            @if($can_repair && ($extra->isNotEmpty() || $overlinked->isNotEmpty() || $stock_mismatches->isNotEmpty()))
+                <button type="button" class="tw-dw-btn tw-dw-btn-warning tw-text-white tw-dw-btn-sm" id="repair_stock_links" style="margin-bottom: 10px;">
+                    <i class="fa fa-wrench"></i> Repair
+                </button>
+            @endif
+
+            @if($stock_mismatches->isNotEmpty())
+                <h4>Stock does not match purchases &minus; sales ({{ $stock_mismatches->count() }})</h4>
+                <p class="text-muted">"In stock" is what POS shows. When it is higher than the real stock, selling fails with
+                    "Mismatch between sold and purchase quantity". Repair sets it to the real stock.</p>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-striped">
+                        <thead>
+                            <tr>
+                                <th>Product</th>
+                                <th>SKU</th>
+                                <th>Location</th>
+                                <th>In stock (shown in POS)</th>
+                                <th>Real stock (purchases &minus; sales &minus; adjustments)</th>
+                                <th>Difference</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($stock_mismatches as $row)
+                                <tr>
+                                    <td>{{ $row->product }}</td>
+                                    <td>{{ $row->sub_sku }}</td>
+                                    <td>{{ $row->location }}</td>
+                                    <td>{{ @format_quantity($row->qty_available) }} {{ $row->unit }}</td>
+                                    <td>{{ @format_quantity($row->calculated_qty) }} {{ $row->unit }}</td>
+                                    <td class="text-danger">{{ $row->qty_available > $row->calculated_qty ? '+' : '' }}{{ @format_quantity($row->qty_available - $row->calculated_qty) }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endif
+
+            @if($overlinked->isNotEmpty())
+                <h4>Purchase lines linked to more than they contain ({{ $overlinked->count() }})</h4>
+                <p class="text-muted">Sales were linked to these purchases beyond their quantity. Repair moves the extra to "sold without stock"
+                    and links it again to any purchase that still has free stock.</p>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-striped">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Purchase</th>
+                                <th>Product</th>
+                                <th>Purchased</th>
+                                <th>Linked to sales</th>
+                                <th>Extra</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($overlinked as $line)
+                                <tr>
+                                    <td>{{ @format_datetime($line->transaction_date) }}</td>
+                                    <td>{{ $line->type == 'purchase' ? $line->ref_no : ucfirst(str_replace('_', ' ', $line->type)) }}</td>
+                                    <td>{{ $line->product }}</td>
+                                    <td>{{ @format_quantity($line->available_qty) }} {{ $line->unit }}</td>
+                                    <td>{{ @format_quantity($line->linked_qty) }} {{ $line->unit }}</td>
+                                    <td class="text-danger">+{{ @format_quantity($line->linked_qty - $line->available_qty) }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endif
+
+            @if($issues->isEmpty())
+                <div class="alert alert-success" style="margin: 0;">
+                    <i class="fa fa-check-circle"></i> All sell lines match their purchase links.
+                </div>
+            @else
+                <div class="alert alert-warning">
+                    <h4 style="margin-top: 0;"><i class="fa fa-exclamation-triangle"></i>
+                        {{ $issues->count() }} sell line(s) do not match their purchase links
+                    </h4>
+                    Each sold quantity should be linked once to the purchase it came from. These lines are linked to more
+                    (or less) than they sold, mostly duplicate links created when an invoice was edited. This makes purchase
+                    stock look used up and cost / profit wrong.
+                    @if($extra->isNotEmpty())
+                        <br><strong>Repair</strong> removes the extra linked quantity, recalculates the purchase lines and links
+                        freed stock to sales that were sold without stock. Invoices and stock quantities are not changed.
+                    @endif
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-bordered table-striped">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Invoice</th>
+                                <th>Product</th>
+                                <th>Sold</th>
+                                <th>Linked</th>
+                                <th>Difference</th>
+                                <th>Link rows</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($issues as $issue)
+                                <tr>
+                                    <td>{{ @format_datetime($issue->transaction_date) }}</td>
+                                    <td>
+                                        <a href="#" class="btn-modal" data-href="{{ action([\App\Http\Controllers\SellController::class, 'show'], [$issue->transaction_id]) }}" data-container=".view_modal">{{ $issue->invoice_no }}</a>
+                                    </td>
+                                    <td>{{ $issue->product }}</td>
+                                    <td>{{ @format_quantity($issue->quantity) }} {{ $issue->unit }}</td>
+                                    <td>{{ @format_quantity($issue->linked_qty) }} {{ $issue->unit }}</td>
+                                    <td class="{{ $issue->linked_qty > $issue->quantity ? 'text-danger' : 'text-warning' }}">
+                                        {{ $issue->linked_qty > $issue->quantity ? '+' : '' }}{{ @format_quantity($issue->linked_qty - $issue->quantity) }}
+                                    </td>
+                                    <td>{{ $issue->link_rows }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endif
+        @endcomponent
+    </section>
+    <div class="modal fade view_modal" tabindex="-1" role="dialog"></div>
+@endsection
+
+@section('javascript')
+<script type="text/javascript">
+    $('#repair_stock_links').click(function() {
+        var btn = $(this);
+        swal({
+            title: LANG.sure,
+            text: 'A backup is made automatically, then links and stock are repaired. Continue?',
+            icon: 'warning',
+            buttons: true,
+            dangerMode: true,
+        }).then(function(ok) {
+            if (!ok) {
+                return;
+            }
+            btn.prop('disabled', true);
+            $.ajax({
+                method: 'POST',
+                url: '/reports/stock-link-check/repair',
+                dataType: 'json',
+                data: { _token: '{{ csrf_token() }}' },
+                success: function(result) {
+                    if (result.success) {
+                        toastr.success(result.msg);
+                        setTimeout(function() { location.reload(); }, 1200);
+                    } else {
+                        btn.prop('disabled', false);
+                        toastr.error(result.msg);
+                    }
+                },
+                error: function() {
+                    btn.prop('disabled', false);
+                }
+            });
+        });
+    });
+</script>
+@endsection

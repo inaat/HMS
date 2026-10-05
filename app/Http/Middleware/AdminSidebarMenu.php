@@ -623,7 +623,13 @@ class AdminSidebarMenu
                                 ['icon' => '', 'active' => request()->segment(2) == 'profit-loss']
                             );
                         }
-                        if (config('constants.show_report_606') == true) {
+                        if (auth()->user()->can('profit_loss_report.view') || auth()->user()->can('stock_report.view')) {
+                            $sub->url(
+                                action([\App\Http\Controllers\ReportController::class, 'stockLinkCheck']),
+                                'Stock link check',
+                                ['icon' => '', 'active' => request()->segment(2) == 'stock-link-check']
+                            );
+                        }                        if (config('constants.show_report_606') == true) {
                             $sub->url(
                                 action([\App\Http\Controllers\ReportController::class, 'purchaseReport']),
                                 'Report 606 (' . __('lang_v1.purchase') . ')',

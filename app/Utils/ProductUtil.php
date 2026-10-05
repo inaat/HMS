@@ -886,7 +886,9 @@ class ProductUtil extends Util
         if ($status_before == 'final' && $transaction->status == 'draft') {
             foreach ($input['products'] as $product) {
                 if (! empty($product['transaction_sell_lines_id'])) {
-                    $this->updateProductQuantity($input['location_id'], $product['product_id'], $product['variation_id'], $product['quantity'], 0, null, false);
+                    //Quantity in input is in the selected (sub) unit; stock is kept in the base unit
+                    $base_quantity = $this->num_uf($product['quantity']) * (! empty($product['base_unit_multiplier']) ? $product['base_unit_multiplier'] : 1);
+                    $this->updateProductQuantity($input['location_id'], $product['product_id'], $product['variation_id'], $base_quantity, 0, null, false);
 
                     //Adjust quantity for combo items.
                     if (isset($product['product_type']) && $product['product_type'] == 'combo') {
@@ -902,6 +904,10 @@ class ProductUtil extends Util
         } elseif ($status_before == 'draft' && $transaction->status == 'final') {
             foreach ($input['products'] as $product) {
                 $uf_quantity = $uf_data ? $this->num_uf($product['quantity']) : $product['quantity'];
+                //Same as on create: quantity is in the selected (sub) unit, stock is in the base unit
+                if (! empty($product['base_unit_multiplier'])) {
+                    $uf_quantity = $uf_quantity * $product['base_unit_multiplier'];
+                }
 
                 $this->decreaseProductQuantity(
                     $product['product_id'],
@@ -921,6 +927,10 @@ class ProductUtil extends Util
             foreach ($input['products'] as $product) {
                 if (empty($product['transaction_sell_lines_id'])) {
                     $uf_quantity = $uf_data ? $this->num_uf($product['quantity']) : $product['quantity'];
+                    //Same as on create: quantity is in the selected (sub) unit, stock is in the base unit
+                    if (! empty($product['base_unit_multiplier'])) {
+                        $uf_quantity = $uf_quantity * $product['base_unit_multiplier'];
+                    }
                     $this->decreaseProductQuantity(
                         $product['product_id'],
                         $product['variation_id'],
@@ -1551,7 +1561,8 @@ class ProductUtil extends Util
                 ->where('t.location_id', $transaction->location_id)
                 ->where('tsl.variation_id', $purchase_line->variation_id)
                 ->where('tsl.product_id', $purchase_line->product_id)
-
+                ->orderBy('t.transaction_date')
+                ->orderBy('transaction_sell_lines_purchase_lines.id')
                 ->select('transaction_sell_lines_purchase_lines.*')
                 ->get();
 

@@ -33,6 +33,11 @@ use App\CashRegister;
 class TransactionUtil extends Util
 {
     /**
+     * Cost of goods sold computed by the last getGrossProfit() call
+     */
+    public $last_cogs = 0;
+
+    /**
      * Add Sell transaction
      *
      * @param  int  $business_id
@@ -2588,7 +2593,7 @@ class TransactionUtil extends Util
         return $output;
     }
 
-    public function getTotalLedgerDiscount($business_id, $start_date = null, $end_date = null)
+    public function getTotalLedgerDiscount($business_id, $start_date = null, $end_date = null, $location_id = null, $created_by = null, $permitted_locations = null)
     {
         $query = Transaction::where('transactions.business_id', $business_id)
                     ->where('transactions.type', 'ledger_discount')
@@ -2605,6 +2610,16 @@ class TransactionUtil extends Util
 
         if (empty($start_date) && ! empty($end_date)) {
             $query->whereDate('transactions.transaction_date', '<=', $end_date);
+        }
+
+        if (! empty($permitted_locations) && $permitted_locations != 'all') {
+            $query->whereIn('transactions.location_id', $permitted_locations);
+        }
+        if (! empty($location_id)) {
+            $query->where('transactions.location_id', $location_id);
+        }
+        if (! empty($created_by)) {
+            $query->where('transactions.created_by', $created_by);
         }
 
         $sell_details = $query->first();
@@ -3500,11 +3515,13 @@ class TransactionUtil extends Util
                 if (empty($line->slpl_id)) {
                     $new_sell_lines[] = $line;
                 } else {
-                    //Skip if already processed.
-                    if (in_array($line->slpl_id, $processed_sell_lines)) {
+                    //Skip if already processed. The query returns one row per mapping, so a sell line
+                    //linked to several purchase lines appears several times; check it only once,
+                    //otherwise an increased quantity gets mapped once per existing mapping (duplicates).
+                    if (in_array($line->id, $processed_sell_lines)) {
                         continue;
                     }
-                    $processed_sell_lines[] = $line->slpl_id;
+                    $processed_sell_lines[] = $line->id;
 
                     $total_sold_entry = TransactionSellLinesPurchaseLines::where('sell_line_id', $line->id)
                         ->select(DB::raw('SUM(quantity) AS quantity'))
@@ -3533,6 +3550,228 @@ class TransactionUtil extends Util
     }
 
     /**
+     * Sell lines whose quantity does not match the quantity linked in transaction_sell_lines_purchase_lines
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    public function getSellPurchaseMappingIssues($business_id)
+    {
+        return TransactionSellLine::join('transactions as t', 't.id', '=', 'transaction_sell_lines.transaction_id')
+            ->join('products as p', 'p.id', '=', 'transaction_sell_lines.product_id')
+            ->leftJoin('units as u', 'u.id', '=', 'p.unit_id')
+            ->where('t.business_id', $business_id)
+            ->where('t.type', 'sell')
+            ->where('t.status', 'final')
+            ->where('p.enable_stock', 1)
+            ->where('p.type', '!=', 'combo')
+            ->select(
+                'transaction_sell_lines.id',
+                't.id as transaction_id',
+                't.invoice_no',
+                't.transaction_date',
+                'p.name as product',
+                'u.short_name as unit',
+                'transaction_sell_lines.quantity',
+                DB::raw('(SELECT COALESCE(SUM(x.quantity), 0) FROM transaction_sell_lines_purchase_lines x WHERE x.sell_line_id = transaction_sell_lines.id) as linked_qty'),
+                DB::raw('(SELECT COUNT(*) FROM transaction_sell_lines_purchase_lines x WHERE x.sell_line_id = transaction_sell_lines.id) as link_rows')
+            )
+            ->havingRaw('ABS(linked_qty - transaction_sell_lines.quantity) > 0.0001')
+            ->orderBy('t.transaction_date')
+            ->get();
+    }
+
+    /**
+     * Repairs transaction_sell_lines_purchase_lines where a sell line is linked to more quantity than it
+     * sold (duplicate mapping rows created by the old invoice-edit bug). The extra quantity is removed from
+     * the newest mapping rows, purchase_lines.quantity_sold is recalculated from the real links and freed
+     * purchase quantity is linked to sales that were sold without stock.
+     *
+     * @return array summary
+     */
+    public function repairSellPurchaseMapping($business_id = null)
+    {
+        $lines = TransactionSellLine::join('transactions as t', 't.id', '=', 'transaction_sell_lines.transaction_id')
+            ->where('t.type', 'sell')
+            ->where('t.status', 'final')
+            ->when(! empty($business_id), fn ($q) => $q->where('t.business_id', $business_id))
+            ->whereRaw('(SELECT COALESCE(SUM(x.quantity), 0) FROM transaction_sell_lines_purchase_lines x WHERE x.sell_line_id = transaction_sell_lines.id) > transaction_sell_lines.quantity')
+            ->select('transaction_sell_lines.id', 'transaction_sell_lines.quantity')
+            ->get();
+
+        $affected_purchase_lines = [];
+        $removed_qty = 0;
+        foreach ($lines as $line) {
+            $mappings = TransactionSellLinesPurchaseLines::where('sell_line_id', $line->id)->orderBy('id', 'desc')->get();
+            $excess = $mappings->sum('quantity') - $line->quantity;
+            $removed_qty += $excess;
+
+            foreach ($mappings as $mapping) {
+                if ($excess <= 0) {
+                    break;
+                }
+                $affected_purchase_lines[] = $mapping->purchase_line_id;
+                if ($mapping->quantity > $excess) {
+                    $mapping->quantity -= $excess;
+                    $mapping->qty_returned = min($mapping->qty_returned, $mapping->quantity);
+                    $mapping->save();
+                    $excess = 0;
+                } else {
+                    $excess -= $mapping->quantity;
+                    $mapping->delete();
+                }
+            }
+        }
+
+        //Purchase lines linked to more than they contain: move the extra (newest sales first) to line 0
+        $moved_to_line0 = 0;
+        $overlinked = $this->getOverlinkedPurchaseLines($business_id);
+        foreach ($overlinked as $purchase_line) {
+            $excess = $purchase_line->linked_qty - $purchase_line->available_qty;
+            $affected_purchase_lines[] = $purchase_line->id;
+            $mappings = TransactionSellLinesPurchaseLines::where('purchase_line_id', $purchase_line->id)
+                ->whereNotNull('sell_line_id')->orderBy('id', 'desc')->get();
+            foreach ($mappings as $mapping) {
+                if ($excess <= 0) {
+                    break;
+                }
+                $move = min($excess, $mapping->quantity);
+                if ($move == $mapping->quantity) {
+                    $mapping->purchase_line_id = 0;
+                    $mapping->save();
+                } else {
+                    $mapping->quantity -= $move;
+                    $mapping->save();
+                    TransactionSellLinesPurchaseLines::create([
+                        'sell_line_id' => $mapping->sell_line_id,
+                        'purchase_line_id' => 0,
+                        'quantity' => $move,
+                    ]);
+                }
+                $excess -= $move;
+                $moved_to_line0 += $move;
+            }
+        }
+
+        //quantity_sold must equal what is really linked to the purchase line
+        $mismatched = PurchaseLine::join('transactions as t', 't.id', '=', 'purchase_lines.transaction_id')
+            ->when(! empty($business_id), fn ($q) => $q->where('t.business_id', $business_id))
+            ->whereRaw('ABS(purchase_lines.quantity_sold - (SELECT COALESCE(SUM(x.quantity), 0) FROM transaction_sell_lines_purchase_lines x WHERE x.purchase_line_id = purchase_lines.id AND x.sell_line_id IS NOT NULL)) > 0.0001')
+            ->pluck('purchase_lines.id')->all();
+        $affected_purchase_lines = array_values(array_filter(array_unique(array_merge($affected_purchase_lines, $mismatched))));
+        foreach ($affected_purchase_lines as $purchase_line_id) {
+            $linked = TransactionSellLinesPurchaseLines::where('purchase_line_id', $purchase_line_id)
+                ->whereNotNull('sell_line_id')->sum('quantity');
+            PurchaseLine::where('id', $purchase_line_id)->update(['quantity_sold' => $linked]);
+        }
+
+        //Link sales that were sold without stock (purchase line 0) to any purchase that still has free quantity
+        $productUtil = new ProductUtil();
+        $qty_sum_query = $this->get_pl_quantity_sum_string('PL');
+        $purchase_transaction_ids = Transaction::join('purchase_lines AS PL', 'transactions.id', '=', 'PL.transaction_id')
+            ->when(! empty($business_id), fn ($q) => $q->where('transactions.business_id', $business_id))
+            ->whereIn('transactions.type', ['purchase', 'purchase_transfer', 'opening_stock', 'production_purchase'])
+            ->where('transactions.status', 'received')
+            ->whereRaw("( $qty_sum_query ) < PL.quantity")
+            ->whereExists(function ($q) {
+                $q->from('transaction_sell_lines_purchase_lines as x')
+                    ->join('transaction_sell_lines as s', 's.id', '=', 'x.sell_line_id')
+                    ->join('transactions as st', 'st.id', '=', 's.transaction_id')
+                    ->where('x.purchase_line_id', 0)
+                    ->whereColumn('s.variation_id', 'PL.variation_id')
+                    ->whereColumn('st.location_id', 'transactions.location_id');
+            })
+            ->distinct()->pluck('transactions.id');
+        foreach (Transaction::with(['purchase_lines.product'])->whereIn('id', $purchase_transaction_ids)->orderBy('transaction_date')->get() as $purchase) {
+            $productUtil->adjustStockOverSelling($purchase);
+        }
+
+        //Stock table must equal purchases - sales - adjustments
+        $stock_mismatches = $this->getStockMismatches($business_id);
+        foreach ($stock_mismatches as $row) {
+            DB::table('variation_location_details')->where('id', $row->vld_id)->update(['qty_available' => $row->calculated_qty]);
+        }
+
+        return [
+            'sell_lines_repaired' => $lines->count(),
+            'extra_qty_removed' => $removed_qty,
+            'overlinked_purchase_lines' => $overlinked->count(),
+            'qty_moved_to_line0' => $moved_to_line0,
+            'purchase_lines_recalculated' => count($affected_purchase_lines),
+            'stock_corrected' => $stock_mismatches->count(),
+        ];
+    }
+
+    /**
+     * Stock rows (variation_location_details) whose quantity differs from
+     * purchases/opening stock/transfers in - sales/transfers out - stock adjustments.
+     * This is the stock POS shows; when it is too high a sale fails with "Mismatch between sold and purchase quantity".
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    public function getStockMismatches($business_id = null)
+    {
+        $in = "(SELECT COALESCE(SUM(pl.quantity - pl.quantity_returned), 0) FROM purchase_lines pl JOIN transactions t ON t.id = pl.transaction_id
+                WHERE pl.variation_id = vld.variation_id AND t.location_id = vld.location_id AND t.status = 'received'
+                AND t.type IN ('purchase', 'opening_stock', 'purchase_transfer', 'production_purchase'))";
+        $out = "(SELECT COALESCE(SUM(s.quantity - s.quantity_returned), 0) FROM transaction_sell_lines s JOIN transactions t ON t.id = s.transaction_id
+                WHERE s.variation_id = vld.variation_id AND t.location_id = vld.location_id AND t.status = 'final'
+                AND t.type IN ('sell', 'sell_transfer', 'production_sell'))";
+        $adjusted = "(SELECT COALESCE(SUM(a.quantity), 0) FROM stock_adjustment_lines a JOIN transactions t ON t.id = a.transaction_id
+                WHERE a.variation_id = vld.variation_id AND t.location_id = vld.location_id AND t.type = 'stock_adjustment')";
+
+        return DB::table('variation_location_details as vld')
+            ->join('products as p', 'p.id', '=', 'vld.product_id')
+            ->join('variations as v', 'v.id', '=', 'vld.variation_id')
+            ->leftJoin('units as u', 'u.id', '=', 'p.unit_id')
+            ->leftJoin('business_locations as bl', 'bl.id', '=', 'vld.location_id')
+            ->where('p.enable_stock', 1)
+            ->where('p.type', '!=', 'combo')
+            ->when(! empty($business_id), fn ($q) => $q->where('p.business_id', $business_id))
+            ->select(
+                'vld.id as vld_id',
+                'p.name as product',
+                'v.sub_sku',
+                'u.short_name as unit',
+                'bl.name as location',
+                'vld.qty_available',
+                DB::raw("($in - $out - $adjusted) as calculated_qty")
+            )
+            ->havingRaw('ABS(vld.qty_available - calculated_qty) > 0.0001')
+            ->orderBy('p.name')
+            ->get();
+    }
+
+    /**
+     * Purchase lines whose sell links are more than the purchase quantity available for selling
+     * (quantity - adjusted - returned - used in manufacturing)
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    public function getOverlinkedPurchaseLines($business_id = null)
+    {
+        return PurchaseLine::join('transactions as t', 't.id', '=', 'purchase_lines.transaction_id')
+            ->join('products as p', 'p.id', '=', 'purchase_lines.product_id')
+            ->leftJoin('units as u', 'u.id', '=', 'p.unit_id')
+            ->when(! empty($business_id), fn ($q) => $q->where('t.business_id', $business_id))
+            ->select(
+                'purchase_lines.id',
+                't.id as transaction_id',
+                't.type',
+                't.ref_no',
+                't.transaction_date',
+                'p.name as product',
+                'u.short_name as unit',
+                'purchase_lines.quantity',
+                'purchase_lines.quantity_sold',
+                DB::raw('(purchase_lines.quantity - purchase_lines.quantity_adjusted - purchase_lines.quantity_returned - COALESCE(purchase_lines.mfg_quantity_used, 0)) as available_qty'),
+                DB::raw('(SELECT COALESCE(SUM(x.quantity), 0) FROM transaction_sell_lines_purchase_lines x WHERE x.purchase_line_id = purchase_lines.id AND x.sell_line_id IS NOT NULL) as linked_qty')
+            )
+            ->havingRaw('linked_qty > 0 AND linked_qty > available_qty + 0.0001')
+            ->orderBy('t.transaction_date')
+            ->get();
+    }
+
+    /**
      * Decrease the purchase quantity from
      * transaction_sell_lines_purchase_lines and purchase_lines.quantity_sold
      *
@@ -3555,8 +3794,9 @@ class TransactionUtil extends Util
                 $row->save();
                 $decrement_qty = 0;
             } else {
+                //Whole mapping row is removed: give back only this row's quantity to its purchase line
                 PurchaseLine::where('id', $row->purchase_line_id)
-                    ->decrement('quantity_sold', $decrement_qty);
+                    ->decrement('quantity_sold', $row->quantity);
                 $row->delete();
             }
 
@@ -4612,6 +4852,61 @@ class TransactionUtil extends Util
         return $output;
     }
 
+    /**
+     * Sell lines sold while stock was not available (linked to purchase line 0 / a missing purchase line,
+     * or not linked at all). Their cost in COGS is estimated with the default purchase price.
+     * Grouped per variation, biggest sales first.
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    public function getSoldWithoutStock($business_id, $start_date, $end_date, $location_id = null, $user_id = null, $permitted_locations = null)
+    {
+        $query = TransactionSellLine::join('transactions as sale', 'transaction_sell_lines.transaction_id', '=', 'sale.id')
+            ->join('products as P', 'transaction_sell_lines.product_id', '=', 'P.id')
+            ->join('variations as V', 'transaction_sell_lines.variation_id', '=', 'V.id')
+            ->leftjoin('units as U', 'P.unit_id', '=', 'U.id')
+            ->leftjoin('transaction_sell_lines_purchase_lines as TSPL', 'transaction_sell_lines.id', '=', 'TSPL.sell_line_id')
+            ->leftjoin('purchase_lines as PL', 'TSPL.purchase_line_id', '=', 'PL.id')
+            ->where('sale.business_id', $business_id)
+            ->where('sale.type', 'sell')
+            ->where('sale.status', 'final')
+            ->where('P.enable_stock', 1)
+            ->where('P.type', '!=', 'combo')
+            ->whereNull('PL.id')
+            ->whereDate('sale.transaction_date', '>=', $start_date)
+            ->whereDate('sale.transaction_date', '<=', $end_date);
+
+        if (! empty($permitted_locations) && $permitted_locations != 'all') {
+            $query->whereIn('sale.location_id', $permitted_locations);
+        }
+        if (! empty($location_id)) {
+            $query->where('sale.location_id', $location_id);
+        }
+        if (! empty($user_id)) {
+            $query->where('sale.created_by', $user_id);
+        }
+
+        $qty = 'IF(TSPL.id IS NULL, transaction_sell_lines.quantity - transaction_sell_lines.quantity_returned, TSPL.quantity - TSPL.qty_returned)';
+
+        return $query->groupBy('V.id')
+            ->select(
+                'P.id as product_id',
+                'P.name as product',
+                'P.type',
+                'V.name as variation',
+                'V.sub_sku',
+                'U.short_name as unit',
+                'V.default_purchase_price',
+                DB::raw('SUM('.$qty.') as qty'),
+                DB::raw('SUM('.$qty.' * (transaction_sell_lines.unit_price_inc_tax - COALESCE(transaction_sell_lines.item_tax, 0))) as sales'),
+                DB::raw('SUM('.$qty.' * COALESCE(V.default_purchase_price, 0)) as estimated_cost'),
+                DB::raw('(SELECT SUM(vld.qty_available) FROM variation_location_details vld WHERE vld.variation_id = V.id) as current_stock')
+            )
+            ->havingRaw('qty > 0')
+            ->orderByDesc('sales')
+            ->get();
+    }
+
     public function getGrossProfit($business_id, $start_date = null, $end_date = null, $location_id = null, $user_id = null, $permitted_locations)
     {
         $query = TransactionSellLine::join('transactions as sale', 'transaction_sell_lines.transaction_id', '=', 'sale.id')
@@ -4625,19 +4920,28 @@ class TransactionUtil extends Util
             ->where('sale.type', 'sell')
             ->where('sale.status', 'final')
             ->join('products as P', 'transaction_sell_lines.product_id', '=', 'P.id')
+            ->join('variations as V', 'transaction_sell_lines.variation_id', '=', 'V.id')
             ->where('sale.business_id', $business_id)
             ->where('transaction_sell_lines.children_type', '!=', 'combo');
-        //If type combo: find childrens, sale price parent - get PP of childrens
-        $query->select(DB::raw('SUM(IF (TSPL.id IS NULL AND P.type="combo", ( 
-            SELECT Sum((tspl2.quantity - tspl2.qty_returned) * (tsl.unit_price_inc_tax - pl2.purchase_price_inc_tax)) AS total
+
+        //Cost of a sold unit: the linked purchase line's price. When stock was oversold the sell line is
+        //linked to purchase line 0 (or not linked at all), so fall back to the default purchase price.
+        //Exc. tax on both sides, like Total sell / Total purchase (collected tax is not profit)
+        $unit_cost = 'COALESCE(PL.purchase_price, V.default_purchase_price, 0)';
+        $sold_qty = 'IF(TSPL.id IS NULL, transaction_sell_lines.quantity - transaction_sell_lines.quantity_returned, TSPL.quantity - TSPL.qty_returned)';
+        $combo_cost = '(SELECT SUM((tspl2.quantity - tspl2.qty_returned) * COALESCE(pl2.purchase_price, v2.default_purchase_price, 0))
                 FROM transaction_sell_lines AS tsl
-                    JOIN transaction_sell_lines_purchase_lines AS tspl2
-                ON tsl.id=tspl2.sell_line_id 
-                JOIN purchase_lines AS pl2 
-                ON tspl2.purchase_line_id = pl2.id 
-                WHERE tsl.parent_sell_line_id = transaction_sell_lines.id), IF(P.enable_stock=0,(transaction_sell_lines.quantity - transaction_sell_lines.quantity_returned) * transaction_sell_lines.unit_price_inc_tax,   
-                (TSPL.quantity - TSPL.qty_returned) * (transaction_sell_lines.unit_price_inc_tax - PL.purchase_price_inc_tax)) )) AS gross_profit')
-            );
+                JOIN transaction_sell_lines_purchase_lines AS tspl2 ON tsl.id = tspl2.sell_line_id
+                JOIN variations AS v2 ON tsl.variation_id = v2.id
+                LEFT JOIN purchase_lines AS pl2 ON tspl2.purchase_line_id = pl2.id
+                WHERE tsl.parent_sell_line_id = transaction_sell_lines.id)';
+        $line_sale = $sold_qty.' * (transaction_sell_lines.unit_price_inc_tax - COALESCE(transaction_sell_lines.item_tax, 0))';
+        $line_cost = 'IF(TSPL.id IS NULL AND P.type="combo", COALESCE('.$combo_cost.', 0), IF(P.enable_stock=0, 0, '.$sold_qty.' * '.$unit_cost.'))';
+
+        $query->select(
+            DB::raw('SUM('.$line_sale.' - '.$line_cost.') AS gross_profit'),
+            DB::raw('SUM('.$line_cost.') AS cogs')
+        );
 
         if (! empty($start_date) && ! empty($end_date) && $start_date != $end_date) {
             $query->whereDate('sale.transaction_date', '>=', $start_date)
@@ -4665,6 +4969,7 @@ class TransactionUtil extends Util
         $gross_profit_obj = $query->first();
 
         $gross_profit = ! empty($gross_profit_obj->gross_profit) ? $gross_profit_obj->gross_profit : 0;
+        $this->last_cogs = ! empty($gross_profit_obj->cogs) ? $gross_profit_obj->cogs : 0;
 
         //KNOWS ISSUE: If products are returned then also the discount gets applied for it.
 
@@ -5616,6 +5921,20 @@ class TransactionUtil extends Util
             $user_id,
             $permitted_locations
         );
+        //Cost of the items actually sold (same lines as gross profit, so gross profit = sales - COGS)
+        $data['cogs'] = $this->last_cogs;
+
+        //Items sold without stock: their cost is estimated, show them so the user can enter the missing purchases
+        $data['sold_without_stock'] = $this->getSoldWithoutStock($business_id, $start_date, $end_date, $location_id, $user_id, $permitted_locations);
+        $data['cogs_estimated'] = $data['sold_without_stock']->sum('estimated_cost');
+        $data['cogs_from_purchases'] = $data['cogs'] - $data['cogs_estimated'];
+
+        //Builty (transport) charges received in the period; builty has no business_id, so match by creator
+        $data['total_builty'] = (float) Builty::join('users as bu_user', 'builty.created_by', '=', 'bu_user.id')
+            ->where('bu_user.business_id', $business_id)
+            ->whereDate('builty.recevied_date', '>=', $start_date)
+            ->whereDate('builty.recevied_date', '<=', $end_date)
+            ->sum('builty.amount');
 
         $data['total_purchase_shipping_charge'] = ! empty($purchase_details['total_shipping_charges']) ? $purchase_details['total_shipping_charges'] : 0;
         $data['total_sell_shipping_charge'] = ! empty($sell_details['total_shipping_charges']) ? $sell_details['total_shipping_charges'] : 0;
@@ -5634,7 +5953,7 @@ class TransactionUtil extends Util
         //Stocks
         $data['opening_stock'] = ! empty($opening_stock) ? $opening_stock : 0;
         $data['closing_stock'] = ! empty($closing_stock) ? $closing_stock : 0;
-        $total_ledger_discount = $this->getTotalLedgerDiscount($business_id, $start_date, $end_date);
+        $total_ledger_discount = $this->getTotalLedgerDiscount($business_id, $start_date, $end_date, $location_id, $user_id, $permitted_locations);
     
         //Purchase
         $data['total_purchase'] = ! empty($purchase_details['total_purchase_exc_tax']) ? $purchase_details['total_purchase_exc_tax'] : 0;
@@ -5716,6 +6035,7 @@ class TransactionUtil extends Util
         $data['net_profit'] = $module_total + $gross_profit
                                 + ($data['total_sell_round_off'] + $data['total_recovered'] + $data['total_sell_shipping_charge'] + $data['total_purchase_discount'] + $data['total_sell_additional_expense'] + $data['total_sell_return_discount']
                                 ) - ($data['total_reward_amount'] + $data['total_expense'] + $data['total_adjustment'] + $data['total_transfer_shipping_charges'] + $data['total_purchase_shipping_charge'] + $data['total_purchase_additional_expense'] + $data['total_sell_discount']
+                                + $data['total_builty']
                                 );
 
         //get gross profit from Project Module
@@ -5758,14 +6078,7 @@ class TransactionUtil extends Util
             ->groupBy('transactions.sub_type')
             ->get();
         $data['total_sell_by_subtype'] = $sales_by_subtype;
-        $builty = Builty::whereDate('recevied_date', '>=', $start_date)
-        ->whereDate('recevied_date', '<=', $end_date)
 
-        ->select(
-            DB::raw('SUM(amount) as total_builty'))->first();
-
-        $data['total_builty'] = $builty['total_builty'];
-        
         return $data;
     }
 

@@ -47,12 +47,11 @@
         <h4 style="margin-top: 0;"><i class="fa fa-exclamation-triangle"></i>
             {{ $sws->count() }} product(s) were sold without stock in this period
         </h4>
-        Qty {{ @num_format($sws->sum('qty')) }}, sales
+        Qty {{ @format_quantity($sws->sum('qty')) }}, sales
         <span class="display_currency" data-currency_symbol="true">{{ $sws->sum('sales') }}</span>.
         Their purchase cost is not recorded, so COGS uses each product's <strong>default purchase price</strong>
         (<span class="display_currency" data-currency_symbol="true">{{ $sws->sum('estimated_cost') }}</span>).
-        Profit becomes exact once the missing purchases are added.
-        <a href="#" class="toggle-sold-without-stock" style="margin-left: 8px;"
+        Profit becomes exact once the missing purchases are added.        <a href="#" class="toggle-sold-without-stock" style="margin-left: 8px;"
             onclick="$('#sold_without_stock_table').toggle(); return false;">Show products</a>
     </div>
     <div class="table-responsive" id="sold_without_stock_table" style="display: none;">
@@ -73,11 +72,11 @@
                     <tr>
                         <td>{{ $row->product }}@if($row->type == 'variable') - {{ $row->variation }}@endif</td>
                         <td>{{ $row->sub_sku }}</td>
-                        <td>{{ @num_format($row->qty) }} {{ $row->unit }}</td>
+                        <td>{{ @format_quantity($row->qty) }} {{ $row->unit }}</td>
                         <td><span class="display_currency" data-currency_symbol="true">{{ $row->sales }}</span></td>
                         <td><span class="display_currency" data-currency_symbol="true">{{ $row->default_purchase_price }}</span></td>
                         <td><span class="display_currency" data-currency_symbol="true">{{ $row->estimated_cost }}</span></td>
-                        <td class="{{ $row->current_stock < 0 ? 'text-danger' : '' }}">{{ @num_format($row->current_stock) }} {{ $row->unit }}</td>
+                        <td class="{{ $row->current_stock < 0 ? 'text-danger' : '' }}">{{ @format_quantity($row->current_stock) }} {{ $row->unit }}</td>
                     </tr>
                 @endforeach
             </tbody>
