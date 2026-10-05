@@ -46,6 +46,8 @@
             <button data-href="{{action([\App\Http\Controllers\ContactController::class, 'getLedger'])}}?contact_id={{$contact->id}}&action=pdf" class="btn btn-default btn-xs" id="print_ledger_pdf"><i class="fas fa-file-pdf"></i></button>
 
             <button type="button" class="btn btn-default btn-xs" id="send_ledger"><i class="fas fa-envelope"></i></button>
+
+            <button type="button" class="btn btn-success btn-xs" id="send_ledger_whatsapp" title="Send on WhatsApp"><i class="fab fa-whatsapp"></i> WhatsApp</button>
         </div>
     </div>
     <div id="contact_ledger_div"></div>

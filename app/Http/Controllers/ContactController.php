@@ -1365,6 +1365,70 @@ class ContactController extends Controller
         }
     }
      
+    /**
+     * Sends the ledger currently on screen (same dates, format and location)
+     * to the contact's mobile as a PDF over WhatsApp.
+     */
+    public function sendLedgerWhatsapp(Request $request)
+    {
+        if (! auth()->user()->can('supplier.view') && ! auth()->user()->can('customer.view')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+        $contact = Contact::where('business_id', $business_id)->findOrFail($request->input('contact_id'));
+
+        if (empty($contact->mobile)) {
+            return ['success' => 0, 'msg' => 'This contact has no mobile number.'];
+        }
+
+        $start_date = $request->input('start_date');
+        $end_date = $request->input('end_date');
+        $format = $request->input('format');
+        $location_id = $request->input('location_id');
+
+        $file = null;
+        try {
+            $ledger_details = $this->transactionUtil->getLedgerDetails($contact->id, $start_date, $end_date, $format, $location_id, $format == 'format_3');
+
+            $location = ! empty($location_id) ? BusinessLocation::where('business_id', $business_id)->find($location_id) : null;
+            $is_admin = $this->contactUtil->is_admin(auth()->user());
+            $for_pdf = true;
+            $view = $format == 'format_2' ? 'contact.ledger_format_2' : ($format == 'format_3' ? 'contact.ledger_format_3' : 'contact.ledger');
+            $html = view($view)->with(compact('ledger_details', 'contact', 'location', 'is_admin', 'for_pdf'))->render();
+
+            $mpdf = $this->getMpdf();
+            $mpdf->WriteHTML($html);
+
+            $path = config('constants.mpdf_temp_path');
+            if (! file_exists($path)) {
+                mkdir($path, 0777, true);
+            }
+            $file = $path.'/'.time().'_ledger.pdf';
+            $mpdf->Output($file, 'F');
+
+            $filename = 'Ledger-'.str_replace(' ', '-', $contact->name).'.pdf';
+            $caption = $contact->name.' - Ledger '.$this->transactionUtil->format_date($start_date).' to '.$this->transactionUtil->format_date($end_date)
+                ."\nBalance due: ".$this->transactionUtil->num_f($ledger_details['balance_due'], true);
+
+            $response = (new WhatsappApiService())->sendDocument(\App\WhatsappDevice::instanceFor($business_id), $file, $contact->mobile, $filename, $caption);
+
+            $output = (empty($response) || ! empty($response['error']))
+                ? ['success' => 0, 'msg' => $response['message'] ?? 'WhatsApp did not accept the message.']
+                : ['success' => 1, 'msg' => 'Ledger sent on WhatsApp to '.$contact->mobile];
+        } catch (\Exception $e) {
+            \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
+
+            $output = ['success' => 0, 'msg' => __('messages.something_went_wrong')];
+        }
+
+        if (! empty($file) && file_exists($file)) {
+            unlink($file);
+        }
+
+        return $output;
+    }
+
     public function getAllTransactionPayments()
     {
         if (! auth()->user()->can('supplier.view') && ! auth()->user()->can('customer.view') && ! auth()->user()->can('supplier.view_own') && ! auth()->user()->can('customer.view_own')) {
@@ -1514,7 +1578,7 @@ class ContactController extends Controller
             $mpdf->Output($file, 'F');
             $whatsappApiService = new WhatsappApiService();
             // Send the document via WhatsApp
-            $response = $whatsappApiService->sendDocument('UMS', $file,$contact->mobile, 'ledger', $data['subject']);
+            $response = $whatsappApiService->sendDocument(\App\WhatsappDevice::instanceFor($contact->business_id), $file, $contact->mobile, 'ledger', $data['subject']);
             
             $data['attachment'] = $file;
             $data['attachment_name'] = 'ledger.pdf';

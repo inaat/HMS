@@ -544,6 +544,38 @@ $(document).on('click', '#send_ledger', function() {
     });
 })
 
+$(document).on('click', '#send_ledger_whatsapp', function() {
+    var btn = $(this);
+    var data = {
+        contact_id: {{ $contact->id }},
+        start_date: $('#ledger_date_range').data('daterangepicker').startDate.format('YYYY-MM-DD'),
+        end_date: $('#ledger_date_range').data('daterangepicker').endDate.format('YYYY-MM-DD'),
+        format: $('input[name="ledger_format"]:checked').val(),
+        location_id: $('#ledger_location').val()
+    };
+
+    btn.prop('disabled', true);
+    $.ajax({
+        method: 'POST',
+        url: "{{ action([\App\Http\Controllers\ContactController::class, 'sendLedgerWhatsapp']) }}",
+        dataType: 'json',
+        data: data,
+        success: function(result) {
+            if (result.success) {
+                toastr.success(result.msg);
+            } else {
+                toastr.error(result.msg);
+            }
+        },
+        error: function() {
+            toastr.error("{{ __('messages.something_went_wrong') }}");
+        },
+        complete: function() {
+            btn.prop('disabled', false);
+        }
+    });
+});
+
 $(document).on('click', '#print_ledger_pdf', function() {
     var start_date = $('#ledger_date_range').data('daterangepicker').startDate.format('YYYY-MM-DD');
     var end_date = $('#ledger_date_range').data('daterangepicker').endDate.format('YYYY-MM-DD');
