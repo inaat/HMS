@@ -10,7 +10,7 @@
   </td>
   <td>
     <div class="rule-brand-wrap">
-      <select name="rules[{{ $index }}][brand_id]" class="form-control input-sm">
+      <select name="rules[{{ $index }}][brand_id]" class="form-control input-sm rule-brand">
         <option value="">Select brand</option>
         @foreach($brands as $id => $name)
           <option value="{{ $id }}" @if(! empty($rule) && $rule->brand_id == $id) selected @endif>{{ $name }}</option>

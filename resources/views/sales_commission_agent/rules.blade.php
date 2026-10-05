@@ -65,6 +65,7 @@
     var next_index = {{ $rules->count() }};
 
     function init_row($row) {
+      $row.find('select.rule-brand').select2({ dropdownParent: $modal, width: '100%', placeholder: 'Select brand' });
       $row.find('select.rule-product').select2({ dropdownParent: $modal, width: '100%', placeholder: 'Select product' });
       toggle_target($row);
       update_hint($row);
