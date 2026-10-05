@@ -1,0 +1,190 @@
+/*
+ * "Fresh green" theme (same look as the babekhyber admin): white sidebar with a green active pill, a soft green-cream
+ * page background, a light header, rounded cards and green primary buttons.
+ * Loaded LAST (layouts/partials/css.blade.php) and scoped to body.theme-fresh, so removing that body class turns it off.
+ * Selectors are written for this app's layout: aside.side-bar / #side-bar (AdminlteCustomPresenter), .app-header
+ * (layouts/partials/header.blade.php) and .app-widget (components/widget.blade.php).
+ */
+body.theme-fresh {
+    --tf-ink: #1f2d27;
+    --tf-muted: #6b7a73;
+    --tf-line: #e3ece7;
+    --tf-green: #2f9e6e;
+    --tf-green-dark: #23845a;
+    --tf-green-soft: #e8f6ef;
+    --tf-bg: #f3f7f2;
+    background: var(--tf-bg) !important;
+    color: var(--tf-ink);
+}
+
+/* page background: soft cream-green wash */
+body.theme-fresh main.tw-bg-gray-100,
+body.theme-fresh main {
+    background: linear-gradient(180deg, #f6f9f3 0%, #eef5ef 100%) !important;
+}
+
+/* ---------- sidebar ---------- */
+body.theme-fresh aside.side-bar {
+    background: #ffffff !important;
+    border-right: 1px solid var(--tf-line);
+    box-shadow: 2px 0 14px rgba(31, 45, 39, .04);
+}
+/* business name block at the top of the sidebar */
+body.theme-fresh aside.side-bar > a:first-of-type {
+    background: #ffffff !important;
+    border-bottom: 1px solid var(--tf-line) !important;
+    border-right: 0 !important;
+}
+body.theme-fresh aside.side-bar > a:first-of-type p {
+    color: var(--tf-ink) !important;
+    font-weight: 700 !important;
+}
+body.theme-fresh #side-bar {
+    border-right: 0 !important;
+}
+body.theme-fresh #side-bar a {
+    color: #3c4a44 !important;
+    border-radius: 10px;
+}
+body.theme-fresh #side-bar a > i,
+body.theme-fresh #side-bar a > svg:first-child {
+    color: var(--tf-green) !important;
+}
+body.theme-fresh #side-bar a:hover,
+body.theme-fresh #side-bar a:focus {
+    color: var(--tf-green-dark) !important;
+    background: var(--tf-green-soft) !important;
+}
+/* the active top-level item / open group: solid green pill with white text */
+body.theme-fresh #side-bar > a.tw-bg-gray-200,
+body.theme-fresh #side-bar > div.tw-bg-gray-200 > a.drop_down {
+    color: #ffffff !important;
+    background: var(--tf-green) !important;
+    box-shadow: 0 4px 12px rgba(47, 158, 110, .28);
+}
+body.theme-fresh #side-bar > a.tw-bg-gray-200 > i,
+body.theme-fresh #side-bar > a.tw-bg-gray-200 svg,
+body.theme-fresh #side-bar > div.tw-bg-gray-200 > a.drop_down > i,
+body.theme-fresh #side-bar > div.tw-bg-gray-200 > a.drop_down svg {
+    color: #ffffff !important;
+}
+/* the open group's box: light green instead of grey */
+body.theme-fresh #side-bar > div.tw-bg-gray-200 {
+    background: #f7fbf8 !important;
+    border-radius: 10px;
+}
+/* sub menu: green guide line, active page in bold green */
+body.theme-fresh #side-bar .chiled > .tw-absolute {
+    background: #cfe9dc !important;
+}
+body.theme-fresh #side-bar .chiled a {
+    padding: 2px 6px;
+}
+body.theme-fresh #side-bar .chiled a.tw-text-primary-700 {
+    color: var(--tf-green-dark) !important;
+    background: var(--tf-green-soft) !important;
+    font-weight: 700 !important;
+}
+/* section labels */
+body.theme-fresh #side-bar .tw-uppercase {
+    color: var(--tf-muted) !important;
+    letter-spacing: .06em;
+}
+
+/* ---------- header: light bar instead of the dark gradient ---------- */
+body.theme-fresh .app-header {
+    background: rgba(255, 255, 255, .92) !important;
+    background-image: none !important;
+    border-bottom: 1px solid var(--tf-line) !important;
+    box-shadow: 0 2px 10px rgba(31, 45, 39, .04);
+}
+body.theme-fresh .app-header .tw-text-white,
+body.theme-fresh .app-header [class*="tw-text-white"] {
+    color: #3c4a44 !important;
+}
+/* header buttons (sidebar toggle, POS, calculator, date, user ...): white pills with a soft border */
+body.theme-fresh .app-header button[class*="-800"],
+body.theme-fresh .app-header a[class*="-800"],
+body.theme-fresh .app-header .dropdown-toggle[class*="-800"] {
+    background: #ffffff !important;
+    border: 1px solid var(--tf-line) !important;
+    box-shadow: 0 2px 6px rgba(31, 45, 39, .05);
+    --tw-ring-color: transparent !important;
+}
+body.theme-fresh .app-header button[class*="-800"]:hover,
+body.theme-fresh .app-header a[class*="-800"]:hover {
+    background: var(--tf-green-soft) !important;
+    color: var(--tf-green-dark) !important;
+}
+/* dropdown menus opened from the header keep their normal dark text */
+body.theme-fresh .app-header .dropdown-menu,
+body.theme-fresh .app-header .dropdown-menu * {
+    color: inherit;
+}
+
+/* ---------- shared bits used on every page ---------- */
+body.theme-fresh .app-widget,
+body.theme-fresh .box {
+    border-radius: 16px !important;
+    border: 1px solid var(--tf-line);
+    --tw-ring-color: var(--tf-line) !important;
+    box-shadow: 0 2px 10px rgba(31, 45, 39, .04) !important;
+}
+body.theme-fresh .content-header h1 {
+    color: var(--tf-ink) !important;
+}
+body.theme-fresh .btn-primary,
+body.theme-fresh .tw-dw-btn-primary {
+    background: var(--tf-green) !important;
+    border-color: var(--tf-green) !important;
+    color: #fff !important;
+}
+body.theme-fresh .btn-primary:hover,
+body.theme-fresh .btn-primary:focus,
+body.theme-fresh .tw-dw-btn-primary:hover {
+    background: var(--tf-green-dark) !important;
+    border-color: var(--tf-green-dark) !important;
+}
+body.theme-fresh .bg-primary {
+    background-color: var(--tf-green) !important;
+}
+body.theme-fresh .text-primary {
+    color: var(--tf-green-dark) !important;
+}
+body.theme-fresh .btn-outline-primary,
+body.theme-fresh .tw-dw-btn-outline.tw-dw-btn-primary {
+    color: var(--tf-green-dark) !important;
+    border-color: var(--tf-green) !important;
+    background: transparent !important;
+}
+body.theme-fresh .btn-outline-primary:hover,
+body.theme-fresh .tw-dw-btn-outline.tw-dw-btn-primary:hover {
+    color: #fff !important;
+    background: var(--tf-green) !important;
+}
+/* tables: soft header row */
+body.theme-fresh table.dataTable thead th,
+body.theme-fresh .table > thead > tr > th {
+    background: #f4f8f6;
+    color: #3c4a44;
+    border-color: var(--tf-line) !important;
+}
+/* form focus ring in green */
+body.theme-fresh .form-control:focus {
+    border-color: var(--tf-green) !important;
+    box-shadow: 0 0 0 3px rgba(47, 158, 110, .15) !important;
+}
+/* footer */
+body.theme-fresh .main-footer,
+body.theme-fresh footer {
+    background: #ffffff !important;
+    border-top: 1px solid var(--tf-line) !important;
+    color: var(--tf-muted) !important;
+}
+
+/* dashboard: the light page now shows through behind the stat cards */
+body.theme-fresh .dash-v2 { background: transparent; }
+
+@media print {
+    body.theme-fresh, body.theme-fresh main { background: #fff !important; }
+}

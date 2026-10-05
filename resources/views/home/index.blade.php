@@ -3,509 +3,165 @@
 
 @section('content')
 
-    <div class="tw-pb-6 tw-bg-gradient-to-r tw-from-@if(!empty(session('business.theme_color'))){{session('business.theme_color')}}@else{{'primary'}}@endif-800 tw-to-@if(!empty(session('business.theme_color'))){{session('business.theme_color')}}@else{{'primary'}}@endif-900 xl:tw-pb-0 ">
-        <div class="tw-px-5 tw-pt-3">
-            {{-- <div class="sm:tw-flex sm:tw-items-center sm:tw-justify-between sm:tw-gap-12">
-                <h1 class="tw-text-2xl tw-font-medium tw-tracking-tight tw-text-white">
-                    {{ __('home.welcome_message', ['name' => Session::get('user.first_name')]) }}
-                </h1>
-            </div> --}}
-                    <div class="sm:tw-flex sm:tw-items-center sm:tw-justify-between sm:tw-gap-12">
-                        <div class="tw-mt-2 sm:tw-w-1/2 md:tw-w-1/2">
-                            <h1
-                                class="tw-text-2xl md:tw-text-4xl tw-tracking-tight tw-text-primary-800 tw-font-semibold text-white tw-mb-10 md:tw-mb-0">
-                                {{ __('home.welcome_message', ['name' => Session::get('user.first_name')]) }}
-                            </h1>
+    @include('home.partials.dash_styles')
+    @php
+        $dvHour = (int) \Carbon::now()->format('G');
+        $dvGreeting = $dvHour < 12 ? 'Good Morning' : ($dvHour < 17 ? 'Good Afternoon' : 'Good Evening');
+        $dvName = trim(Session::get('user.first_name') . ' ' . Session::get('user.last_name'));
+        $dvInitials = strtoupper(mb_substr(Session::get('user.first_name') ?? '', 0, 1) . mb_substr(Session::get('user.last_name') ?? '', 0, 1));
+    @endphp
+    <div class="dash-v2">
+        {{-- header: initials, greeting, location + date filter (wired by public/js/home.js) --}}
+        <div class="dv-head">
+            <div class="dv-avatar">{{ $dvInitials ?: 'U' }}</div>
+            <div class="dv-title">
+                <h2>{{ __('home.home') }}</h2>
+                <div class="hello">{{ $dvGreeting }}, {{ $dvName }}!</div>
+                <div class="sub">{{ Session::get('business.name') }}</div>
+            </div>
+            <div class="dv-tools">
+                @if (auth()->user()->can('dashboard.data') && $is_admin)
+                    @if (count($all_locations) > 1)
+                        <div class="dv-location">
+                            {!! Form::select('dashboard_location', $all_locations, null, [
+                                'class' => 'form-control select2',
+                                'placeholder' => __('lang_v1.select_location'),
+                                'id' => 'dashboard_location',
+                                'style' => 'width: 100%',
+                            ]) !!}
                         </div>
-    
-                        @if (auth()->user()->can('dashboard.data'))
-                            @if ($is_admin)
-                                <div class="tw-mt-2 sm:tw-w-1/3 md:tw-w-1/4 ">
-                                    @if (count($all_locations) > 1)
-                                        {!! Form::select('dashboard_location', $all_locations, null, [
-                                            'class' => 'form-control select2',
-                                            'placeholder' => __('lang_v1.select_location'),
-                                            'id' => 'dashboard_location',
-                                        ]) !!}
-                                    @endif
-                                </div>
-            
-                                <div class="tw-mt-2 sm:tw-w-1/3 md:tw-w-1/4 tw-text-right">
-                                    @if ($is_admin)
-                                        <button type="button" id="dashboard_date_filter"
-                                            class="tw-inline-flex tw-items-center tw-justify-center tw-w-full tw-gap-1 tw-px-3 tw-py-2 tw-text-sm tw-font-medium tw-text-gray-900 tw-transition-all tw-duration-200 tw-bg-white tw-rounded-lg sm:tw-w-auto hover:tw-bg-primary-50">
-                                            <svg aria-hidden="true" class="tw-size-5" xmlns="http://www.w3.org/2000/svg"
-                                                viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none"
-                                                stroke-linecap="round" stroke-linejoin="round">
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                                                <path
-                                                    d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12z" />
-                                                <path d="M16 3v4" />
-                                                <path d="M8 3v4" />
-                                                <path d="M4 11h16" />
-                                                <path d="M7 14h.013" />
-                                                <path d="M10.01 14h.005" />
-                                                <path d="M13.01 14h.005" />
-                                                <path d="M16.015 14h.005" />
-                                                <path d="M13.015 17h.005" />
-                                                <path d="M7.01 17h.005" />
-                                                <path d="M10.01 17h.005" />
-                                            </svg>
-                                            <span>
-                                                {{ __('messages.filter_by_date') }}
-                                            </span>
-                                            <svg aria-hidden="true" class="tw-size-4" xmlns="http://www.w3.org/2000/svg"
-                                                viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
-                                                stroke-linecap="round" stroke-linejoin="round">
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                                                <path d="M6 9l6 6l6 -6" />
-                                            </svg>
-                                        </button>
-                                    @endif
-                                </div>
-                            @endif
-                        @endif
-                    </div>
-                    @if (auth()->user()->can('dashboard.data'))
-                        @if ($is_admin)
-                            <div class="tw-grid tw-grid-cols-1 tw-gap-4 tw-mt-6 sm:tw-grid-cols-2 xl:tw-grid-cols-4 sm:tw-gap-5">
-                           
-                                 <div class="tw-transition-all tw-duration-300 tw-bg-white tw-shadow-lg hover:tw-shadow-xl tw-rounded-xl hover:tw-translate-y-[-2px] tw-ring-1 tw-ring-gray-300">
-                                       <a href="{{ url('/get-parties?type=customer') }}">
-                                       
-                                       <div class="tw-p-6">
-                                            <div class="tw-flex tw-items-center tw-gap-4">
-                                              
-                                     
-                                                <!-- Text Content Section -->
-                                                <div class="tw-flex-1">
-                                                    <p class="tw-text-base tw-font-semibold tw-text-gray-600 tw-truncate">
-                                                        Total Receivable
-                                                    </p>
-                                                    <p class="total_receivable tw-text-gray-900 tw-text-2xl tw-font-bold tw-tracking-tight tw-font-mono tw-mt-1">
-                                                       
-                                                    </p>
-                                                    <p class="total_receivable_count tw-text-sm tw-text-gray-500 tw-mt-0.5">
-                                                       
-                                                    </p>
-                                                </div>
-                                               <div class="tw-inline-flex tw-items-center tw-justify-center tw-w-14 tw-h-14 tw-rounded-full tw-bg-green-100 tw-text-green-500">
-                                                           <svg aria-hidden="true" class="tw-w-12 tw-h-12"
-                                                xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2"
-                                                stroke="currentColor" fill="none" stroke-linecap="round"
-                                                stroke-linejoin="round">
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                <path d="M12 3v12"></path>
-                                                <path d="M16 11l-4 4l-4 -4"></path>
-                                                <path d="M3 12a9 9 0 0 0 18 0"></path>
-                                            </svg>
-                                                </div>
-
-                                            </div>
-                                        </div>
-                                       </a> 
-                                 </div>
-                                 <div class="tw-transition-all tw-duration-300 tw-bg-white tw-shadow-lg hover:tw-shadow-xl tw-rounded-xl hover:tw-translate-y-[-2px] tw-ring-1 tw-ring-gray-300">
-                                          <a href="{{ url('/get-parties?type=supplier') }}">
-                                        <div class="tw-p-6">
-                                            <div class="tw-flex tw-items-center tw-gap-4">
-                                              
-                                     
-                                                <!-- Text Content Section -->
-                                                <div class="tw-flex-1">
-                                                    <p class="tw-text-base tw-font-semibold tw-text-gray-600 tw-truncate">
-                                                        Total Payable
-                                                    </p>
-                                                    <p class="total_payable tw-text-gray-900 tw-text-2xl tw-font-bold tw-tracking-tight tw-font-mono tw-mt-1">
-                                                       
-                                                    </p>
-                                                    <p class=" total_payable_count tw-text-sm tw-text-gray-500 tw-mt-0.5">
-                                                       
-                                                    </p>
-                                                </div>
-                                               <div class="tw-inline-flex tw-items-center tw-justify-center tw-w-14 tw-h-14 tw-rounded-full tw-bg-red-100 tw-text-red-500">
-                                                       <svg aria-hidden="true"  class="tw-w-12 tw-h-12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                                                            <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                            <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                            <path d="M12 15v-12"></path>
-                                                            <path d="M16 7l-4 -4l-4 4"></path>
-                                                            <path d="M3 12a9 9 0 0 0 18 0"></path>
-                                                        </svg>
-                                                </div>
-
-                                            </div>
-                                        </div>
-                                        </a>
-                                 </div>
-                                 <div class="tw-transition-all tw-duration-300 tw-bg-white tw-shadow-lg hover:tw-shadow-xl tw-rounded-xl hover:tw-translate-y-[-2px] tw-ring-1 tw-ring-gray-300">
-                                        <div class="tw-p-6">
-                                            <div class="tw-flex tw-items-center tw-gap-4">
-                                              
-                                     
-                                                <!-- Text Content Section -->
-                                                <div class="tw-flex-1">
-                                                    <p class="tw-text-base tw-font-semibold tw-text-gray-600 tw-truncate">
-                                                      Total Recover Amount
-                                                    </p>
-                                                    <p class="recover_amount tw-text-gray-900 tw-text-2xl tw-font-bold tw-tracking-tight tw-font-mono tw-mt-1">
-                                                       
-                                                    </p>
-                                                    
-                                                </div>
-                                             <div class="tw-inline-flex tw-items-center tw-justify-center tw-w-14 tw-h-14 tw-rounded-full tw-bg-green-100 tw-text-green-500">
-                                                           <svg aria-hidden="true" class="tw-w-12 tw-h-12"
-                                                xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2"
-                                                stroke="currentColor" fill="none" stroke-linecap="round"
-                                                stroke-linejoin="round">
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                <path d="M12 3v12"></path>
-                                                <path d="M16 11l-4 4l-4 -4"></path>
-                                                <path d="M3 12a9 9 0 0 0 18 0"></path>
-                                            </svg>
-                                                </div>
-
-                                            </div>
-                                        </div>
-                                        </a>
-                                 </div>
-                                   <div class="tw-transition-all tw-duration-200 tw-bg-white tw-shadow-sm tw-rounded-xl hover:tw-shadow-md hover:tw--translate-y-0.5 tw-ring-1 tw-ring-gray-200">
-                                <div class="tw-p-4 sm:tw-p-5">
-                                    <div class="tw-flex tw-items-center tw-gap-4">
-                                        <div
-                                            class="tw-inline-flex tw-items-center tw-justify-center tw-w-10 tw-h-10 tw-text-red-500 tw-bg-red-100 tw-rounded-full sm:tw-w-12 sm:tw-h-12 shrink-0">
-                                            <svg aria-hidden="true" class="tw-w-6 tw-h-6"
-                                                xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2"
-                                                stroke="currentColor" fill="none" stroke-linecap="round"
-                                                stroke-linejoin="round">
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                <path
-                                                    d="M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16l-3 -2l-2 2l-2 -2l-2 2l-2 -2l-3 2">
-                                                </path>
-                                                <path
-                                                    d="M14.8 8a2 2 0 0 0 -1.8 -1h-2a2 2 0 1 0 0 4h2a2 2 0 1 1 0 4h-2a2 2 0 0 1 -1.8 -1">
-                                                </path>
-                                                <path d="M12 6v10"></path>
-                                            </svg>
-                                        </div>
-
-                                        <div class="tw-flex-1 tw-min-w-0">
-                                            <p
-                                                class="tw-text-sm tw-font-medium tw-text-gray-500 tw-truncate tw-whitespace-nowrap">
-                                                 Total Builty Amount
-                                            </p>
-                                            <p
-                                                class="total_builty tw-mt-0.5 tw-text-gray-900 tw-text-xl tw-truncate tw-font-semibold tw-tracking-tight tw-font-mono">
-
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-    
-                            </div>
-                        @endif
                     @endif
-                    @if (auth()->user()->can('dashboard.data'))
-                        @if ($is_admin)
-                            <div class="tw-grid tw-grid-cols-1 tw-gap-4 tw-mt-6 sm:tw-grid-cols-2 xl:tw-grid-cols-4 sm:tw-gap-5">
-                           
-                                <div
-                                    class="tw-transition-all tw-duration-200 tw-bg-white tw-shadow-sm hover:tw-shadow-md tw-rounded-xl hover:tw-translate-y-0.5 tw-ring-1 tw-ring-gray-200">
-                                    <div class="tw-p-4 sm:tw-p-5">
-                                        <div class="tw-flex tw-items-center tw-gap-4">
-                                            <div
-                                                class="tw-inline-flex tw-items-center tw-justify-center tw-w-10 tw-h-10 tw-rounded-full sm:tw-w-12 sm:tw-h-12 tw-shrink-0 tw-bg-sky-100 tw-text-sky-500">
-                                                <svg aria-hidden="true" class="tw-w-6 tw-h-6" xmlns="http://www.w3.org/2000/svg"
-                                                    viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
-                                                    stroke-linecap="round" stroke-linejoin="round">
-                                                    <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                                                    <path d="M6 19m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
-                                                    <path d="M17 19m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
-                                                    <path d="M17 17h-11v-14h-2" />
-                                                    <path d="M6 5l14 1l-1 7h-13" />
-                                                </svg>
-                                            </div>
-
-                                            <div class="tw-flex-1 tw-min-w-0">
-                                                <p
-                                                    class="tw-text-sm tw-font-medium tw-text-gray-500 tw-truncate tw-whitespace-nowrap">
-                                                    {{ __('home.total_sell') }}
-                                                </p>
-                                                <p
-                                                    class="total_sell tw-mt-0.5 tw-text-gray-900 tw-text-xl tw-truncate tw-font-semibold tw-tracking-tight tw-font-mono">
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div
-                                    class="tw-transition-all tw-duration-200 tw-bg-white tw-shadow-sm hover:tw-shadow-md tw-rounded-xl hover:tw--translate-y-0.5 tw-ring-1 tw-ring-gray-200">
-                                    <div class="tw-p-4 sm:tw-p-5">
-                                        <div class="tw-flex tw-items-center tw-gap-4">
-                                            <div
-                                                class="tw-inline-flex tw-items-center tw-justify-center tw-w-10 tw-h-10 tw-text-green-500 tw-bg-green-100 tw-rounded-full sm:tw-w-12 sm:tw-h-12 tw-shrink-0">
-                                                <svg aria-hidden="true" class="tw-w-6 tw-h-6" xmlns="http://www.w3.org/2000/svg"
-                                                    viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
-                                                    stroke-linecap="round" stroke-linejoin="round">
-                                                    <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                    <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                    <path
-                                                        d="M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16l-3 -2l-2 2l-2 -2l-2 2l-2 -2l-3 2">
-                                                    </path>
-                                                    <path
-                                                        d="M14.8 8a2 2 0 0 0 -1.8 -1h-2a2 2 0 1 0 0 4h2a2 2 0 1 1 0 4h-2a2 2 0 0 1 -1.8 -1">
-                                                    </path>
-                                                    <path d="M12 6v10"></path>
-                                                </svg>
-                                            </div>
-
-                                            <div class="tw-flex-1 tw-min-w-0">
-                                                <p
-                                                    class="tw-text-sm tw-font-medium tw-text-gray-500 tw-truncate tw-whitespace-nowrap">
-                                                    {{ __('lang_v1.net') }} @show_tooltip(__('lang_v1.net_home_tooltip'))
-                                                </p>
-                                                <p
-                                                    class="net tw-mt-0.5 tw-text-gray-900 tw-text-xl tw-truncate tw-font-semibold tw-tracking-tight tw-font-mono">
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div
-                                    class="tw-transition-all tw-duration-200 tw-bg-white tw-shadow-sm hover:tw-shadow-md tw-rounded-xl hover:tw--translate-y-0.5 tw-ring-1 tw-ring-gray-200">
-                                    <div class="tw-p-4 sm:tw-p-5">
-                                        <div class="tw-flex tw-items-center tw-gap-4">
-                                            <div
-                                                class="tw-inline-flex tw-items-center tw-justify-center tw-w-10 tw-h-10 tw-text-yellow-500 tw-bg-yellow-100 tw-rounded-full sm:tw-w-12 sm:tw-h-12 shrink-0">
-                                                <svg aria-hidden="true" class="tw-w-6 tw-h-6" xmlns="http://www.w3.org/2000/svg"
-                                                    viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
-                                                    stroke-linecap="round" stroke-linejoin="round">
-                                                    <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                                                    <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                                                    <path d="M14 3v4a1 1 0 0 0 1 1h4" />
-                                                    <path
-                                                        d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z" />
-                                                    <path d="M9 7l1 0" />
-                                                    <path d="M9 13l6 0" />
-                                                    <path d="M13 17l2 0" />
-                                                </svg>
-                                            </div>
-
-                                            <div class="tw-flex-1 tw-min-w-0">
-                                                <p
-                                                    class="tw-text-sm tw-font-medium tw-text-gray-500 tw-truncate tw-whitespace-nowrap">
-                                                    {{ __('home.invoice_due') }}
-                                                </p>
-                                                <p
-                                                    class="invoice_due tw-mt-0.5 tw-text-gray-900 tw-text-xl tw-truncate tw-font-semibold tw-tracking-tight tw-font-mono">
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div
-                                    class="tw-transition-all tw-duration-200 tw-bg-white tw-shadow-sm hover:tw-shadow-md tw-rounded-xl hover:tw--translate-y-0.5 tw-ring-1 tw-ring-gray-200">
-                                    <div class="tw-p-4 sm:tw-p-5">
-                                        <div class="tw-flex tw-items-center tw-gap-4">
-                                            <div
-                                                class="tw-inline-flex tw-items-center tw-justify-center tw-w-10 tw-h-10 tw-text-red-500 tw-bg-red-100 tw-rounded-full sm:tw-w-12 sm:tw-h-12 shrink-0">
-                                                <svg aria-hidden="true" class="tw-w-6 tw-h-6" xmlns="http://www.w3.org/2000/svg"
-                                                    viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none"
-                                                    stroke-linecap="round" stroke-linejoin="round">
-                                                    <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                                                    <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                                                    <path d="M21 7l-18 0" />
-                                                    <path d="M18 10l3 -3l-3 -3" />
-                                                    <path d="M6 20l-3 -3l3 -3" />
-                                                    <path d="M3 17l18 0" />
-                                                </svg>
-                                            </div>
-
-                                            <div class="tw-flex-1 tw-min-w-0">
-                                                <p
-                                                    class="tw-text-sm tw-font-medium tw-text-gray-500 tw-truncate tw-whitespace-nowrap">
-                                                    {{ __('lang_v1.total_sell_return') }}
-                                                    <i class="fa fa-info-circle text-info hover-q no-print" aria-hidden="true" data-container="body"
-                                                    data-toggle="popover" data-placement="auto bottom" id="total_srp"
-                                                    data-value="{{ __('lang_v1.total_sell_return') }}-{{ __('lang_v1.total_sell_return_paid') }}"
-                                                    data-content="" data-html="true" data-trigger="hover"></i>
-                                                </p>
-                                                <p
-                                                    class="total_sell_return tw-mt-0.5 tw-text-gray-900 tw-text-xl tw-truncate tw-font-semibold tw-tracking-tight tw-font-mono">
-                                                </p>
-                                                {{-- <p class="mb-0 text-muted fs-10 mt-5">{{ __('lang_v1.total_sell_return') }}: <span
-                                                        class="total_sr"></span><br>
-                                                    {{ __('lang_v1.total_sell_return_paid') }}<span class="total_srp"></span></p> --}}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        @endif
-                    @endif
-              
+                    <button type="button" id="dashboard_date_filter">
+                        <i class="fa fa-calendar"></i>
+                        <span>{{ __('messages.filter_by_date') }}</span>
+                        <i class="fa fa-caret-down"></i>
+                    </button>
+                @endif
+                <div class="dv-pill"><i class="fa fa-calendar-check"></i> {{ \Carbon::now()->format('d M Y') }}</div>
+            </div>
         </div>
-        @if (auth()->user()->can('dashboard.data'))
-            @if ($is_admin)
-                <div class="tw-relative">
-                    <div class="tw-absolute tw-inset-0 tw-grid" aria-hidden="true">
-                        <div class="tw-bg-gradient-to-r tw-from-@if(!empty(session('business.theme_color'))){{session('business.theme_color')}}@else{{'primary'}}@endif-800 tw-to-@if(!empty(session('business.theme_color'))){{session('business.theme_color')}}@else{{'primary'}}@endif-900"></div>
-                        <div class="tw-bg-gradient-to-r tw-from-@if(!empty(session('business.theme_color'))){{session('business.theme_color')}}@else{{'primary'}}@endif-800 tw-to-@if(!empty(session('business.theme_color'))){{session('business.theme_color')}}@else{{'primary'}}@endif-900 xl:tw-bg-none xl:tw-bg-gray-100">
-                        </div>
+
+        @if (auth()->user()->can('dashboard.data') && $is_admin)
+            {{-- receivable / payable / recovered / builty --}}
+            <div class="dv-grid">
+                <a href="{{ url('/get-parties?type=customer') }}" class="dv-stat big t-green">
+                    <div class="ic"><i class="fa fa-arrow-down"></i></div>
+                    <div class="txt">
+                        <div class="lbl">Total Receivable</div>
+                        <p class="num total_receivable"></p>
+                        <p class="sub total_receivable_count"></p>
                     </div>
-                    <div class="tw-px-5 tw-isolate">
-                        <div
-                            class="tw-grid tw-grid-cols-1 tw-gap-4 tw-mt-4 sm:tw-mt-6 sm:tw-grid-cols-2 xl:tw-grid-cols-4 sm:tw-gap-5">
-                            <div
-                                class="tw-transition-all tw-duration-200 tw-bg-white tw-shadow-sm tw-rounded-xl hover:tw-shadow-md hover:tw--translate-y-0.5 tw-ring-1 tw-ring-gray-200">
-                                <div class="tw-p-4 sm:tw-p-5">
-                                    <div class="tw-flex tw-items-center tw-gap-4">
-                                        <div
-                                            class="tw-inline-flex tw-items-center tw-justify-center tw-w-10 tw-h-10 tw-rounded-full sm:tw-w-12 sm:tw-h-12 shrink-0 bg-sky-100 tw-text-sky-500">
-                                            <svg aria-hidden="true" class="tw-w-6 tw-h-6"
-                                                xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2"
-                                                stroke="currentColor" fill="none" stroke-linecap="round"
-                                                stroke-linejoin="round">
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                <path d="M12 3v12"></path>
-                                                <path d="M16 11l-4 4l-4 -4"></path>
-                                                <path d="M3 12a9 9 0 0 0 18 0"></path>
-                                            </svg>
-                                        </div>
-
-                                        <div class="tw-flex-1 tw-min-w-0">
-                                            <p
-                                                class="tw-text-sm tw-font-medium tw-text-gray-500 tw-truncate tw-whitespace-nowrap">
-                                                {{ __('home.total_purchase') }}
-                                            </p>
-                                            <p
-                                                class="total_purchase tw-mt-0.5 tw-text-gray-900 tw-text-xl tw-truncate tw-font-semibold tw-tracking-tight tw-font-mono">
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div
-                                class="tw-transition-all tw-duration-200 tw-bg-white tw-shadow-sm tw-rounded-xl hover:tw-shadow-md hover:tw--translate-y-0.5 tw-ring-1 tw-ring-gray-200">
-                                <div class="tw-p-4 sm:tw-p-5">
-                                    <div class="tw-flex tw-items-center tw-gap-4">
-                                        <div
-                                            class="tw-inline-flex tw-items-center tw-justify-center tw-w-10 tw-h-10 tw-text-yellow-500 tw-bg-yellow-100 tw-rounded-full sm:tw-w-12 sm:tw-h-12 shrink-0">
-                                            <svg aria-hidden="true" class="tw-w-6 tw-h-6"
-                                                xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2"
-                                                stroke="currentColor" fill="none" stroke-linecap="round"
-                                                stroke-linejoin="round">
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                                                <path d="M12 9v4" />
-                                                <path
-                                                    d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z" />
-                                                <path d="M12 16h.01" />
-                                            </svg>
-                                        </div>
-
-                                        <div>
-                                            <p class="tw-text-sm tw-font-medium tw-text-gray-500">
-                                                {{ __('home.purchase_due') }}
-                                            </p>
-                                            <p
-                                                class="purchase_due tw-mt-0.5 tw-text-gray-900 tw-text-xl tw-truncate tw-font-semibold tw-tracking-tight tw-font-mono">
-
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div
-                                class="tw-transition-all tw-duration-200 tw-bg-white tw-shadow-sm tw-rounded-xl hover:tw-shadow-md hover:tw--translate-y-0.5 tw-ring-1 tw-ring-gray-200">
-                                <div class="tw-p-4 sm:tw-p-5">
-                                    <div class="tw-flex tw-items-center tw-gap-4">
-                                        <div
-                                            class="tw-inline-flex tw-items-center tw-justify-center tw-w-10 tw-h-10 tw-text-red-500 tw-bg-red-100 tw-rounded-full sm:tw-w-12 sm:tw-h-12 shrink-0">
-                                            <svg aria-hidden="true" class="tw-w-6 tw-h-6"
-                                                xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2"
-                                                stroke="currentColor" fill="none" stroke-linecap="round"
-                                                stroke-linejoin="round">
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                                                <path
-                                                    d="M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16l-3 -2l-2 2l-2 -2l-2 2l-2 -2l-3 2" />
-                                                <path d="M15 14v-2a2 2 0 0 0 -2 -2h-4l2 -2m0 4l-2 -2" />
-                                            </svg>
-                                        </div>
-
-                                        <div class="tw-flex-1 tw-min-w-0">
-                                            <p
-                                                class="tw-text-sm tw-font-medium tw-text-gray-500 tw-truncate tw-whitespace-nowrap">
-                                                {{ __('lang_v1.total_purchase_return') }}
-                                                <i class="fa fa-info-circle text-info hover-q no-print" aria-hidden="true" data-container="body"
-                                                data-toggle="popover" data-placement="auto bottom" id="total_prp"
-                                                data-value="{{ __('lang_v1.total_purchase_return') }}-{{ __('lang_v1.total_purchase_return_paid') }}"
-                                                data-content="" data-html="true" data-trigger="hover"></i>
-                                            </p>
-                                            <p
-                                                class="total_purchase_return tw-mt-0.5 tw-text-gray-900 tw-text-xl tw-truncate tw-font-semibold tw-tracking-tight tw-font-mono">
-                                            </p>
-                                            {{-- <p class="mb-0 text-muted fs-10 mt-5">
-                                                {{ __('lang_v1.total_purchase_return') }}: <span
-                                                    class="total_pr"></span><br>
-                                                {{ __('lang_v1.total_purchase_return_paid') }}<span
-                                                    class="total_prp"></span></p> --}}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div
-                                class="tw-transition-all tw-duration-200 tw-bg-white tw-shadow-sm tw-rounded-xl hover:tw-shadow-md hover:tw--translate-y-0.5 tw-ring-1 tw-ring-gray-200">
-                                <div class="tw-p-4 sm:tw-p-5">
-                                    <div class="tw-flex tw-items-center tw-gap-4">
-                                        <div
-                                            class="tw-inline-flex tw-items-center tw-justify-center tw-w-10 tw-h-10 tw-text-red-500 tw-bg-red-100 tw-rounded-full sm:tw-w-12 sm:tw-h-12 shrink-0">
-                                            <svg aria-hidden="true" class="tw-w-6 tw-h-6"
-                                                xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="2"
-                                                stroke="currentColor" fill="none" stroke-linecap="round"
-                                                stroke-linejoin="round">
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-                                                <path
-                                                    d="M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16l-3 -2l-2 2l-2 -2l-2 2l-2 -2l-3 2">
-                                                </path>
-                                                <path
-                                                    d="M14.8 8a2 2 0 0 0 -1.8 -1h-2a2 2 0 1 0 0 4h2a2 2 0 1 1 0 4h-2a2 2 0 0 1 -1.8 -1">
-                                                </path>
-                                                <path d="M12 6v10"></path>
-                                            </svg>
-                                        </div>
-
-                                        <div class="tw-flex-1 tw-min-w-0">
-                                            <p
-                                                class="tw-text-sm tw-font-medium tw-text-gray-500 tw-truncate tw-whitespace-nowrap">
-                                                {{ __('lang_v1.expense') }}
-                                            </p>
-                                            <p
-                                                class="total_expense tw-mt-0.5 tw-text-gray-900 tw-text-xl tw-truncate tw-font-semibold tw-tracking-tight tw-font-mono">
-
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                </a>
+                <a href="{{ url('/get-parties?type=supplier') }}" class="dv-stat big t-red">
+                    <div class="ic"><i class="fa fa-arrow-up"></i></div>
+                    <div class="txt">
+                        <div class="lbl">Total Payable</div>
+                        <p class="num total_payable"></p>
+                        <p class="sub total_payable_count"></p>
+                    </div>
+                </a>
+                <div class="dv-stat big t-teal">
+                    <div class="ic"><i class="fa fa-hand-holding-usd"></i></div>
+                    <div class="txt">
+                        <div class="lbl">Total Recover Amount</div>
+                        <p class="num recover_amount"></p>
                     </div>
                 </div>
-                {{-- @if (!empty($widgets['after_sale_purchase_totals']))
-                    @foreach ($widgets['after_sale_purchase_totals'] as $widget)
-                        {!! $widget !!}
-                    @endforeach
-                @endif --}}
-            @endif
+                <div class="dv-stat big t-orange">
+                    <div class="ic"><i class="fa fa-truck"></i></div>
+                    <div class="txt">
+                        <div class="lbl">Total Builty Amount</div>
+                        <p class="num total_builty"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dv-row">
+                {{-- sales, purchases and expenses for the selected dates --}}
+                <div class="dv-panel">
+                    <div class="dv-panel-h">
+                        <div class="ph-ic"><i class="fa fa-chart-line"></i></div>
+                        <h5>Business Overview</h5>
+                    </div>
+
+                    <div class="dv-sub-h" style="margin-top: 0;"><i class="fa fa-shopping-cart"></i> Sales</div>
+                    <div class="dv-acc">
+                        <div class="dv-stat t-blue">
+                            <div class="ic"><i class="fa fa-shopping-cart"></i></div>
+                            <div class="txt"><div class="lbl">{{ __('home.total_sell') }}</div><p class="num total_sell"></p></div>
+                        </div>
+                        <div class="dv-stat t-green">
+                            <div class="ic"><i class="fa fa-coins"></i></div>
+                            <div class="txt"><div class="lbl">{{ __('lang_v1.net') }} @show_tooltip(__('lang_v1.net_home_tooltip'))</div><p class="num net"></p></div>
+                        </div>
+                        <div class="dv-stat t-orange">
+                            <div class="ic"><i class="fa fa-file-invoice"></i></div>
+                            <div class="txt"><div class="lbl">{{ __('home.invoice_due') }}</div><p class="num invoice_due"></p></div>
+                        </div>
+                        <div class="dv-stat t-red">
+                            <div class="ic"><i class="fa fa-undo"></i></div>
+                            <div class="txt">
+                                <div class="lbl">{{ __('lang_v1.total_sell_return') }}
+                                    <i class="fa fa-info-circle text-info hover-q no-print" aria-hidden="true" data-container="body"
+                                        data-toggle="popover" data-placement="auto bottom" id="total_srp"
+                                        data-value="{{ __('lang_v1.total_sell_return') }}-{{ __('lang_v1.total_sell_return_paid') }}"
+                                        data-content="" data-html="true" data-trigger="hover"></i>
+                                </div>
+                                <p class="num total_sell_return"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dv-sub-h is-red"><i class="fa fa-truck-loading"></i> Purchases &amp; Expenses</div>
+                    <div class="dv-acc">
+                        <div class="dv-stat t-blue">
+                            <div class="ic"><i class="fa fa-cart-arrow-down"></i></div>
+                            <div class="txt"><div class="lbl">{{ __('home.total_purchase') }}</div><p class="num total_purchase"></p></div>
+                        </div>
+                        <div class="dv-stat t-orange">
+                            <div class="ic"><i class="fa fa-exclamation-triangle"></i></div>
+                            <div class="txt"><div class="lbl">{{ __('home.purchase_due') }}</div><p class="num purchase_due"></p></div>
+                        </div>
+                        <div class="dv-stat t-red">
+                            <div class="ic"><i class="fa fa-reply"></i></div>
+                            <div class="txt">
+                                <div class="lbl">{{ __('lang_v1.total_purchase_return') }}
+                                    <i class="fa fa-info-circle text-info hover-q no-print" aria-hidden="true" data-container="body"
+                                        data-toggle="popover" data-placement="auto bottom" id="total_prp"
+                                        data-value="{{ __('lang_v1.total_purchase_return') }}-{{ __('lang_v1.total_purchase_return_paid') }}"
+                                        data-content="" data-html="true" data-trigger="hover"></i>
+                                </div>
+                                <p class="num total_purchase_return"></p>
+                            </div>
+                        </div>
+                        <div class="dv-stat t-violet">
+                            <div class="ic"><i class="fa fa-money-bill-wave"></i></div>
+                            <div class="txt"><div class="lbl">{{ __('lang_v1.expense') }}</div><p class="num total_expense"></p></div>
+                        </div>
+                    </div>
+
+                    <div class="dv-sub-h"><i class="fa fa-chart-bar"></i> Sales, Purchases &amp; Expenses &ndash; last 30 days</div>
+                    <div id="dv_daily_chart" style="height: 240px;"></div>
+                </div>
+
+                {{-- donut: filled from the same /home/get-totals reply home.js fetches (script at the bottom) --}}
+                <div class="dv-panel">
+                    <div class="dv-panel-h">
+                        <div class="ph-ic"><i class="fa fa-chart-pie"></i></div>
+                        <h5>Financial Overview</h5>
+                    </div>
+                    <div class="dv-donut-wrap">
+                        <div id="dv_fin_donut"></div>
+                        <ul class="dv-legend">
+                            <li><span class="dot" style="background:#3b82c4"></span>{{ __('home.total_sell') }}<span class="v" id="dv_leg_sell">&ndash;</span></li>
+                            <li><span class="dot" style="background:#1f9fa8"></span>{{ __('home.total_purchase') }}<span class="v" id="dv_leg_purchase">&ndash;</span></li>
+                            <li><span class="dot" style="background:#8a63c9"></span>{{ __('lang_v1.expense') }}<span class="v" id="dv_leg_expense">&ndash;</span></li>
+                            <li><span class="dot" style="background:#e58a2b"></span>{{ __('home.invoice_due') }}<span class="v" id="dv_leg_invoice_due">&ndash;</span></li>
+                            <li><span class="dot" style="background:#2f9e6e"></span><b>{{ __('lang_v1.net') }}</b><span class="v" id="dv_leg_net">&ndash;</span></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
         @endif
     </div>
     @if (auth()->user()->can('dashboard.data'))
@@ -1173,6 +829,121 @@
 
 @section('javascript')
     <script src="{{ asset('js/home.js?v=' . $asset_v) }}"></script>
+    <script type="text/javascript">
+        // Daily columns (last 30 days): same look as the babekhyber dashboard chart (rounded gradient columns, light grid)
+        function dv_load_daily_chart() {
+            if (typeof Highcharts === 'undefined' || !document.getElementById('dv_daily_chart')) {
+                return;
+            }
+            $.getJSON('/home/dashboard-chart', { location_id: $('#dashboard_location').val() || '' }, function(d) {
+                var labels = d.labels || [];
+                Highcharts.chart('dv_daily_chart', {
+                    chart: { type: 'column', backgroundColor: 'transparent', height: 240, spacingTop: 4 },
+                    credits: { enabled: false },
+                    exporting: { enabled: false },
+                    title: { text: null },
+                    colors: [
+                        { linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 }, stops: [[0, '#1fb5a6'], [1, '#1f7fa8']] },
+                        { linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 }, stops: [[0, '#8fe08a'], [1, '#3fb56f']] },
+                        { linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 }, stops: [[0, '#f7e27a'], [1, '#e9c34a']] }
+                    ],
+                    legend: {
+                        align: 'right', verticalAlign: 'top', layout: 'horizontal',
+                        itemStyle: { color: '#1f2d27', fontWeight: '600', fontSize: '12px' }, symbolRadius: 3
+                    },
+                    xAxis: {
+                        categories: labels, crosshair: { color: 'rgba(47,158,110,.08)' },
+                        lineColor: '#e3ece7', tickLength: 0,
+                        labels: { style: { color: '#6b7a73', fontSize: '11px' }, rotation: -40,
+                            step: labels.length > 20 ? 3 : (labels.length > 12 ? 2 : 1) }
+                    },
+                    yAxis: {
+                        title: { text: null },
+                        gridLineColor: '#eef3f0',
+                        labels: {
+                            style: { color: '#6b7a73', fontSize: '11px' },
+                            formatter: function() {
+                                var v = Math.abs(this.value);
+                                return v >= 1e7 ? (this.value / 1e7) + ' Cr' : (v >= 1e5 ? (this.value / 1e5) + ' Lac' : (v >= 1e3 ? (this.value / 1e3) + 'k' : this.value));
+                            }
+                        }
+                    },
+                    tooltip: {
+                        shared: true, useHTML: true, borderRadius: 10, borderColor: '#e3ece7', backgroundColor: '#ffffff',
+                        headerFormat: '<div style="font-size:11px;color:#6b7a73;margin-bottom:4px">{point.key}</div>',
+                        pointFormatter: function() {
+                            return '<div><span style="color:' + (this.color.stops ? this.color.stops[1][1] : this.color) + '">&#9679;</span> ' +
+                                this.series.name + ': <b>' + __currency_trans_from_en(this.y, true) + '</b></div>';
+                        }
+                    },
+                    plotOptions: {
+                        column: { pointPadding: 0.02, groupPadding: 0.08, borderWidth: 0, borderRadius: 3, minPointLength: 2 }
+                    },
+                    series: [
+                        { name: @json(__('home.total_sell')), data: d.sell || [] },
+                        { name: @json(__('home.total_purchase')), data: d.purchase || [] },
+                        { name: @json(__('lang_v1.expense')), data: d.expense || [] }
+                    ]
+                });
+            });
+        }
+        $(document).ready(function() {
+            dv_load_daily_chart();
+            $('#dashboard_location').on('change', dv_load_daily_chart);
+        });
+
+        // Financial Overview donut: uses the same /home/get-totals reply home.js already fetches, so it always matches
+        // the cards and re-draws when the location / date filter changes.
+        $(document).ajaxSuccess(function(event, xhr, settings) {
+            if (!settings.url || settings.url.indexOf('/home/get-totals') === -1) {
+                return;
+            }
+            var d = xhr.responseJSON || {};
+            var sell = parseFloat(d.total_sell) || 0;
+            var purchase = parseFloat(d.total_purchase) || 0;
+            var expense = parseFloat(d.total_expense) || 0;
+            var invoice_due = parseFloat(d.invoice_due) || 0;
+            var net = parseFloat(d.net) || 0;
+            var fmt = function(v) { return __currency_trans_from_en(v, true); };
+            var compact = function(v) {
+                var a = Math.abs(v), sign = v < 0 ? '-' : '';
+                if (a >= 1e7) { return sign + (a / 1e7).toFixed(2) + ' Cr'; }
+                if (a >= 1e5) { return sign + (a / 1e5).toFixed(2) + ' Lac'; }
+                if (a >= 1e3) { return sign + (a / 1e3).toFixed(1) + 'k'; }
+                return sign + a.toFixed(0);
+            };
+
+            $('#dv_leg_sell').html(fmt(sell));
+            $('#dv_leg_purchase').html(fmt(purchase));
+            $('#dv_leg_expense').html(fmt(expense));
+            $('#dv_leg_invoice_due').html(fmt(invoice_due));
+            $('#dv_leg_net').html(fmt(net));
+
+            if (typeof Highcharts === 'undefined' || !document.getElementById('dv_fin_donut')) {
+                return;
+            }
+            Highcharts.chart('dv_fin_donut', {
+                chart: { type: 'pie', backgroundColor: 'transparent', margin: [0, 0, 0, 0], spacing: [0, 0, 0, 0] },
+                title: {
+                    text: '<div style="text-align:center;line-height:1.2"><span style="font-size:10px;color:#6b7a73">{{ __('lang_v1.net') }}</span><br><b style="font-size:14px;color:#1f2d27">' + compact(net) + '</b></div>',
+                    useHTML: true, verticalAlign: 'middle', floating: true, y: 6
+                },
+                credits: { enabled: false },
+                exporting: { enabled: false },
+                tooltip: { pointFormatter: function() { return '<b>' + fmt(this.y) + '</b>'; } },
+                plotOptions: { pie: { innerSize: '72%', borderWidth: 2, dataLabels: { enabled: false } } },
+                series: [{
+                    name: 'Amount',
+                    data: [
+                        { name: @json(__('home.total_sell')), y: sell, color: '#3b82c4' },
+                        { name: @json(__('home.total_purchase')), y: purchase, color: '#1f9fa8' },
+                        { name: @json(__('lang_v1.expense')), y: expense, color: '#8a63c9' },
+                        { name: @json(__('home.invoice_due')), y: invoice_due, color: '#e58a2b' }
+                    ]
+                }]
+            });
+        });
+    </script>
     <script src="{{ asset('js/payment.js?v=' . $asset_v) }}"></script>
     @includeIf('sales_order.common_js')
     @includeIf('purchase_order.common_js')

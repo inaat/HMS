@@ -237,6 +237,55 @@ class HomeController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
+    /**
+     * Dashboard column chart: sales, purchases and expenses per day for the last 30 days.
+     *
+     * @return array labels + one array per series
+     */
+    public function getDashboardChart()
+    {
+        if (! auth()->user()->can('dashboard.data')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = request()->session()->get('user.business_id');
+        $location_id = request()->input('location_id');
+        $permitted_locations = auth()->user()->permitted_locations();
+
+        $end = \Carbon::today();
+        $start = $end->copy()->subDays(29);
+
+        $rows = \App\Transaction::where('business_id', $business_id)
+            ->whereDate('transaction_date', '>=', $start->toDateString())
+            ->whereDate('transaction_date', '<=', $end->toDateString())
+            ->where(function ($q) {
+                $q->where(function ($s) {
+                    $s->where('type', 'sell')->where('status', 'final');
+                })->orWhere(function ($p) {
+                    $p->where('type', 'purchase')->where('status', 'received');
+                })->orWhere('type', 'expense');
+            })
+            ->when(! empty($location_id), fn ($q) => $q->where('location_id', $location_id))
+            ->when($permitted_locations != 'all', fn ($q) => $q->whereIn('location_id', $permitted_locations))
+            ->selectRaw('DATE(transaction_date) as day, type, SUM(final_total) as total')
+            ->groupBy('day', 'type')
+            ->get()
+            ->groupBy('day');
+
+        $labels = [];
+        $series = ['sell' => [], 'purchase' => [], 'expense' => []];
+        for ($day = $start->copy(); $day->lte($end); $day->addDay()) {
+            $key = $day->toDateString();
+            $labels[] = $day->format('d M');
+            $day_rows = $rows->get($key, collect())->keyBy('type');
+            foreach (array_keys($series) as $type) {
+                $series[$type][] = round((float) optional($day_rows->get($type))->total, 2);
+            }
+        }
+
+        return ['labels' => $labels, 'sell' => $series['sell'], 'purchase' => $series['purchase'], 'expense' => $series['expense']];
+    }
+
     public function getTotals()
     {
         if (request()->ajax()) {

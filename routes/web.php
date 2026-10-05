@@ -118,6 +118,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
      Route::resource('/builty', BuiltyController::class);
     Route::get('/home', [HomeController::class, 'index'])->name('home');
     Route::get('/home/get-totals', [HomeController::class, 'getTotals']);
+    Route::get('/home/dashboard-chart', [HomeController::class, 'getDashboardChart']);
     Route::get('/home/product-stock-alert', [HomeController::class, 'getProductStockAlert']);
     Route::get('/home/purchase-payment-dues', [HomeController::class, 'getPurchasePaymentDues']);
     Route::get('/home/sales-payment-dues', [HomeController::class, 'getSalesPaymentDues']);

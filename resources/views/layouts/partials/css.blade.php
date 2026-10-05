@@ -76,3 +76,6 @@
     {!! $__system_settings['additional_css'] !!}
 @endif
 
+
+{{-- "Fresh green" theme (public/css/theme-fresh.css), scoped to body.theme-fresh --}}
+<link rel="stylesheet" href="{{ asset('css/theme-fresh.css?v='.$asset_v) }}">
