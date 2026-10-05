@@ -50,6 +50,10 @@ class SalesCommissionAgentController extends Controller
                         @endcan
                         @can("user.delete")
                         <button data-href="{{action(\'App\Http\Controllers\SalesCommissionAgentController@destroy\', [$id])}}" class="tw-dw-btn tw-dw-btn-outline tw-dw-btn-xs tw-dw-btn-error delete_commsn_agnt_button"><i class="glyphicon glyphicon-trash"></i> @lang("messages.delete")</button>
+                        &nbsp;
+                        @endcan
+                        @can("sales_representative.view")
+                        <a href="{{action(\'App\Http\Controllers\ReportController@getCommissionAgentReport\')}}?commission_agent={{$id}}" class="tw-dw-btn tw-dw-btn-outline tw-dw-btn-xs tw-dw-btn-info"><i class="fa fa-file-alt"></i> Report</a>
                         @endcan'
                 )
                 ->filterColumn('full_name', function ($query, $keyword) {

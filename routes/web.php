@@ -286,6 +286,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::get('/reports/stock-adjustment-report', [ReportController::class, 'getStockAdjustmentReport']);
     Route::get('/reports/register-report', [ReportController::class, 'getRegisterReport']);
     Route::get('/reports/sales-representative-report', [ReportController::class, 'getSalesRepresentativeReport']);
+    Route::get('/reports/commission-agent-report', [ReportController::class, 'getCommissionAgentReport']);
     Route::get('/reports/sales-representative-total-expense', [ReportController::class, 'getSalesRepresentativeTotalExpense']);
     Route::get('/reports/sales-representative-total-sell', [ReportController::class, 'getSalesRepresentativeTotalSell']);
     Route::get('/reports/sales-representative-total-commission', [ReportController::class, 'getSalesRepresentativeTotalCommission']);

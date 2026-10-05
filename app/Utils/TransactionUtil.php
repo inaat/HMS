@@ -4366,6 +4366,134 @@ class TransactionUtil extends Util
     }
 
     /**
+     * Detailed commission agent report: product-wise and invoice-wise sales of commission agents
+     *
+     * @param  int  $business_id
+     * @param  array  $filters  start_date, end_date, location_id, commission_agent, brand_id, category_id, product_id
+     * @return array ['products' => Collection, 'invoices' => Collection]
+     */
+    public function getCommissionAgentDetails($business_id, $filters = [])
+    {
+        $query = TransactionSellLine::join('transactions as t', 'transaction_sell_lines.transaction_id', '=', 't.id')
+                    ->join('users as agent', 't.commission_agent', '=', 'agent.id')
+                    ->join('products as p', 'transaction_sell_lines.product_id', '=', 'p.id')
+                    ->join('variations as v', 'transaction_sell_lines.variation_id', '=', 'v.id')
+                    ->leftjoin('brands as b', 'p.brand_id', '=', 'b.id')
+                    ->leftjoin('categories as c', 'p.category_id', '=', 'c.id')
+                    ->leftjoin('units as u', 'p.unit_id', '=', 'u.id')
+                    ->where('t.business_id', $business_id)
+                    ->where('t.type', 'sell')
+                    ->where('t.status', 'final')
+                    ->whereNotNull('t.commission_agent');
+
+        //Check for permitted locations of a user
+        $permitted_locations = auth()->user()->permitted_locations();
+        if ($permitted_locations != 'all') {
+            $query->whereIn('t.location_id', $permitted_locations);
+        }
+
+        if (! empty($filters['start_date']) && ! empty($filters['end_date'])) {
+            $query->whereBetween(DB::raw('date(t.transaction_date)'), [$filters['start_date'], $filters['end_date']]);
+        }
+        if (! empty($filters['location_id'])) {
+            $query->where('t.location_id', $filters['location_id']);
+        }
+        if (! empty($filters['commission_agent'])) {
+            $query->where('t.commission_agent', $filters['commission_agent']);
+        }
+        if (! empty($filters['brand_id'])) {
+            $query->where('p.brand_id', $filters['brand_id']);
+        }
+        if (! empty($filters['category_id'])) {
+            $query->where('p.category_id', $filters['category_id']);
+        }
+        if (! empty($filters['product_id'])) {
+            $query->where('p.id', $filters['product_id']);
+        }
+
+        $agent_name = "TRIM(CONCAT(COALESCE(agent.surname, ''),' ',COALESCE(agent.first_name, ''),' ',COALESCE(agent.last_name,'')))";
+        $net_amount = '(transaction_sell_lines.quantity - transaction_sell_lines.quantity_returned) * transaction_sell_lines.unit_price';
+
+        $products = (clone $query)
+                    ->select(
+                        't.commission_agent as agent_id',
+                        DB::raw("$agent_name as agent_name"),
+                        'agent.cmmsn_percent',
+                        'p.id as product_id',
+                        'p.name as product',
+                        'p.type as product_type',
+                        'v.name as variation',
+                        'v.sub_sku',
+                        'b.id as brand_id',
+                        'b.name as brand',
+                        'c.name as category',
+                        'u.short_name as unit',
+                        DB::raw('SUM(transaction_sell_lines.quantity) as qty_sold'),
+                        DB::raw('SUM(transaction_sell_lines.quantity_returned) as qty_returned'),
+                        DB::raw('SUM(transaction_sell_lines.quantity * transaction_sell_lines.unit_price) as gross_amount'),
+                        DB::raw("SUM($net_amount) as net_amount"),
+                        DB::raw('COUNT(DISTINCT t.id) as invoice_count')
+                    )
+                    ->groupBy('t.commission_agent', 'v.id')
+                    ->orderBy('agent_name')
+                    ->orderBy('b.name')
+                    ->orderBy('p.name')
+                    ->get();
+
+        $invoices = (clone $query)
+                    ->leftjoin('contacts as ct', 't.contact_id', '=', 'ct.id')
+                    ->leftjoin('business_locations as bl', 't.location_id', '=', 'bl.id')
+                    ->select(
+                        't.commission_agent as agent_id',
+                        DB::raw("$agent_name as agent_name"),
+                        'agent.cmmsn_percent',
+                        't.id as transaction_id',
+                        't.invoice_no',
+                        't.transaction_date',
+                        't.final_total',
+                        't.payment_status',
+                        'ct.name as customer',
+                        'ct.supplier_business_name',
+                        'bl.name as location',
+                        DB::raw('SUM(transaction_sell_lines.quantity - transaction_sell_lines.quantity_returned) as net_qty'),
+                        DB::raw("SUM($net_amount) as net_amount")
+                    )
+                    ->groupBy('t.commission_agent', 't.id')
+                    ->orderBy('agent_name')
+                    ->orderBy('t.transaction_date')
+                    ->get();
+
+        //Every sold line: date, invoice, customer, agent and product
+        $lines = (clone $query)
+                    ->leftjoin('contacts as ct', 't.contact_id', '=', 'ct.id')
+                    ->select(
+                        't.commission_agent as agent_id',
+                        DB::raw("$agent_name as agent_name"),
+                        'agent.cmmsn_percent',
+                        't.id as transaction_id',
+                        't.invoice_no',
+                        't.transaction_date',
+                        'ct.name as customer',
+                        'ct.supplier_business_name',
+                        'p.name as product',
+                        'p.type as product_type',
+                        'v.name as variation',
+                        'v.sub_sku',
+                        'b.name as brand',
+                        'u.short_name as unit',
+                        'transaction_sell_lines.quantity as qty_sold',
+                        'transaction_sell_lines.quantity_returned as qty_returned',
+                        'transaction_sell_lines.unit_price',
+                        DB::raw("$net_amount as net_amount")
+                    )
+                    ->orderBy('t.transaction_date')
+                    ->orderBy('t.id')
+                    ->get();
+
+        return compact('products', 'invoices', 'lines');
+    }
+
+    /**
      * Add Sell transaction
      *
      * @param  int  $business_id

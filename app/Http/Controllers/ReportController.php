@@ -1309,6 +1309,97 @@ class ReportController extends Controller
     }
 
     /**
+     * Detailed commission agent report: agent, brand, product and invoice wise commission (printable)
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function getCommissionAgentReport(Request $request)
+    {
+        if (! auth()->user()->can('sales_representative.view')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $business_id = $request->session()->get('user.business_id');
+
+        $filters = $request->only(['start_date', 'end_date', 'location_id', 'commission_agent', 'brand_id', 'category_id', 'product_id']);
+        if (empty($filters['start_date']) || empty($filters['end_date'])) {
+            $filters['start_date'] = \Carbon::now()->startOfMonth()->format('Y-m-d');
+            $filters['end_date'] = \Carbon::now()->format('Y-m-d');
+        }
+
+        $details = $this->transactionUtil->getCommissionAgentDetails($business_id, $filters);
+        $products = $details['products'];
+        $invoices = $details['invoices'];
+        $lines = $details['lines'];
+
+        $commission = function ($row) {
+            return $row->net_amount * (float) $row->cmmsn_percent / 100;
+        };
+
+        //Agent wise summary
+        $agents = $products->groupBy('agent_id')->map(function ($rows) use ($invoices, $commission) {
+            $first = $rows->first();
+
+            return (object) [
+                'agent_id' => $first->agent_id,
+                'agent_name' => $first->agent_name,
+                'cmmsn_percent' => (float) $first->cmmsn_percent,
+                'invoice_count' => $invoices->where('agent_id', $first->agent_id)->count(),
+                'qty_sold' => $rows->sum('qty_sold'),
+                'qty_returned' => $rows->sum('qty_returned'),
+                'gross_amount' => $rows->sum('gross_amount'),
+                'net_amount' => $rows->sum('net_amount'),
+                'commission' => $rows->sum($commission),
+            ];
+        })->values();
+
+        //Agent + brand wise summary
+        $brands = $products->groupBy(function ($row) {
+            return $row->agent_id.'_'.$row->brand_id;
+        })->map(function ($rows) use ($commission) {
+            $first = $rows->first();
+
+            return (object) [
+                'agent_id' => $first->agent_id,
+                'agent_name' => $first->agent_name,
+                'brand' => $first->brand,
+                'cmmsn_percent' => (float) $first->cmmsn_percent,
+                'product_count' => $rows->count(),
+                'qty_sold' => $rows->sum('qty_sold'),
+                'qty_returned' => $rows->sum('qty_returned'),
+                'net_amount' => $rows->sum('net_amount'),
+                'commission' => $rows->sum($commission),
+            ];
+        })->values();
+
+        //Commission is calculated on payments received when set so in POS settings
+        $business_details = $this->businessUtil->getDetails($business_id);
+        $pos_settings = empty($business_details->pos_settings) ? $this->businessUtil->defaultPosSettings() : json_decode($business_details->pos_settings, true);
+        $calculation_type = $pos_settings['cmmsn_calculation_type'] ?? 'invoice_value';
+        if ($calculation_type == 'payment_received') {
+            foreach ($agents as $agent) {
+                $payment = $this->transactionUtil->getTotalPaymentWithCommission($business_id, $filters['start_date'], $filters['end_date'], $filters['location_id'] ?? null, $agent->agent_id);
+                $agent->payment_received = (float) ($payment['total_payment_with_commission'] ?? 0);
+                $agent->payment_commission = $agent->payment_received * $agent->cmmsn_percent / 100;
+            }
+        }
+
+        $commission_agents = User::saleCommissionAgentsDropdown($business_id, false);
+        $business_locations = BusinessLocation::forDropdown($business_id, true);
+        $brands_dropdown = Brands::forDropdown($business_id);
+        $categories = Category::forDropdown($business_id, 'product');
+        $products_dropdown = Product::where('business_id', $business_id)
+                    ->select('id', DB::raw("CONCAT(name, ' (', sku, ')') as name"))
+                    ->orderBy('name')
+                    ->pluck('name', 'id');
+
+        return view('report.commission_agent_report', compact(
+            'filters', 'agents', 'brands', 'products', 'invoices', 'lines', 'calculation_type',
+            'commission_agents', 'business_locations', 'brands_dropdown', 'categories', 'products_dropdown'
+        ));
+    }
+
+    /**
      * Shows sales representative total expense
      *
      * @return json

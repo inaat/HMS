@@ -766,6 +766,11 @@ class AdminSidebarMenu
                                 __('report.sales_representative'),
                                 ['icon' => '', 'active' => request()->segment(2) == 'sales-representative-report']
                             );
+                            $sub->url(
+                                action([\App\Http\Controllers\ReportController::class, 'getCommissionAgentReport']),
+                                'Commission Agent Report',
+                                ['icon' => '', 'active' => request()->segment(2) == 'commission-agent-report']
+                            );
                         }
                         if (auth()->user()->can('purchase_n_sell_report.view') && in_array('tables', $enabled_modules)) {
                             $sub->url(
