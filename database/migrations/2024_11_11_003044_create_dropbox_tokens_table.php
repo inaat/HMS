@@ -13,14 +13,18 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::create('dropbox_tokens', function (Blueprint $table) {
-            $table->id();
-            $table->string('dropbox_app_key')->nullable();
-            $table->string('dropbox_app_secret')->nullable();
-            $table->string('dropbox_auth_token')->nullable();
-            $table->timestamp('expires_at')->nullable();
-            $table->timestamps();
-        });
+        // skipped when the change is already in the database (e.g. a database
+        // imported from another install without this migration being recorded)
+        if (! Schema::hasTable('dropbox_tokens')) {
+            Schema::create('dropbox_tokens', function (Blueprint $table) {
+                $table->id();
+                $table->string('dropbox_app_key')->nullable();
+                $table->string('dropbox_app_secret')->nullable();
+                $table->string('dropbox_auth_token')->nullable();
+                $table->timestamp('expires_at')->nullable();
+                $table->timestamps();
+            });
+        }
     }
 
     /**

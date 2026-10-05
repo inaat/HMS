@@ -13,14 +13,20 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::table('products', function (Blueprint $table) {
-            $table->integer('preparation_time_in_minutes')->nullable()->after('created_by');
-        });
+        // skipped when the change is already in the database (e.g. a database
+        // imported from another install without this migration being recorded)
+        if (! Schema::hasColumn('products', 'preparation_time_in_minutes')) {
+            Schema::table('products', function (Blueprint $table) {
+                $table->integer('preparation_time_in_minutes')->nullable()->after('created_by');
+            });
+        }
 
-        Schema::table('users', function (Blueprint $table) {
-            $table->dateTime('available_at')->nullable()->after('business_id')->comment('Service staff avilable at. Calculated from product preparation_time_in_minutes');
-            $table->dateTime('paused_at')->nullable()->after('available_at')->comment('Service staff available time paused at, Will be nulled on resume.');
-        });
+        if (! Schema::hasColumn('users', 'available_at')) {
+            Schema::table('users', function (Blueprint $table) {
+                $table->dateTime('available_at')->nullable()->after('business_id')->comment('Service staff avilable at. Calculated from product preparation_time_in_minutes');
+                $table->dateTime('paused_at')->nullable()->after('available_at')->comment('Service staff available time paused at, Will be nulled on resume.');
+            });
+        }
     }
 
     /**

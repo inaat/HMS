@@ -14,10 +14,14 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::table('business', function (Blueprint $table) {
-            $table->tinyInteger('currency_precision')->default(2)->after('time_format');
-            $table->tinyInteger('quantity_precision')->default(2)->after('currency_precision');
-        });
+        // skipped when the change is already in the database (e.g. a database
+        // imported from another install without this migration being recorded)
+        if (! Schema::hasColumn('business', 'currency_precision')) {
+            Schema::table('business', function (Blueprint $table) {
+                $table->tinyInteger('currency_precision')->default(2)->after('time_format');
+                $table->tinyInteger('quantity_precision')->default(2)->after('currency_precision');
+            });
+        }
 
         //clear blade directive cache
         Artisan::call('view:clear');

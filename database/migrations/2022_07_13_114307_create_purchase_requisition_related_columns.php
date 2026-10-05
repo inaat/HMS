@@ -13,13 +13,19 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::table('purchase_lines', function (Blueprint $table) {
-            $table->integer('purchase_requisition_line_id')->after('tax_id')->nullable();
-        });
+        // skipped when the change is already in the database (e.g. a database
+        // imported from another install without this migration being recorded)
+        if (! Schema::hasColumn('purchase_lines', 'purchase_requisition_line_id')) {
+            Schema::table('purchase_lines', function (Blueprint $table) {
+                $table->integer('purchase_requisition_line_id')->after('tax_id')->nullable();
+            });
+        }
 
-        Schema::table('transactions', function (Blueprint $table) {
-            $table->text('purchase_requisition_ids')->after('created_by')->nullable();
-        });
+        if (! Schema::hasColumn('transactions', 'purchase_requisition_ids')) {
+            Schema::table('transactions', function (Blueprint $table) {
+                $table->text('purchase_requisition_ids')->after('created_by')->nullable();
+            });
+        }
     }
 
     /**

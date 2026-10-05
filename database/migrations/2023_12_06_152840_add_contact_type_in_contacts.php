@@ -13,9 +13,13 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::table('contacts', function (Blueprint $table) {
-            $table->string('contact_type')->nullable()->after('type');
-        });
+        // skipped when the change is already in the database (e.g. a database
+        // imported from another install without this migration being recorded)
+        if (! Schema::hasColumn('contacts', 'contact_type')) {
+            Schema::table('contacts', function (Blueprint $table) {
+                $table->string('contact_type')->nullable()->after('type');
+            });
+        }
     }
 
     /**

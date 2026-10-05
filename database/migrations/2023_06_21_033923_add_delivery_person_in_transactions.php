@@ -13,9 +13,13 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::table('transactions', function (Blueprint $table) {
-            $table->bigInteger('delivery_person')->nullable()->index()->after('delivered_to');
-        });
+        // skipped when the change is already in the database (e.g. a database
+        // imported from another install without this migration being recorded)
+        if (! Schema::hasColumn('transactions', 'delivery_person')) {
+            Schema::table('transactions', function (Blueprint $table) {
+                $table->bigInteger('delivery_person')->nullable()->index()->after('delivered_to');
+            });
+        }
     }
 
     /**

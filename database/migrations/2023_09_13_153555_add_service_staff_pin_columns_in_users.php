@@ -13,10 +13,14 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::table('users', function (Blueprint $table) {
-            $table->boolean('is_enable_service_staff_pin')->default(0)->after('status');
-            $table->text('service_staff_pin')->nullable()->after('is_enable_service_staff_pin');
-        });
+        // skipped when the change is already in the database (e.g. a database
+        // imported from another install without this migration being recorded)
+        if (! Schema::hasColumn('users', 'is_enable_service_staff_pin')) {
+            Schema::table('users', function (Blueprint $table) {
+                $table->boolean('is_enable_service_staff_pin')->default(0)->after('status');
+                $table->text('service_staff_pin')->nullable()->after('is_enable_service_staff_pin');
+            });
+        }
     }
 
     /**

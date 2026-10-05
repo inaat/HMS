@@ -13,9 +13,13 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::table('oauth_clients', function (Blueprint $table) {
-            $table->string('provider')->after('secret')->nullable();
-        });
+        // skipped when the change is already in the database (e.g. a database
+        // imported from another install without this migration being recorded)
+        if (! Schema::hasColumn('oauth_clients', 'provider')) {
+            Schema::table('oauth_clients', function (Blueprint $table) {
+                $table->string('provider')->after('secret')->nullable();
+            });
+        }
     }
 
     /**

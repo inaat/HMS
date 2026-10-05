@@ -13,11 +13,15 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::table('invoice_schemes', function (Blueprint $table) {
-            $table->string('number_type', 100)->default('sequential')->after('scheme_type');
-
-            $table->index('number_type');
-        });
+        // skipped when the change is already in the database (e.g. a database
+        // imported from another install without this migration being recorded)
+        if (! Schema::hasColumn('invoice_schemes', 'number_type')) {
+            Schema::table('invoice_schemes', function (Blueprint $table) {
+                $table->string('number_type', 100)->default('sequential')->after('scheme_type');
+    
+                $table->index('number_type');
+            });
+        }
     }
 
     /**

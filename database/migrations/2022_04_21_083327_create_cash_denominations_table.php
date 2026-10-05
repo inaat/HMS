@@ -13,14 +13,18 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::create('cash_denominations', function (Blueprint $table) {
-            $table->bigIncrements('id');
-            $table->integer('business_id');
-            $table->decimal('amount', 22, 4);
-            $table->integer('total_count');
-            $table->morphs('model');
-            $table->timestamps();
-        });
+        // skipped when the change is already in the database (e.g. a database
+        // imported from another install without this migration being recorded)
+        if (! Schema::hasTable('cash_denominations')) {
+            Schema::create('cash_denominations', function (Blueprint $table) {
+                $table->bigIncrements('id');
+                $table->integer('business_id');
+                $table->decimal('amount', 22, 4);
+                $table->integer('total_count');
+                $table->morphs('model');
+                $table->timestamps();
+            });
+        }
     }
 
     /**
