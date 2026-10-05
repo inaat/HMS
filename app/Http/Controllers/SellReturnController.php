@@ -253,8 +253,12 @@ class SellReturnController extends Controller
             $sell->sell_lines[$key]->formatted_qty = $this->transactionUtil->num_f($value->quantity, false, null, true);
         }
 
+        //What the customer still owes on the sale decides how much of the return is refunded
+        $refund_info = $this->transactionUtil->getSellReturnRefundInfo($sell, $sell->return_parent);
+        $payment_types = $this->transactionUtil->payment_types($sell->location_id, false, $business_id);
+
         return view('sell_return.add')
-            ->with(compact('sell'));
+            ->with(compact('sell', 'refund_info', 'payment_types'));
     }
 
     /**

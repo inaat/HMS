@@ -157,6 +157,49 @@
 					<span id="net_return">0</span>
 				</div>
 			</div>
+
+			{{-- Refund: the return first clears what is still due on the sale, only the rest goes back to the customer --}}
+			@php
+				$refund_payment = $refund_info['refund_payment'];
+			@endphp
+			{!! Form::hidden('manage_refund', 1) !!}
+			<div class="row">
+				<div class="col-sm-12">
+					<div class="sr-refund-box">
+						<div class="sr-refund-sale">
+							<span>Sale total: <strong><span class="display_currency" data-currency_symbol="true">{{ $refund_info['sale_total'] }}</span></strong></span>
+							<span>Paid: <strong><span class="display_currency" data-currency_symbol="true">{{ $refund_info['sale_paid'] }}</span></strong></span>
+							<span>Still due: <strong><span class="display_currency" data-currency_symbol="true">{{ $refund_info['sale_due'] }}</span></strong></span>
+							@if($refund_info['other_refunded'] > 0)
+								<span>Already refunded by hand: <strong><span class="display_currency" data-currency_symbol="true">{{ $refund_info['other_refunded'] }}</span></strong></span>
+							@endif
+						</div>
+						<div class="row">
+							<div class="col-sm-3">
+								<div class="checkbox" style="margin-top: 28px;">
+									<label>
+										<input type="checkbox" name="refund_now" value="1" id="refund_now" @if(! empty($refund_payment) || empty($sell->return_parent)) checked @endif>
+										<strong>Refund to customer now</strong>
+									</label>
+								</div>
+							</div>
+							<div class="col-sm-3">
+								<div class="form-group">
+									{!! Form::label('refund_method', 'Refund method:') !!}
+									{!! Form::select('refund_method', $payment_types, ! empty($refund_payment) ? $refund_payment->method : 'cash', ['class' => 'form-control refund-field', 'id' => 'refund_method']) !!}
+								</div>
+							</div>
+							<div class="col-sm-3">
+								<div class="form-group">
+									{!! Form::label('refund_amount', 'Refund amount:') !!}
+									{!! Form::text('refund_amount', ! empty($refund_payment) ? @num_format($refund_payment->amount) : null, ['class' => 'form-control input_number refund-field', 'id' => 'refund_amount']) !!}
+								</div>
+							</div>
+						</div>
+						<p class="sr-refund-help" id="refund_help"></p>
+					</div>
+				</div>
+			</div>
 			<br>
 			<div class="row">
 				<div class="col-sm-12">
@@ -212,6 +255,82 @@
 		$('span#total_return_discount').text(__currency_trans_from_en(discount, true));
 		$('span#total_return_tax').text(__currency_trans_from_en(total_tax, true));
 		$('span#net_return').text(__currency_trans_from_en(net_return_inc_tax, true));
+
+		update_refund(net_return_inc_tax);
 	}
+
+	//Refund = return total minus what the customer still owes on the sale (and minus refunds paid by hand)
+	var sale_due = {{ (float) $refund_info['sale_due'] }};
+	var other_refunded = {{ (float) $refund_info['other_refunded'] }};
+	var refund_touched = false; //user changed the tick or the amount himself
+	var last_return_total = 0;
+	//Editing a return: keep the refund saved last time unless it was the suggested one
+	var refund_first_run = true;
+	var is_existing_return = {{ ! empty($sell->return_parent) ? 'true' : 'false' }};
+	var saved_refund = {{ ! empty($refund_payment) ? (float) $refund_payment->amount : 0 }};
+
+	function update_refund(return_total) {
+		if (typeof return_total == 'undefined') {
+			return_total = last_return_total;
+		}
+		last_return_total = return_total;
+
+		var max_refund = Math.max(0, return_total - other_refunded);
+		var suggested = Math.min(Math.max(0, return_total - sale_due), max_refund);
+		var adjusted = Math.min(return_total, sale_due);
+
+		if (refund_first_run) {
+			refund_first_run = false;
+			if (is_existing_return && Math.abs(saved_refund - suggested) > 0.009) {
+				refund_touched = true;
+			}
+		}
+
+		if (! refund_touched) {
+			$('#refund_now').prop('checked', true);
+			__write_number($('#refund_amount'), suggested);
+		} else if (__read_number($('#refund_amount')) > max_refund) {
+			__write_number($('#refund_amount'), max_refund);
+		}
+
+		var refunding = $('#refund_now').is(':checked');
+		$('.refund-field').prop('disabled', ! refunding);
+		var refund = refunding ? __read_number($('#refund_amount')) : 0;
+
+		var help = '';
+		if (return_total <= 0) {
+			help = 'Enter the return quantity.';
+		} else {
+			if (adjusted > 0) {
+				help += '<strong>' + __currency_trans_from_en(adjusted, true) + '</strong> is taken off what the customer still owes on this sale. ';
+			}
+			if (refund > 0) {
+				help += '<strong>' + __currency_trans_from_en(refund, true) + '</strong> is paid back to the customer (' + $('#refund_method option:selected').text() + ').';
+			} else if (suggested > 0) {
+				help += '<span class="text-danger">No refund: ' + __currency_trans_from_en(suggested, true) + ' stays as the customer\'s credit balance.</span>';
+			}
+		}
+		$('#refund_help').html(help);
+	}
+
+	$(document).on('change', '#refund_now', function() {
+		refund_touched = true;
+		if ($(this).is(':checked') && __read_number($('#refund_amount')) <= 0) {
+			__write_number($('#refund_amount'), Math.min(Math.max(0, last_return_total - sale_due), Math.max(0, last_return_total - other_refunded)));
+		}
+		update_refund();
+	});
+	$(document).on('change keyup', '#refund_amount', function() {
+		refund_touched = true;
+		update_refund();
+	});
+	$(document).on('change', '#refund_method', function() {
+		update_refund();
+	});
 </script>
+<style>
+	.sr-refund-box { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 15px 4px; margin-top: 15px; background: #f9fafb; }
+	.sr-refund-sale { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 13px; color: #374151; }
+	.sr-refund-help { font-size: 13px; color: #374151; margin: 0 0 8px; }
+</style>
 @endsection

@@ -6781,6 +6781,11 @@ class TransactionUtil extends Util
             }
         }
 
+        //Refund to the customer, only when the return form sends it (other callers keep the old behaviour)
+        if (! empty($input['manage_refund'])) {
+            $this->syncSellReturnRefund($sell, $sell_return, $input, $user_id, $uf_number);
+        }
+
         //Update payment status
         $this->updatePaymentStatus($sell_return->id, $sell_return->final_total);
 
@@ -6813,6 +6818,102 @@ class TransactionUtil extends Util
         }
 
         return $sell_return;
+    }
+
+    /**
+     * Note that marks the refund payment created from the sell return form; only that payment is
+     * changed or removed when the return is edited, refunds paid by hand are never touched.
+     */
+    const SELL_RETURN_REFUND_NOTE = 'Refund on sell return';
+
+    /**
+     * How a sell return is settled: the return first clears what is still due on the sale,
+     * only the rest is refunded to the customer (e.g. paid sale: full refund; credit sale: no refund).
+     *
+     * @param  Transaction  $sell  parent sale
+     * @param  Transaction|null  $sell_return
+     * @return array sale_total, sale_paid, sale_due, refund_payment, other_refunded
+     */
+    public function getSellReturnRefundInfo($sell, $sell_return = null)
+    {
+        $sale_payments = TransactionPayment::where('transaction_id', $sell->id)->get();
+        $sale_paid = $sale_payments->where('is_return', 0)->sum('amount') - $sale_payments->where('is_return', 1)->sum('amount');
+
+        $refund_payment = null;
+        $other_refunded = 0;
+        if (! empty($sell_return)) {
+            $return_payments = TransactionPayment::where('transaction_id', $sell_return->id)->get();
+            $refund_payment = $return_payments->first(fn ($p) => empty($p->parent_id) && $p->note == self::SELL_RETURN_REFUND_NOTE);
+            $other_refunded = $return_payments->where('id', '!=', optional($refund_payment)->id)->sum('amount');
+        }
+
+        return [
+            'sale_total' => (float) $sell->final_total,
+            'sale_paid' => (float) $sale_paid,
+            'sale_due' => max(0, (float) $sell->final_total - $sale_paid),
+            'refund_payment' => $refund_payment,
+            'other_refunded' => (float) $other_refunded,
+        ];
+    }
+
+    /**
+     * Creates, updates or removes the refund payment of a sell return from the return form
+     * (refund_now, refund_amount, refund_method). Without an amount the suggested refund is used:
+     * return total minus what is still due on the sale.
+     */
+    public function syncSellReturnRefund($sell, $sell_return, $input, $user_id, $uf_number = true)
+    {
+        $info = $this->getSellReturnRefundInfo($sell, $sell_return);
+        $refund_payment = $info['refund_payment'];
+
+        //Never refund more than the return total minus refunds already paid by hand
+        $max_refund = max(0, $sell_return->final_total - $info['other_refunded']);
+        $amount = 0;
+        if (! empty($input['refund_now'])) {
+            $amount = isset($input['refund_amount']) && $input['refund_amount'] !== ''
+                ? ($uf_number ? $this->num_uf($input['refund_amount']) : (float) $input['refund_amount'])
+                : max(0, $sell_return->final_total - $info['sale_due']);
+            $amount = min(max(0, $amount), $max_refund);
+        }
+        $method = ! empty($input['refund_method']) ? $input['refund_method'] : 'cash';
+
+        if ($amount <= 0) {
+            if (! empty($refund_payment)) {
+                $refund_payment->delete();
+                event(new TransactionPaymentDeleted($refund_payment));
+            }
+
+            return;
+        }
+
+        if (! empty($refund_payment)) {
+            $refund_payment->update([
+                'amount' => $amount,
+                'method' => $method,
+                'payment_for' => $sell_return->contact_id,
+            ]);
+            event(new TransactionPaymentUpdated($refund_payment, $sell_return->type));
+
+            return;
+        }
+
+        $ref_count = $this->setAndGetReferenceCount('sell_payment', $sell_return->business_id);
+        $payment_data = [
+            'transaction_id' => $sell_return->id,
+            'business_id' => $sell_return->business_id,
+            'amount' => $amount,
+            'method' => $method,
+            'is_return' => 0,
+            'note' => self::SELL_RETURN_REFUND_NOTE,
+            'paid_on' => $sell_return->transaction_date,
+            'created_by' => $user_id,
+            'payment_for' => $sell_return->contact_id,
+            'payment_ref_no' => $this->generateReferenceNumber('sell_payment', $ref_count, $sell_return->business_id),
+        ];
+        $payment = TransactionPayment::create($payment_data);
+
+        $payment_data['transaction_type'] = $sell_return->type;
+        event(new TransactionPaymentAdded($payment, $payment_data));
     }
 
     public function updatePurchaseOrderStatus($purchase_order_ids = [])
