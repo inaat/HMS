@@ -9,7 +9,14 @@
             @endif
             @if($product->enable_stock == 1)
                 <br>
-                <small class="text-muted" style="white-space: nowrap;">@lang('report.current_stock'): @if(!empty($variation->variation_location_details->first())) {{@num_format($variation->variation_location_details->first()->qty_available)}} @else 0 @endif {{ $product->unit->short_name }}</small>
+                @php
+                    $row_stock = ! empty($variation->variation_location_details->first()) ? $variation->variation_location_details->first()->qty_available : 0;
+                    $row_stock_in_sub_unit = app(\App\Utils\ProductUtil::class)->stockInBiggestSubUnit($product->business_id, $row_stock, $product->sub_unit_ids, $product->unit->short_name);
+                @endphp
+                <small class="text-muted" style="white-space: nowrap;">@lang('report.current_stock'): {{ @num_format($row_stock) }} {{ $product->unit->short_name }}</small>
+                @if(! empty($row_stock_in_sub_unit))
+                    <br><small class="text-muted" style="white-space: nowrap;">({{ $row_stock_in_sub_unit }})</small>
+                @endif
             @endif
             
         </td>

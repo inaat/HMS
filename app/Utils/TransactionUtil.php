@@ -3845,6 +3845,7 @@ class TransactionUtil extends Util
             ->when(! empty($location_id), fn ($q) => $q->where('vld.location_id', $location_id))
             ->select(
                 'p.id as product_id',
+                'v.id as variation_id',
                 'p.name as product',
                 'p.type',
                 'v.name as variation',

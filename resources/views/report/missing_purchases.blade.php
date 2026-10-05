@@ -37,10 +37,16 @@
                     stock goes back to 0 or more and profit uses the real cost.
                 </div>
 
+                <button type="button" class="tw-dw-btn tw-dw-btn-primary tw-text-white tw-dw-btn-sm" id="create_purchase_selected" disabled style="margin-bottom: 10px;">
+                    <i class="fa fa-plus"></i> Create purchase for selected (<span id="selected_count">0</span>)
+                </button>
+                <span class="text-muted" style="margin-left: 8px;">Select products of one location; they are added to a new purchase with the missing quantity.</span>
+
                 <div class="table-responsive">
-                    <table class="table table-bordered table-striped">
+                    <table class="table table-bordered table-striped" id="missing_purchases_table">
                         <thead>
                             <tr>
+                                <th style="width: 30px;"><input type="checkbox" id="select_all_missing" title="Select all"></th>
                                 <th>Product</th>
                                 <th>SKU</th>
                                 <th>Location</th>
@@ -53,7 +59,16 @@
                         </thead>
                         <tbody>
                             @foreach($rows as $row)
+                                @php
+                                    //Quantity to purchase: what was sold without stock, at least enough to bring negative stock to 0
+                                    $missing_qty = max((float) $row->sold_without_stock, (float) $row->qty_available < 0 ? -(float) $row->qty_available : 0);
+                                @endphp
                                 <tr>
+                                    <td>
+                                        <input type="checkbox" class="missing_row_check"
+                                            data-product_id="{{ $row->product_id }}" data-variation_id="{{ $row->variation_id }}"
+                                            data-location_id="{{ $row->location_id }}" data-location="{{ $row->location }}" data-qty="{{ $missing_qty }}">
+                                    </td>
                                     <td>{{ $row->product }}@if($row->type == 'variable') - {{ $row->variation }}@endif</td>
                                     <td>{{ $row->sub_sku }}</td>
                                     <td>{{ $row->location }}</td>
@@ -62,7 +77,7 @@
                                     <td><span class="display_currency" data-currency_symbol="true">{{ $row->sold_without_stock * $row->default_purchase_price }}</span></td>
                                     <td>{{ ! empty($row->last_sold_without_stock) ? @format_datetime($row->last_sold_without_stock) : '' }}</td>
                                     <td>
-                                        <a href="{{ action([\App\Http\Controllers\PurchaseController::class, 'create']) }}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary" target="_blank">
+                                        <a href="{{ action([\App\Http\Controllers\PurchaseController::class, 'create']) }}?location_id={{ $row->location_id }}&missing_items={{ $row->product_id }}:{{ $row->variation_id }}:{{ $missing_qty }}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary" target="_blank">
                                             <i class="fa fa-plus"></i> Add purchase
                                         </a>
                                     </td>
@@ -71,7 +86,7 @@
                         </tbody>
                         <tfoot>
                             <tr class="bg-gray font-17 footer-total">
-                                <td colspan="4"><strong>Total ({{ $rows->count() }} products)</strong></td>
+                                <td colspan="5"><strong>Total ({{ $rows->count() }} products)</strong></td>
                                 <td>{{ @format_quantity($rows->sum('sold_without_stock')) }}</td>
                                 <td><span class="display_currency" data-currency_symbol="true">{{ $rows->sum(fn ($r) => $r->sold_without_stock * $r->default_purchase_price) }}</span></td>
                                 <td colspan="2"></td>
@@ -82,4 +97,41 @@
             @endif
         @endcomponent
     </section>
+@endsection
+
+@section('javascript')
+<script type="text/javascript">
+    $(document).ready(function() {
+        function update_selected() {
+            var count = $('.missing_row_check:checked').length;
+            $('#selected_count').text(count);
+            $('#create_purchase_selected').prop('disabled', count == 0);
+        }
+
+        $('#select_all_missing').on('change', function() {
+            $('.missing_row_check').prop('checked', $(this).is(':checked'));
+            update_selected();
+        });
+        $(document).on('change', '.missing_row_check', update_selected);
+
+        $('#create_purchase_selected').on('click', function() {
+            var checked = $('.missing_row_check:checked');
+            var locations = {};
+            checked.each(function() {
+                locations[$(this).data('location_id')] = $(this).data('location');
+            });
+            if (Object.keys(locations).length > 1) {
+                toastr.error('Select products of one location only (selected: ' + Object.values(locations).join(', ') + ')');
+                return;
+            }
+
+            var items = checked.map(function() {
+                return $(this).data('product_id') + ':' + $(this).data('variation_id') + ':' + $(this).data('qty');
+            }).get().join(',');
+
+            window.open("{{ action([\App\Http\Controllers\PurchaseController::class, 'create']) }}" +
+                '?location_id=' + Object.keys(locations)[0] + '&missing_items=' + items, '_blank');
+        });
+    });
+</script>
 @endsection

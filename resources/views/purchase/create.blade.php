@@ -659,4 +659,94 @@
 		}
 	</script>
 	@include('purchase.partials.keyboard_shortcuts')
+
+	{{-- Opened from Reports > Missing purchases: preselect location and add the selected products with their missing quantity --}}
+	@if(request()->filled('missing_items'))
+	@php
+		$missing_items_list = [];
+		foreach (explode(',', (string) request()->input('missing_items')) as $missing_item) {
+			$parts = explode(':', $missing_item);
+			if ((int) ($parts[0] ?? 0) > 0 && (int) ($parts[1] ?? 0) > 0) {
+				$missing_items_list[] = ['product_id' => (int) $parts[0], 'variation_id' => (int) $parts[1], 'qty' => (float) ($parts[2] ?? 0)];
+			}
+		}
+		$missing_location_id = (int) request()->input('location_id');
+	@endphp
+	<script type="text/javascript">
+		$(document).ready(function() {
+			var items = @json($missing_items_list);
+			var location_id = @json($missing_location_id ?: null);
+
+			//Changing the location clears the table, so set it first, then add the rows one by one
+			if (location_id && $('select#location_id').val() != location_id) {
+				$('select#location_id').val(location_id).trigger('change');
+			}
+			if (!$('select#location_id').val()) {
+				toastr.error('Select the business location first');
+				return;
+			}
+
+			var added = 0;
+			function add_next(index) {
+				if (index >= items.length) {
+					toastr.success(added + ' product(s) added with the missing quantity. Check prices and supplier, then save.');
+					return;
+				}
+				var item = items[index];
+				var row_count = $('#row_count').val();
+				$.ajax({
+					method: 'POST',
+					url: '/purchases/get_purchase_entry_row',
+					dataType: 'html',
+					data: {
+						product_id: item.product_id,
+						variation_id: item.variation_id,
+						row_count: row_count,
+						location_id: $('select#location_id').val(),
+						supplier_id: $('#supplier_id').val()
+					},
+					success: function(result) {
+						var rows_before = $('#purchase_entry_table tbody tr').length;
+						append_purchase_lines(result, row_count);
+						var row = $('#purchase_entry_table tbody tr').eq(rows_before);
+						if (row.length) {
+							//Missing quantity is in the base unit (Pc/KG). Buy it in the biggest sub unit (Ctn/Bag), rounded up
+							//to whole cartons/bags; if less than one carton/bag is missing, keep the base unit.
+							var qty = item.qty;
+							var unit_select = row.find('select.sub_unit');
+							if (unit_select.length) {
+								var base_option = null, big_option = null, big_multiplier = 1;
+								unit_select.find('option').each(function() {
+									var multiplier = parseFloat($(this).data('multiplier')) || 0;
+									if (multiplier == 1 && !base_option) {
+										base_option = $(this);
+									}
+									if (multiplier > big_multiplier) {
+										big_multiplier = multiplier;
+										big_option = $(this);
+									}
+								});
+								var chosen = base_option;
+								if (big_option && item.qty >= big_multiplier) {
+									chosen = big_option;
+									qty = Math.ceil(item.qty / big_multiplier);
+								}
+								if (chosen && unit_select.val() != chosen.val()) {
+									unit_select.val(chosen.val()).trigger('change');
+								}
+							}
+							__write_number(row.find('.purchase_quantity'), qty, true);
+							row.find('.purchase_quantity').trigger('change');
+							added++;
+						}
+					},
+					complete: function() {
+						add_next(index + 1);
+					}
+				});
+			}
+			add_next(0);
+		});
+	</script>
+	@endif
 @endsection
