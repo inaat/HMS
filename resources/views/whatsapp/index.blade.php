@@ -18,6 +18,25 @@
         </div>
     @endif
 
+    @component('components.widget', ['class' => 'box-success', 'title' => 'Sending'])
+        <form method="POST" action="{{ url('whatsapp/send-as') }}" class="form-inline">
+            @csrf
+            <div class="form-group">
+                <label for="wa_send_as" style="margin-right: 8px;">Send ledger &amp; invoice as:</label>
+                <select name="send_as" id="wa_send_as" class="form-control">
+                    <option value="image" @if($send_as == 'image') selected @endif>Image (opens in chat)</option>
+                    <option value="pdf" @if($send_as == 'pdf') selected @endif>PDF file</option>
+                    <option value="both" @if($send_as == 'both') selected @endif>Image + PDF</option>
+                </select>
+            </div>
+            <button type="submit" class="tw-dw-btn tw-dw-btn-primary tw-text-white tw-dw-btn-sm" style="margin-left: 8px;">@lang('messages.save')</button>
+            <p class="text-muted" style="margin: 8px 0 0;">
+                Image is easiest for customers on a phone; PDF is better for long ledgers and printing.
+                You can still pick another option for one ledger next to its WhatsApp button.
+            </p>
+        </form>
+    @endcomponent
+
     @component('components.widget', ['class' => 'box-primary', 'title' => 'Devices'])
         @slot('tool')
             <div class="box-tools">

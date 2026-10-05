@@ -27,8 +27,32 @@ class WhatsappController extends Controller
         WhatsappDevice::forBusiness($business_id);
 
         $devices = WhatsappDevice::where('business_id', $business_id)->orderBy('id')->get();
+        $send_as = app(\App\Utils\TransactionUtil::class)->whatsappSendAs($business_id);
 
-        return view('whatsapp.index')->with('devices', $devices);
+        return view('whatsapp.index')->with(compact('devices', 'send_as'));
+    }
+
+    /**
+     * Saves how ledgers and invoices are sent: image, pdf or both (same setting as Business settings > Contact)
+     */
+    public function saveSendAs(Request $request)
+    {
+        if (! auth()->user()->can('send_notification')) {
+            abort(403, 'Unauthorized action.');
+        }
+
+        $request->validate(['send_as' => 'required|in:image,pdf,both']);
+
+        $business = \App\Business::findOrFail($request->session()->get('user.business_id'));
+        $common_settings = $business->common_settings ?: [];
+        $common_settings['whatsapp_send_as'] = $request->input('send_as');
+        $business->common_settings = $common_settings;
+        $business->save();
+
+        //Ledger page reads it from the session
+        $request->session()->put('business.common_settings', $common_settings);
+
+        return redirect()->back()->with('status', ['success' => 1, 'msg' => 'WhatsApp sending setting saved']);
     }
 
     public function store(Request $request)

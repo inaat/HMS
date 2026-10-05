@@ -551,7 +551,8 @@ $(document).on('click', '#send_ledger_whatsapp', function() {
         start_date: $('#ledger_date_range').data('daterangepicker').startDate.format('YYYY-MM-DD'),
         end_date: $('#ledger_date_range').data('daterangepicker').endDate.format('YYYY-MM-DD'),
         format: $('input[name="ledger_format"]:checked').val(),
-        location_id: $('#ledger_location').val()
+        location_id: $('#ledger_location').val(),
+        send_as: $('#ledger_whatsapp_send_as').val()
     };
 
     var original_html = btn.html();

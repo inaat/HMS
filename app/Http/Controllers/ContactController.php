@@ -1396,26 +1396,39 @@ class ContactController extends Controller
             $for_pdf = true;
             $view = $format == 'format_2' ? 'contact.ledger_format_2' : ($format == 'format_3' ? 'contact.ledger_format_3' : 'contact.ledger');
             $html = view($view)->with(compact('ledger_details', 'contact', 'location', 'is_admin', 'for_pdf'))->render();
-
-            $mpdf = $this->getMpdf();
-            $mpdf->WriteHTML($html);
-
-            $path = config('constants.mpdf_temp_path');
-            if (! file_exists($path)) {
-                mkdir($path, 0777, true);
-            }
-            $file = $path.'/'.time().'_ledger.pdf';
-            $mpdf->Output($file, 'F');
+            //Image: same view as on screen (browser fonts), without the edit buttons
+            $image_html = view($view)->with(compact('ledger_details', 'contact', 'location') + ['is_admin' => false])->render();
 
             $filename = 'Ledger-'.str_replace(' ', '-', $contact->name).'.pdf';
             $caption = $contact->name.' - Ledger '.$this->transactionUtil->format_date($start_date).' to '.$this->transactionUtil->format_date($end_date)
                 ."\nBalance due: ".$this->transactionUtil->num_f($ledger_details['balance_due'], true);
 
-            $response = (new WhatsappApiService())->sendDocument(\App\WhatsappDevice::instanceFor($business_id), $file, $contact->mobile, $filename, $caption);
+            $result = $this->transactionUtil->sendDocumentOnWhatsapp(
+                $business_id,
+                //03001234567 -> 923001234567, like invoices and reminders
+                DefaulterController::whatsappNumber($contact->mobile) ?: $contact->mobile,
+                $image_html,
+                function () use ($html, &$file) {
+                    $mpdf = $this->getMpdf();
+                    $mpdf->WriteHTML($html);
 
-            $output = (empty($response) || ! empty($response['error']))
-                ? ['success' => 0, 'msg' => $response['message'] ?? 'WhatsApp did not accept the message.']
-                : ['success' => 1, 'msg' => 'Ledger sent on WhatsApp to '.$contact->mobile];
+                    $path = config('constants.mpdf_temp_path');
+                    if (! file_exists($path)) {
+                        mkdir($path, 0777, true);
+                    }
+                    $file = $path.'/'.time().'_ledger.pdf';
+                    $mpdf->Output($file, 'F');
+
+                    return $file;
+                },
+                $filename,
+                $caption,
+                $this->transactionUtil->whatsappSendAs($business_id, $request->input('send_as'))
+            );
+
+            $output = empty($result['success'])
+                ? ['success' => 0, 'msg' => $result['msg']]
+                : ['success' => 1, 'msg' => 'Ledger sent on WhatsApp to '.$contact->mobile.' ('.$result['msg'].')'];
         } catch (\Exception $e) {
             \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
 

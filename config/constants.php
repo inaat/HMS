@@ -61,6 +61,9 @@ return [
     
     'mpdf_temp_path' => storage_path('app/pdf'), //Temporary path used by mpdf
 
+    //Edge / Chrome used to send ledgers and invoices on WhatsApp as images (auto-detected when empty)
+    'html_to_image_browser' => env('HTML_TO_IMAGE_BROWSER'),
+
     'document_upload_mimes_types' => ['application/pdf' => '.pdf',
         'text/csv' => '.csv',
         'application/zip' => '.zip',

@@ -7410,7 +7410,99 @@ class TransactionUtil extends Util
      *
      * @return array ['success' => bool, 'msg' => string]
      */
-    function sendReceiptViaWhatsApp($receipt_details, $business_id, $transaction_id) {
+    /**
+     * How ledgers and invoices go on WhatsApp: 'image' (default), 'pdf' or 'both' (Business settings > Contact)
+     */
+    public function whatsappSendAs($business_id, $requested = null)
+    {
+        if (in_array($requested, ['image', 'pdf', 'both'])) {
+            return $requested;
+        }
+        $common_settings = Business::where('id', $business_id)->value('common_settings');
+        $common_settings = is_array($common_settings) ? $common_settings : (json_decode($common_settings, true) ?: []);
+
+        return $common_settings['whatsapp_send_as'] ?? 'image';
+    }
+
+    /**
+     * Sends a document on WhatsApp as images (pages of the HTML, rendered by Edge / Chrome), as a PDF, or both.
+     * When the images can't be made (no browser, very long document) the PDF is sent instead.
+     *
+     * @param  string  $html  what the images show (same view as the PDF)
+     * @param  callable  $make_pdf  returns the PDF file path; only called when a PDF is sent
+     * @return array success, msg, sent_as ('image' | 'pdf' | 'both')
+     */
+    public function sendDocumentOnWhatsapp($business_id, $number, $html, callable $make_pdf, $filename, $caption, $send_as = 'image')
+    {
+        $api = app(WhatsappApiService::class);
+        $instance = \App\WhatsappDevice::instanceFor($business_id);
+        $failed = fn ($response) => empty($response) || ! empty($response['error']);
+
+        $images = [];
+        $sent = [];
+        try {
+            if (in_array($send_as, ['image', 'both'])) {
+                $images = \App\Services\HtmlToImage::convert($html, pathinfo($filename, PATHINFO_FILENAME));
+                foreach ($images as $i => $image) {
+                    $page_caption = $i == 0 ? $caption : null;
+                    if (count($images) > 1) {
+                        $page_caption = ($i == 0 ? $caption."\n" : '').'Page '.($i + 1).'/'.count($images);
+                    }
+                    $response = $api->sendImage($instance, $image, $number, $page_caption);
+                    if ($failed($response)) {
+                        return ['success' => false, 'msg' => 'WhatsApp: '.($response['message'] ?? 'image not accepted')];
+                    }
+                }
+                if (! empty($images)) {
+                    $sent[] = 'image';
+                }
+            }
+
+            //PDF when asked, or when the images could not be made
+            if ($send_as != 'image' || empty($images)) {
+                $pdf = $make_pdf();
+                $response = $api->sendDocument($instance, $pdf, $number, $filename, $caption);
+                if ($failed($response)) {
+                    return ['success' => false, 'msg' => 'WhatsApp: '.($response['message'] ?? 'PDF not accepted')];
+                }
+                $sent[] = 'pdf';
+            }
+        } finally {
+            \App\Services\HtmlToImage::delete($images);
+        }
+
+        $sent_as = count($sent) > 1 ? 'both' : ($sent[0] ?? $send_as);
+        $msg = $sent_as == 'image' ? count($images).' image(s)' : ($sent_as == 'both' ? count($images).' image(s) + PDF' : 'PDF');
+        if (in_array($send_as, ['image', 'both']) && empty($images)) {
+            $msg .= ' (image not possible for this document, sent as PDF)';
+        }
+
+        return ['success' => true, 'msg' => $msg, 'sent_as' => $sent_as];
+    }
+
+    /**
+     * HTML of the invoice as it is printed from the browser (the location's invoice layout + app styles),
+     * used for the WhatsApp image of an invoice
+     */
+    public function receiptImageHtml($receipt_details, $business_details)
+    {
+        if (empty($receipt_details->currency)) {
+            $receipt_details->currency = [
+                'symbol' => $business_details->currency_symbol,
+                'thousand_separator' => $business_details->thousand_separator,
+                'decimal_separator' => $business_details->decimal_separator,
+            ];
+        }
+        //Logo from disk: the browser opens the page as a file, not through the website
+        if (! empty($receipt_details->logo)) {
+            $logo_file = public_path(parse_url($receipt_details->logo, PHP_URL_PATH));
+            $receipt_details->logo = is_file($logo_file) ? 'file:///'.str_replace('\\', '/', $logo_file) : false;
+        }
+
+        return view('sale_pos.receipts.whatsapp_image', compact('receipt_details'))->render();
+    }
+
+    function sendReceiptViaWhatsApp($receipt_details, $business_id, $transaction_id, $send_as = null) {
         // 03001234567 / +92 300 1234567 -> 923001234567 (same as ledger and defaulter reminders)
         $number = \App\Http\Controllers\DefaulterController::whatsappNumber($receipt_details->customer_mobile);
         if (empty($number)) {
@@ -7425,12 +7517,31 @@ class TransactionUtil extends Util
         $filename = basename($receipt_details->invoice_no . '.pdf');
 
         try {
-            $this->reportPDF($receipt_details->invoice_no, 'samplereport.css', $receipt_details, 'sale_pos.receipts.pdf', 'save', 'a4');
+            //Image: invoice design made for WhatsApp (sale_pos.receipts.whatsapp_image); PDF stays as before
+            $html = $this->receiptImageHtml(clone $receipt_details, (new BusinessUtil())->getDetails($business_id));
 
-            $response = (new WhatsappApiService())->sendDocument(\App\WhatsappDevice::instanceFor($business_id), $filePath, $number, $filename, $receipt_details->invoice_no);
+            $result = $this->sendDocumentOnWhatsapp(
+                $business_id,
+                $number,
+                $html,
+                function () use ($receipt_details, $filePath) {
+                    $this->reportPDF($receipt_details->invoice_no, 'samplereport.css', $receipt_details, 'sale_pos.receipts.pdf', 'save', 'a4');
 
-            if (! empty($response['error'])) {
-                return ['success' => false, 'msg' => 'WhatsApp: '.($response['message'] ?? 'sending failed')];
+                    //Mypdf saves next to the current folder (public/ in the web app); pick it up from anywhere else
+                    $saved = getcwd().DIRECTORY_SEPARATOR.$receipt_details->invoice_no.'.pdf';
+                    if (! is_file($filePath) && is_file($saved)) {
+                        rename($saved, $filePath);
+                    }
+
+                    return $filePath;
+                },
+                $filename,
+                'Invoice '.$receipt_details->invoice_no,
+                $this->whatsappSendAs($business_id, $send_as)
+            );
+
+            if (empty($result['success'])) {
+                return $result;
             }
 
             $transaction = Transaction::where('business_id', $business_id)
@@ -7439,7 +7550,7 @@ class TransactionUtil extends Util
                 ->first();
             $this->activityLog($transaction, 'pdf_notification_sent', null, [], false, $business_id);
 
-            return ['success' => true, 'msg' => 'Receipt sent on WhatsApp'];
+            return ['success' => true, 'msg' => 'Invoice sent on WhatsApp ('.$result['msg'].')'];
         } catch (\Illuminate\Http\Client\ConnectionException $e) {
             \Log::warning('WhatsApp receipt not sent (gateway not responding): '.$e->getMessage());
 

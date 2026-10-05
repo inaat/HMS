@@ -48,6 +48,15 @@
             <button type="button" class="btn btn-default btn-xs" id="send_ledger"><i class="fas fa-envelope"></i></button>
 
             <button type="button" class="btn btn-success btn-xs" id="send_ledger_whatsapp" title="Send on WhatsApp"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+            @php
+                $common_settings = session('business.common_settings') ?? [];
+                $ledger_send_as = $common_settings['whatsapp_send_as'] ?? 'image';
+            @endphp
+            <select id="ledger_whatsapp_send_as" class="input-xs" title="Send on WhatsApp as" style="height: 22px; font-size: 12px; margin-left: 2px;">
+                <option value="image" @if($ledger_send_as == 'image') selected @endif>as Image</option>
+                <option value="pdf" @if($ledger_send_as == 'pdf') selected @endif>as PDF</option>
+                <option value="both" @if($ledger_send_as == 'both') selected @endif>Image + PDF</option>
+            </select>
         </div>
     </div>
     <div id="contact_ledger_div"></div>

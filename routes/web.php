@@ -431,6 +431,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::post('top-defaulters/send', [\App\Http\Controllers\DefaulterController::class, 'send']);
     Route::get('whatsapp', [\App\Http\Controllers\WhatsappController::class, 'index']);
     Route::post('whatsapp', [\App\Http\Controllers\WhatsappController::class, 'store']);
+    Route::post('whatsapp/send-as', [\App\Http\Controllers\WhatsappController::class, 'saveSendAs']);
     Route::get('whatsapp/{id}/qr-status', [\App\Http\Controllers\WhatsappController::class, 'qrStatus']);
     Route::post('whatsapp/{id}/update', [\App\Http\Controllers\WhatsappController::class, 'update']);
     Route::post('whatsapp/{id}/delete', [\App\Http\Controllers\WhatsappController::class, 'destroy']);
