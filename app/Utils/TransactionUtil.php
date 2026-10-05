@@ -276,6 +276,15 @@ class TransactionUtil extends Util
         $transaction->fill($update_date);
         $transaction->update();
 
+        //If the customer was changed, its payments must move with it (the contact ledger finds payments by payment_for)
+        if (! empty($transaction->contact_id)) {
+            TransactionPayment::where('transaction_id', $transaction->id)
+                ->where(function ($q) use ($transaction) {
+                    $q->whereNull('payment_for')->orWhere('payment_for', '!=', $transaction->contact_id);
+                })
+                ->update(['payment_for' => $transaction->contact_id]);
+        }
+
         return $transaction;
     }
 
@@ -719,6 +728,17 @@ class TransactionUtil extends Util
         if ($transaction->status == 'draft') {
             return true;
         }
+
+        //Existing payments must belong to the invoice's current customer (it can be changed on edit,
+        //e.g. Walk-In -> real customer); the contact ledger finds payments by payment_for
+        if (! empty($transaction->contact_id)) {
+            TransactionPayment::where('transaction_id', $transaction->id)
+                ->where(function ($q) use ($transaction) {
+                    $q->whereNull('payment_for')->orWhere('payment_for', '!=', $transaction->contact_id);
+                })
+                ->update(['payment_for' => $transaction->contact_id]);
+        }
+
         $c = 0;
         $prefix_type = 'sell_payment';
         if ($transaction->type == 'purchase') {
@@ -3547,6 +3567,57 @@ class TransactionUtil extends Util
                 $this->mapPurchaseSell($business, $new_sell_lines);
             }
         }
+    }
+
+    /**
+     * Payments recorded for another customer than their invoice's customer (customer changed after payment).
+     * The contact ledger finds payments by payment_for, so these make one customer's balance too high.
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    public function getPaymentContactMismatches($business_id)
+    {
+        return TransactionPayment::join('transactions as t', 't.id', '=', 'transaction_payments.transaction_id')
+            ->join('contacts as c', 'c.id', '=', 't.contact_id')
+            ->leftJoin('contacts as wrong', 'wrong.id', '=', 'transaction_payments.payment_for')
+            ->where('t.business_id', $business_id)
+            ->whereNotNull('t.contact_id')
+            ->where(function ($q) {
+                $q->whereNull('transaction_payments.payment_for')
+                    ->orWhereColumn('transaction_payments.payment_for', '!=', 't.contact_id');
+            })
+            ->select(
+                'transaction_payments.id',
+                'transaction_payments.payment_ref_no',
+                'transaction_payments.amount',
+                'transaction_payments.paid_on',
+                't.id as transaction_id',
+                't.invoice_no',
+                't.type',
+                'c.name as customer',
+                'wrong.name as recorded_for'
+            )
+            ->orderBy('transaction_payments.paid_on')
+            ->get();
+    }
+
+    /**
+     * Moves payments to their invoice's customer (fixes getPaymentContactMismatches()).
+     *
+     * @return int payments fixed
+     */
+    public function repairPaymentContacts($business_id)
+    {
+        $ids = $this->getPaymentContactMismatches($business_id)->pluck('id');
+        $fixed = 0;
+        foreach ($ids->chunk(500) as $chunk) {
+            $fixed += DB::table('transaction_payments as tp')
+                ->join('transactions as t', 't.id', '=', 'tp.transaction_id')
+                ->whereIn('tp.id', $chunk->all())
+                ->update(['tp.payment_for' => DB::raw('t.contact_id')]);
+        }
+
+        return $fixed;
     }
 
     /**

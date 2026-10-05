@@ -133,9 +133,10 @@ class ReportController extends Controller
         $issues = $this->transactionUtil->getSellPurchaseMappingIssues($business_id);
         $overlinked = $this->transactionUtil->getOverlinkedPurchaseLines($business_id);
         $stock_mismatches = $this->transactionUtil->getStockMismatches($business_id);
+        $payment_mismatches = $this->transactionUtil->getPaymentContactMismatches($business_id);
         $can_repair = auth()->user()->can('purchase.update');
 
-        return view('report.stock_link_check', compact('issues', 'overlinked', 'stock_mismatches', 'can_repair'));
+        return view('report.stock_link_check', compact('issues', 'overlinked', 'stock_mismatches', 'payment_mismatches', 'can_repair'));
     }
 
     /**
@@ -173,6 +174,7 @@ class ReportController extends Controller
         try {
             DB::beginTransaction();
             $summary = $this->transactionUtil->repairSellPurchaseMapping($business_id);
+            $summary['payments_moved'] = $this->transactionUtil->repairPaymentContacts($business_id);
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();
@@ -183,7 +185,7 @@ class ReportController extends Controller
 
         \Log::info('Stock links repaired', ['business_id' => $business_id, 'user_id' => auth()->id()] + $summary);
 
-        return ['success' => true, 'msg' => ($summary['sell_lines_repaired'] + $summary['unlinked_sell_lines']).' sell line(s), '.$summary['overlinked_purchase_lines'].' purchase line(s) and '.$summary['stock_corrected'].' stock row(s) repaired'];
+        return ['success' => true, 'msg' => ($summary['sell_lines_repaired'] + $summary['unlinked_sell_lines']).' sell line(s), '.$summary['overlinked_purchase_lines'].' purchase line(s) and '.$summary['stock_corrected'].' stock row(s) and '.$summary['payments_moved'].' payment(s) repaired'];
     }
 
     /**

@@ -13,7 +13,7 @@
             @php
                 $extra = $issues->filter(fn ($i) => $i->linked_qty > $i->quantity);
             @endphp
-            @if($can_repair && ($issues->isNotEmpty() || $overlinked->isNotEmpty() || $stock_mismatches->isNotEmpty()))
+            @if($can_repair && ($issues->isNotEmpty() || $overlinked->isNotEmpty() || $stock_mismatches->isNotEmpty() || $payment_mismatches->isNotEmpty()))
                 <button type="button" class="tw-dw-btn tw-dw-btn-warning tw-text-white tw-dw-btn-sm" id="repair_stock_links" style="margin-bottom: 10px;">
                     <i class="fa fa-wrench"></i> Repair
                 </button>
@@ -79,6 +79,48 @@
                                 </tr>
                             @endforeach
                         </tbody>
+                    </table>
+                </div>
+            @endif
+
+            @if($payment_mismatches->isNotEmpty())
+                <h4>Payments recorded for the wrong customer ({{ $payment_mismatches->count() }})</h4>
+                <p class="text-muted">The invoice's customer was changed after it was paid (e.g. Walk-In &rarr; real customer), but the
+                    payment stayed with the old customer. The customer's ledger then misses these payments and shows a too high balance.
+                    Repair moves each payment to its invoice's customer.</p>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-striped">
+                        <thead>
+                            <tr>
+                                <th>Paid on</th>
+                                <th>Payment</th>
+                                <th>Invoice</th>
+                                <th>Amount</th>
+                                <th>Recorded for</th>
+                                <th>Should be (invoice customer)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($payment_mismatches as $payment)
+                                <tr>
+                                    <td>{{ @format_datetime($payment->paid_on) }}</td>
+                                    <td>{{ $payment->payment_ref_no }}</td>
+                                    <td>
+                                        <a href="#" class="btn-modal" data-href="{{ action([\App\Http\Controllers\SellController::class, 'show'], [$payment->transaction_id]) }}" data-container=".view_modal">{{ $payment->invoice_no }}</a>
+                                    </td>
+                                    <td><span class="display_currency" data-currency_symbol="true">{{ $payment->amount }}</span></td>
+                                    <td class="text-danger">{{ $payment->recorded_for ?? '-' }}</td>
+                                    <td class="text-success">{{ $payment->customer }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                        <tfoot>
+                            <tr class="bg-gray">
+                                <td colspan="3"><strong>Total</strong></td>
+                                <td><span class="display_currency" data-currency_symbol="true">{{ $payment_mismatches->sum('amount') }}</span></td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
             @endif
