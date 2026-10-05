@@ -5416,12 +5416,10 @@ class TransactionUtil extends Util
      */
     public function getListSells($business_id, $sale_type = 'sell')
     {
+        // sell lines and sell returns are read through per-row subqueries, not joins:
+        // joining every sell line multiplied each sale by its line count, so every
+        // page (and the datatable's row count) had to group ~180k rows back together
         $sells = Transaction::leftJoin('contacts', 'transactions.contact_id', '=', 'contacts.id')
-                // ->leftJoin('transaction_payments as tp', 'transactions.id', '=', 'tp.transaction_id')
-                ->leftJoin('transaction_sell_lines as tsl', function ($join) {
-                    $join->on('transactions.id', '=', 'tsl.transaction_id')
-                        ->whereNull('tsl.parent_sell_line_id');
-                })
                 ->leftJoin('users as u', 'transactions.created_by', '=', 'u.id')
                 ->leftJoin('users as ss', 'transactions.res_waiter_id', '=', 'ss.id')
                 ->leftJoin('users as dp', 'transactions.delivery_person', '=', 'dp.id')
@@ -5433,12 +5431,6 @@ class TransactionUtil extends Util
                     'bl.id'
                 )
                 ->leftJoin(
-                    'transactions AS SR',
-                    'transactions.id',
-                    '=',
-                    'SR.return_parent_id'
-                )
-                ->leftJoin(
                     'types_of_services AS tos',
                     'transactions.types_of_service_id',
                     '=',
@@ -5447,7 +5439,11 @@ class TransactionUtil extends Util
                 ->where('transactions.business_id', $business_id)
                 ->where('transactions.type', $sale_type)
                 ->select(
-                    'transactions.id',
+                    // optimizer hint (must directly follow SELECT): MySQL otherwise
+                    // hash-joins the tiny res_tables/types_of_services tables, which
+                    // discards index order and sorts every sale just to show 50.
+                    // With it, transactions_sell_list_index serves the newest-first page
+                    DB::raw('/*+ NO_BNL(tables, tos) */ transactions.id'),
                     'transactions.transaction_date',
                     'transactions.type',
                     'transactions.is_direct_sale',
@@ -5490,17 +5486,17 @@ class TransactionUtil extends Util
                     DB::raw('(SELECT SUM(IF(TP.is_return = 1,-1*TP.amount,TP.amount)) FROM transaction_payments AS TP WHERE
                         TP.transaction_id=transactions.id) as total_paid'),
                     'bl.name as business_location',
-                    DB::raw('COUNT(SR.id) as return_exists'),
+                    DB::raw('(SELECT COUNT(*) FROM transactions AS SR WHERE SR.return_parent_id=transactions.id) as return_exists'),
                     DB::raw('(SELECT SUM(TP2.amount) FROM transaction_payments AS TP2 WHERE
-                        TP2.transaction_id=SR.id ) as return_paid'),
-                    DB::raw('COALESCE(SR.final_total, 0) as amount_return'),
-                    'SR.id as return_transaction_id',
+                        TP2.transaction_id=(SELECT SR.id FROM transactions AS SR WHERE SR.return_parent_id=transactions.id LIMIT 1)) as return_paid'),
+                    DB::raw('COALESCE((SELECT SR.final_total FROM transactions AS SR WHERE SR.return_parent_id=transactions.id LIMIT 1), 0) as amount_return'),
+                    DB::raw('(SELECT SR.id FROM transactions AS SR WHERE SR.return_parent_id=transactions.id LIMIT 1) as return_transaction_id'),
                     'tos.name as types_of_service_name',
                     'transactions.service_custom_field_1',
-                    DB::raw('COUNT( DISTINCT tsl.id) as total_items'),
+                    DB::raw('(SELECT COUNT(*) FROM transaction_sell_lines AS tsl WHERE tsl.transaction_id=transactions.id AND tsl.parent_sell_line_id IS NULL) as total_items'),
                     DB::raw("CONCAT(COALESCE(ss.surname, ''),' ',COALESCE(ss.first_name, ''),' ',COALESCE(ss.last_name,'')) as waiter"),
                     'tables.name as table_name',
-                    DB::raw('SUM(tsl.quantity - tsl.so_quantity_invoiced) as so_qty_remaining'),
+                    DB::raw('(SELECT SUM(tsl.quantity - tsl.so_quantity_invoiced) FROM transaction_sell_lines AS tsl WHERE tsl.transaction_id=transactions.id AND tsl.parent_sell_line_id IS NULL) as so_qty_remaining'),
                     'transactions.is_export',
                     DB::raw("CONCAT(COALESCE(dp.surname, ''),' ',COALESCE(dp.first_name, ''),' ',COALESCE(dp.last_name,'')) as delivery_person")
                 );

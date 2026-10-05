@@ -42,6 +42,9 @@ class SellController extends Controller
 
     protected $productUtil;
 
+    // userCan() results for the current request
+    protected $permission_cache = [];
+
     /**
      * Constructor
      *
@@ -196,7 +199,7 @@ class SellController extends Controller
 
             if (! empty(request()->customer_id)) {
                 $customer_id = request()->customer_id;
-                $sells->where('contacts.id', $customer_id);
+                $sells->where('transactions.contact_id', $customer_id);
             }
             if (! empty(request()->start_date) && ! empty(request()->end_date)) {
                 $start = request()->start_date;
@@ -287,7 +290,8 @@ class SellController extends Controller
 
             if (! empty(request()->input('for_dashboard_sales_order'))) {
                 $sells->whereIn('transactions.status', ['partial', 'ordered'])
-                    ->orHavingRaw('so_qty_remaining > 0');
+                    ->orHavingRaw('so_qty_remaining > 0')
+                    ->groupBy('transactions.id');
             }
 
             if ($sale_type == 'sales_order') {
@@ -300,7 +304,9 @@ class SellController extends Controller
                 $sells->where('transactions.delivery_person', request()->input('delivery_person'));
             }
 
-            $sells->groupBy('transactions.id');
+            // no groupBy: getListSells has no row-multiplying joins any more, and a
+            // GROUP BY makes the datatable count every matching sale with all its
+            // subqueries instead of a plain COUNT(*)
 
             if (! empty(request()->suspended)) {
                 $transaction_sub_type = request()->get('transaction_sub_type');
@@ -347,7 +353,17 @@ class SellController extends Controller
                 $sells->addSelect('transactions.is_recurring', 'transactions.recur_parent_id');
             }
             $sales_order_statuses = Transaction::sales_order_statuses();
+            $this->applySellSearch($sells, $business_id, request()->input('search.value'));
+
+            // skipTotalRecords: a search otherwise also re-counts every sale just for
+            // the "(filtered from N total entries)" note.
+            // filter(): the search box is applied by applySellSearch() above, so the
+            // datatable's own LIKE-on-every-joined-column search is switched off
             $datatable = Datatables::of($sells)
+                ->skipTotalRecords()
+                ->filter(function ($query) {
+                })
+                ->setFilteredRecords($this->countSells($sells))
                 ->addColumn(
                     'action',
                     function ($row) use ($only_shipments, $is_admin, $sale_type) {
@@ -360,41 +376,41 @@ class SellController extends Controller
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-left" role="menu">';
 
-                        if (auth()->user()->can('sell.view') || auth()->user()->can('direct_sell.view') || auth()->user()->can('view_own_sell_only')) {
+                        if ($this->userCan('sell.view') || $this->userCan('direct_sell.view') || $this->userCan('view_own_sell_only')) {
                             $html .= '<li><a href="#" data-href="'.action([\App\Http\Controllers\SellController::class, 'show'], [$row->id]).'" class="btn-modal" data-container=".view_modal"><i class="fas fa-eye" aria-hidden="true"></i> '.__('messages.view').'</a></li>';
                         }
                         if (! $only_shipments) {
                             if ($row->is_direct_sale == 0) {
-                                if (auth()->user()->can('sell.update')) {
+                                if ($this->userCan('sell.update')) {
                                     $html .= '<li><a target="_blank" href="'.action([\App\Http\Controllers\SellPosController::class, 'edit'], [$row->id]).'"><i class="fas fa-edit"></i> '.__('messages.edit').'</a></li>';
                                 }
                             } elseif ($row->type == 'sales_order') {
-                                if (auth()->user()->can('so.update')) {
+                                if ($this->userCan('so.update')) {
                                     $html .= '<li><a target="_blank" href="'.action([\App\Http\Controllers\SellController::class, 'edit'], [$row->id]).'"><i class="fas fa-edit"></i> '.__('messages.edit').'</a></li>';
                                 }
                             } else {
-                                if (auth()->user()->can('direct_sell.update')) {
+                                if ($this->userCan('direct_sell.update')) {
                                     $html .= '<li><a target="_blank" href="'.action([\App\Http\Controllers\SellController::class, 'edit'], [$row->id]).'"><i class="fas fa-edit"></i> '.__('messages.edit').'</a></li>';
                                 }
                             }
 
                             $delete_link = '<li><a href="'.action([\App\Http\Controllers\SellPosController::class, 'destroy'], [$row->id]).'" class="delete-sale"><i class="fas fa-trash"></i> '.__('messages.delete').'</a></li>';
                             if ($row->is_direct_sale == 0) {
-                                if (auth()->user()->can('sell.delete')) {
+                                if ($this->userCan('sell.delete')) {
                                     $html .= $delete_link;
                                 }
                             } elseif ($row->type == 'sales_order') {
-                                if (auth()->user()->can('so.delete')) {
+                                if ($this->userCan('so.delete')) {
                                     $html .= $delete_link;
                                 }
                             } else {
-                                if (auth()->user()->can('direct_sell.delete')) {
+                                if ($this->userCan('direct_sell.delete')) {
                                     $html .= $delete_link;
                                 }
                             }
                         }
 
-                        if (config('constants.enable_download_pdf') && auth()->user()->can('print_invoice') && $sale_type != 'sales_order') {
+                        if (config('constants.enable_download_pdf') && $this->userCan('print_invoice') && $sale_type != 'sales_order') {
                             $html .= '<li><a href="'.route('sell.downloadPdf', [$row->id]).'" target="_blank"><i class="fas fa-print" aria-hidden="true"></i> '.__('lang_v1.download_pdf').'</a></li>';
 
                             if (! empty($row->shipping_status)) {
@@ -402,7 +418,7 @@ class SellController extends Controller
                             }
                         }
 
-                        if (auth()->user()->can('sell.view') || auth()->user()->can('direct_sell.access')) {
+                        if ($this->userCan('sell.view') || $this->userCan('direct_sell.access')) {
                             if (! empty($row->document)) {
                                 $document_name = ! empty(explode('_', $row->document, 2)[1]) ? explode('_', $row->document, 2)[1] : $row->document;
                                 $html .= '<li><a href="'.url('uploads/documents/'.$row->document).'" download="'.$document_name.'"><i class="fas fa-download" aria-hidden="true"></i>'.__('purchase.download_document').'</a></li>';
@@ -417,7 +433,7 @@ class SellController extends Controller
                         }
 
                         if ($row->type == 'sell') {
-                            if (auth()->user()->can('print_invoice')) {
+                            if ($this->userCan('print_invoice')) {
                                 $html .= '<li><a href="#" class="print-invoice" data-href="'.route('sell.printInvoice', [$row->id]).'"><i class="fas fa-print" aria-hidden="true"></i> '.__('lang_v1.print_invoice').'</a></li>
                                     <li><a href="#" class="print-invoice" data-href="'.route('sell.printInvoice', [$row->id]).'?package_slip=true"><i class="fas fa-file-alt" aria-hidden="true"></i> '.__('lang_v1.packing_slip').'</a></li>';
 
@@ -425,16 +441,16 @@ class SellController extends Controller
                             }
                             $html .= '<li class="divider"></li>';
                             if (! $only_shipments) {
-                                if ($row->is_direct_sale == 0 && ! auth()->user()->can('sell.update') &&
-                                auth()->user()->can('edit_pos_payment')) {
+                                if ($row->is_direct_sale == 0 && ! $this->userCan('sell.update') &&
+                                $this->userCan('edit_pos_payment')) {
                                     $html .= '<li><a href="'.route('edit-pos-payment', [$row->id]).'" 
                                     ><i class="fas fa-money-bill-alt"></i> '.__('lang_v1.add_edit_payment').
                                     '</a></li>';
                                 }
 
-                                if (auth()->user()->can('sell.payments') ||
-                                    auth()->user()->can('edit_sell_payment') ||
-                                    auth()->user()->can('delete_sell_payment')) {
+                                if ($this->userCan('sell.payments') ||
+                                    $this->userCan('edit_sell_payment') ||
+                                    $this->userCan('delete_sell_payment')) {
                                     if ($row->payment_status != 'paid') {
                                         $html .= '<li><a href="'.action([\App\Http\Controllers\TransactionPaymentController::class, 'addPayment'], [$row->id]).'" class="add_payment_modal"><i class="fas fa-money-bill-alt"></i> '.__('purchase.add_payment').'</a></li>';
                                     }
@@ -442,7 +458,7 @@ class SellController extends Controller
                                     $html .= '<li><a href="'.action([\App\Http\Controllers\TransactionPaymentController::class, 'show'], [$row->id]).'" class="view_payment_modal"><i class="fas fa-money-bill-alt"></i> '.__('purchase.view_payments').'</a></li>';
                                 }
 
-                                if (auth()->user()->can('sell.create') || auth()->user()->can('direct_sell.access')) {
+                                if ($this->userCan('sell.create') || $this->userCan('direct_sell.access')) {
                                     // $html .= '<li><a href="' . action([\App\Http\Controllers\SellController::class, 'duplicateSell'], [$row->id]) . '"><i class="fas fa-copy"></i> ' . __("lang_v1.duplicate_sell") . '</a></li>';
 
                                     $html .= '<li><a href="'.action([\App\Http\Controllers\SellReturnController::class, 'add'], [$row->id]).'"><i class="fas fa-undo"></i> '.__('lang_v1.sell_return').'</a></li>
@@ -467,22 +483,18 @@ class SellController extends Controller
                 ->addColumn('mass_print', function ($row) {
                     return  '<input type="checkbox" class="row-select" value="' . $row->id.'">' ;
                 })
-                ->editColumn(
-                    'final_total',
-                    '<span class="final-total" data-orig-value="{{$final_total}}">@format_currency($final_total)</span>'
-                )
-                ->editColumn(
-                    'tax_amount',
-                    '<span class="total-tax" data-orig-value="{{$tax_amount}}">@format_currency($tax_amount)</span>'
-                )
-                ->editColumn(
-                    'total_paid',
-                    '<span class="total-paid" data-orig-value="{{$total_paid}}">@format_currency($total_paid)</span>'
-                )
-                ->editColumn(
-                    'total_before_tax',
-                    '<span class="total_before_tax" data-orig-value="{{$total_before_tax}}">@format_currency($total_before_tax)</span>'
-                )
+                ->editColumn('final_total', function ($row) {
+                    return '<span class="final-total" data-orig-value="'.e($row->final_total).'">'.$this->formatCurrency($row->final_total).'</span>';
+                })
+                ->editColumn('tax_amount', function ($row) {
+                    return '<span class="total-tax" data-orig-value="'.e($row->tax_amount).'">'.$this->formatCurrency($row->tax_amount).'</span>';
+                })
+                ->editColumn('total_paid', function ($row) {
+                    return '<span class="total-paid" data-orig-value="'.e($row->total_paid).'">'.$this->formatCurrency($row->total_paid).'</span>';
+                })
+                ->editColumn('total_before_tax', function ($row) {
+                    return '<span class="total_before_tax" data-orig-value="'.e($row->total_before_tax).'">'.$this->formatCurrency($row->total_before_tax).'</span>';
+                })
                 ->editColumn(
                     'discount_amount',
                     function ($row) {
@@ -495,19 +507,30 @@ class SellController extends Controller
                         return '<span class="total-discount" data-orig-value="'.$discount.'">'.$this->transactionUtil->num_f($discount, true).'</span>';
                     }
                 )
-                ->editColumn('transaction_date', '{{@format_datetime($transaction_date)}}')
+                // closures, not Blade strings: a Blade string column is compiled and
+                // eval'd again for every row
+                ->editColumn('transaction_date', function ($row) {
+                    $time_format = session('business.time_format') == 24 ? 'H:i' : 'h:i A';
+
+                    return \Carbon::createFromTimestamp(strtotime($row->transaction_date))->format(session('business.date_format').' '.$time_format);
+                })
                 ->editColumn(
                     'payment_status',
                     function ($row) {
                         $payment_status = Transaction::getPaymentStatus($row);
 
-                        return (string) view('sell.partials.payment_status', ['payment_status' => $payment_status, 'id' => $row->id]);
+                        // same markup as sell.partials.payment_status, without a view render per row
+                        $label = e(__('lang_v1.'.$payment_status));
+                        $class = ['partial' => 'bg-aqua', 'due' => 'bg-yellow', 'paid' => 'bg-light-green', 'overdue' => 'bg-red', 'partial-overdue' => 'bg-red'][$payment_status] ?? '';
+
+                        return '<a href="'.action([\App\Http\Controllers\TransactionPaymentController::class, 'show'], [$row->id]).'" class="view_payment_modal payment-status-label" data-orig-value="'.e($payment_status).'" data-status-name="'.$label.'"><span class="label '.$class.'">'.$label.'</span></a>';
                     }
                 )
-                ->editColumn(
-                    'types_of_service_name',
-                    '<span class="service-type-label" data-orig-value="{{$types_of_service_name}}" data-status-name="{{$types_of_service_name}}">{{$types_of_service_name}}</span>'
-                )
+                ->editColumn('types_of_service_name', function ($row) {
+                    $name = e($row->types_of_service_name);
+
+                    return '<span class="service-type-label" data-orig-value="'.$name.'" data-status-name="'.$name.'">'.$name.'</span>';
+                })
                 ->addColumn('total_remaining', function ($row) {
                     $total_remaining = $row->final_total - $row->total_paid;
                     $total_remaining_html = '<span class="payment_due" data-orig-value="'.$total_remaining.'">'.$this->transactionUtil->num_f($total_remaining, true).'</span>';
@@ -555,8 +578,12 @@ class SellController extends Controller
 
                     return $status;
                 })
-                ->addColumn('conatct_name', '@if(!empty($supplier_business_name)) {{$supplier_business_name}}, <br> @endif {{$name}}')
-                ->editColumn('total_items', '{{@format_quantity($total_items)}}')
+                ->addColumn('conatct_name', function ($row) {
+                    return (! empty($row->supplier_business_name) ? e($row->supplier_business_name).', <br> ' : '').e($row->name);
+                })
+                ->editColumn('total_items', function ($row) {
+                    return $this->transactionUtil->num_f($row->total_items, false, null, true);
+                })
                 ->filterColumn('conatct_name', function ($query, $keyword) {
                     $query->where(function ($q) use ($keyword) {
                         $q->where('contacts.name', 'like', "%{$keyword}%")
@@ -590,10 +617,12 @@ class SellController extends Controller
 
                     return $status;
                 })
-                ->editColumn('so_qty_remaining', '{{@format_quantity($so_qty_remaining)}}')
+                ->editColumn('so_qty_remaining', function ($row) {
+                    return $this->transactionUtil->num_f($row->so_qty_remaining, false, null, true);
+                })
                 ->setRowAttr([
                     'data-href' => function ($row) {
-                        if (auth()->user()->can('sell.view') || auth()->user()->can('view_own_sell_only')) {
+                        if ($this->userCan('sell.view') || $this->userCan('view_own_sell_only')) {
                             return  action([\App\Http\Controllers\SellController::class, 'show'], [$row->id]);
                         } else {
                             return '';
@@ -635,6 +664,124 @@ class SellController extends Controller
 
         return view('sell.index')
         ->with(compact('business_locations', 'customers', 'is_woocommerce', 'sales_representative', 'is_cmsn_agent_enabled', 'commission_agents', 'service_staffs', 'is_tables_enabled', 'is_service_staff_enabled', 'is_types_service_enabled', 'shipping_statuses', 'sources', 'payment_types'));
+    }
+
+    /**
+     * Same output as the @format_currency Blade directive, for datatable columns
+     * that would otherwise compile that directive again for every row.
+     */
+    protected function formatCurrency($number)
+    {
+        $formatted = '';
+        if (session('business.currency_symbol_placement') == 'before') {
+            $formatted .= session('currency')['symbol'].' ';
+        }
+        $formatted .= number_format((float) $number, session('business.currency_precision', 2), session('currency')['decimal_separator'], session('currency')['thousand_separator']);
+        if (session('business.currency_symbol_placement') == 'after') {
+            $formatted .= ' '.session('currency')['symbol'];
+        }
+
+        return $formatted;
+    }
+
+    /**
+     * auth()->user()->can() remembered for the request: the sell list's action
+     * column asks ~20 permissions per row, ~0.3ms each.
+     */
+    protected function userCan($permission)
+    {
+        if (! array_key_exists($permission, $this->permission_cache)) {
+            $this->permission_cache[$permission] = auth()->user()->can($permission);
+        }
+
+        return $this->permission_cache[$permission];
+    }
+
+    /**
+     * The sell list's search box. Each word must match somewhere (as the
+     * datatable's own multi-term search did). Contact, location and user names
+     * are matched through IN (SELECT id ...) on those small tables instead of
+     * LIKE on joined columns, so MySQL filters sales before joining anything.
+     */
+    protected function applySellSearch($sells, $business_id, $keyword)
+    {
+        $terms = preg_split('/\s+/', trim((string) $keyword), -1, PREG_SPLIT_NO_EMPTY);
+
+        foreach ($terms as $term) {
+            $like = '%'.$term.'%';
+
+            // matching ids are fetched up front: an IN (SELECT ...) inside an OR is
+            // re-run by MySQL for every sale
+            $contact_ids = DB::table('contacts')->where('business_id', $business_id)
+                ->where(function ($c) use ($like) {
+                    $c->where('name', 'like', $like)
+                        ->orWhere('supplier_business_name', 'like', $like)
+                        ->orWhere('mobile', 'like', $like);
+                })->pluck('id');
+            $location_ids = DB::table('business_locations')->where('business_id', $business_id)->where('name', 'like', $like)->pluck('id');
+            $service_type_ids = DB::table('types_of_services')->where('business_id', $business_id)->where('name', 'like', $like)->pluck('id');
+            $table_ids = DB::table('res_tables')->where('business_id', $business_id)->where('name', 'like', $like)->pluck('id');
+            // added by (created_by) and service staff (res_waiter_id) are both users
+            $user_ids = DB::table('users')->where('business_id', $business_id)->where('first_name', 'like', $like)->pluck('id');
+
+            $sells->where(function ($q) use ($like, $contact_ids, $location_ids, $service_type_ids, $table_ids, $user_ids) {
+                foreach (['invoice_no', 'transaction_date', 'final_total', 'payment_status', 'shipping_status',
+                    'service_custom_field_1', 'additional_notes', 'staff_note', 'shipping_details', ] as $column) {
+                    $q->orWhere('transactions.'.$column, 'like', $like);
+                }
+
+                foreach ([
+                    'contact_id' => $contact_ids,
+                    'location_id' => $location_ids,
+                    'types_of_service_id' => $service_type_ids,
+                    'res_table_id' => $table_ids,
+                    'created_by' => $user_ids,
+                    'res_waiter_id' => $user_ids,
+                ] as $column => $ids) {
+                    if ($ids->isNotEmpty()) {
+                        $q->orWhereIn('transactions.'.$column, $ids->all());
+                    }
+                }
+            });
+        }
+    }
+
+    /**
+     * Row count for the sell list. The left joins look up one row by primary key
+     * each, so they can't change how many sales match; counting without the
+     * ones no filter refers to skips ~6 lookups per sale. Returns null (the
+     * datatable counts normally) for a column search, HAVING or GROUP BY.
+     */
+    protected function countSells($sells)
+    {
+        $has_column_search = collect(request()->input('columns', []))
+            ->contains(function ($column) {
+                return isset($column['search']['value']) && $column['search']['value'] !== '';
+            });
+
+        $query = clone $sells->getQuery();
+        if ($has_column_search || ! empty($query->havings) || ! empty($query->groups)) {
+            return null;
+        }
+
+        $where_sql = $query->getGrammar()->compileWheres($query);
+        $query->joins = collect($query->joins)->filter(function ($join) use ($where_sql) {
+            $alias = trim(last(preg_split('/\s+as\s+/i', $join->table)));
+
+            return $join->type != 'left' || str_contains($where_sql, '`'.$alias.'`.');
+        })->values()->all();
+        $query->orders = null;
+        $query->columns = null;
+        $query->bindings['select'] = [];
+
+        // when every filter is on a transactions_sell_list_index column, the count
+        // is answered from that index alone; a narrower filter (customer, invoice
+        // search...) is left to the optimizer, which picks a more selective index
+        preg_match_all('/`transactions`\.`([a-z_]+)`/', $where_sql, $matches);
+        $index_columns = ['business_id', 'type', 'status', 'sub_type', 'transaction_date', 'location_id'];
+        $hint = empty(array_diff($matches[1], $index_columns)) ? 'NO_BNL() INDEX(transactions transactions_sell_list_index)' : 'NO_BNL()';
+
+        return (int) $query->selectRaw('/*+ '.$hint.' */ COUNT(*) as aggregate')->value('aggregate');
     }
 
     /**
@@ -1327,7 +1474,7 @@ class SellController extends Controller
 
             if (! empty(request()->customer_id)) {
                 $customer_id = request()->customer_id;
-                $sells->where('contacts.id', $customer_id);
+                $sells->where('transactions.contact_id', $customer_id);
             }
 
             if ($is_woocommerce) {
