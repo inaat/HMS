@@ -266,15 +266,19 @@ $(document).ready(function() {
 
     //Start: CRUD for unit
     //Unit table
+    //Units are grouped by base unit (parent) with their sub units (children) under a collapsible header.
+    //All units are loaded at once (small list) so grouping, search and order stay consistent.
+    var units_open_groups = {};
     var units_table = $('#unit_table').DataTable({
         processing: true,
-        serverSide: true,
+        serverSide: false,
         fixedHeader:false,
         ajax: '/units',
+        ordering: false,
+        paging: false,
         columnDefs: [
             {
                 targets: 3,
-                orderable: false,
                 searchable: false,
             },
         ],
@@ -284,6 +288,49 @@ $(document).ready(function() {
             { data: 'allow_decimal', name: 'allow_decimal' },
             { data: 'action', name: 'action' },
         ],
+        drawCallback: function() {
+            var api = this.api();
+            var nodes = api.rows({ page: 'current' }).nodes();
+            var rows = api.rows({ page: 'current' }).data();
+            var searching = api.search() !== '';
+            var counts = {};
+            var last_group = null;
+
+            rows.each(function(d) {
+                counts[d.group_id] = (counts[d.group_id] || 0) + 1;
+            });
+
+            rows.each(function(d, i) {
+                var row = $(nodes[i]);
+                var open = searching || units_open_groups[d.group_id];
+
+                if (last_group !== d.group_id) {
+                    var header = $('<tr class="unit-group-row" style="cursor: pointer; background: #f5f1ea;"><td colspan="4"></td></tr>');
+                    header.attr('data-group', d.group_id);
+                    header.find('td').append(
+                        $('<i class="fa unit-group-icon" style="width: 16px;"></i>').addClass(open ? 'fa-chevron-down' : 'fa-chevron-right'),
+                        ' ',
+                        $('<strong></strong>').html(d.group_name),
+                        ' ',
+                        $('<span class="badge"></span>').text(counts[d.group_id])
+                    );
+                    row.before(header);
+                    last_group = d.group_id;
+                }
+
+                row.attr('data-group', d.group_id).toggle(!!open);
+                if (d.is_base != 1) {
+                    row.find('td:first').css('padding-left', '32px');
+                }
+            });
+        },
+    });
+
+    $(document).on('click', '#unit_table tr.unit-group-row', function() {
+        var group = $(this).data('group');
+        units_open_groups[group] = !units_open_groups[group];
+        $(this).find('.unit-group-icon').toggleClass('fa-chevron-right fa-chevron-down');
+        $('#unit_table tbody tr[data-group="' + group + '"]').not('.unit-group-row').toggle(units_open_groups[group]);
     });
 
     $(document).on('submit', 'form#unit_add_form', function(e) {

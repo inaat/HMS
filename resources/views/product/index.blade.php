@@ -264,6 +264,9 @@
                     "targets": [0, 1, 2],
                     "orderable": false,
                     "searchable": false
+                }, {
+                    "targets": 1,
+                    "width": "60px"
                 }],
                 columns: [{
                         data: 'mass_delete'

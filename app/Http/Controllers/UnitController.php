@@ -40,12 +40,26 @@ class UnitController extends Controller
         if (request()->ajax()) {
             $business_id = request()->session()->get('user.business_id');
 
-            $unit = Unit::where('business_id', $business_id)
+            //Each base unit followed by its sub units (smallest first), groups sorted by base unit name
+            $unit = Unit::where('units.business_id', $business_id)
+                        ->leftJoin('units as bu', 'units.base_unit_id', '=', 'bu.id')
                         ->with(['base_unit'])
-                        ->select(['actual_name', 'short_name', 'allow_decimal', 'id',
-                            'base_unit_id', 'base_unit_multiplier', ]);
+                        ->select(['units.actual_name', 'units.short_name', 'units.allow_decimal', 'units.id',
+                            'units.base_unit_id', 'units.base_unit_multiplier', ])
+                        ->orderByRaw('COALESCE(bu.actual_name, units.actual_name), COALESCE(units.base_unit_id, units.id), units.base_unit_id IS NOT NULL, units.base_unit_multiplier');
 
             return Datatables::of($unit)
+                ->addColumn('group_id', function ($row) {
+                    return $row->base_unit_id ?: $row->id;
+                })
+                ->addColumn('group_name', function ($row) {
+                    $base = ! empty($row->base_unit_id) && ! empty($row->base_unit) ? $row->base_unit : $row;
+
+                    return $base->actual_name.' ('.$base->short_name.')';
+                })
+                ->addColumn('is_base', function ($row) {
+                    return empty($row->base_unit_id) ? 1 : 0;
+                })
                 ->addColumn(
                     'action',
                     '@can("unit.update")

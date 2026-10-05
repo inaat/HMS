@@ -117,6 +117,8 @@ class ProductController extends Controller
                 'c1.name as category',
                 'c2.name as sub_category',
                 'units.actual_name as unit',
+                'units.short_name as unit_short_name',
+                'products.sub_unit_ids',
                 'brands.name as brand',
                 'tax_rates.name as tax',
                 'products.sku',
@@ -276,11 +278,12 @@ class ProductController extends Controller
                 ->addColumn('mass_delete', function ($row) {
                     return  '<input type="checkbox" class="row-select" value="'.$row->id.'">';
                 })
-                ->editColumn('current_stock', function ($row) {
+                ->editColumn('current_stock', function ($row) use ($business_id) {
                     if ($row->enable_stock) {
                         $stock = $this->productUtil->num_f($row->current_stock, false, null, true);
+                        $in_sub_unit = $this->productUtil->stockInBiggestSubUnit($business_id, $row->current_stock, $row->sub_unit_ids, $row->unit_short_name ?: $row->unit);
 
-                        return $stock.' '.$row->unit;
+                        return $stock.' '.$row->unit.(! empty($in_sub_unit) ? '<br><small class="text-muted">'.$in_sub_unit.'</small>' : '');
                     } else {
                         return '--';
                     }

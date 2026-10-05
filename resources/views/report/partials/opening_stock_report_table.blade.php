@@ -34,7 +34,7 @@
         </td>
     </tr>
        <tr>
-                <th>Totla Builty:</th>
+                <th>Total Builty:</th>
                 <td>
                     <span class="display_currency" data-currency_symbol="true">{{$data['total_builty']}}</span>
                 </td>

@@ -25,6 +25,63 @@ use Illuminate\Support\Facades\DB;
 class ProductUtil extends Util
 {
     /**
+     * Sub units per business, loaded once per request by stockInBiggestSubUnit()
+     */
+    private $business_sub_units = [];
+
+    /**
+     * Quantity shown in the product's biggest sub unit, e.g. 2513 Ps with "Ctn 64" => "39 Ctn 64 + 17 Ps".
+     * Sub units with a missing, zero or <= 1 multiplier are skipped, so there is never a division by zero.
+     *
+     * @param  array|string|null  $sub_unit_ids  products.sub_unit_ids
+     * @return string|null
+     */
+    public function stockInBiggestSubUnit($business_id, $qty, $sub_unit_ids, $base_unit_name)
+    {
+        $sub_unit_ids = is_array($sub_unit_ids) ? $sub_unit_ids : json_decode($sub_unit_ids ?? '', true);
+        if (empty($sub_unit_ids) || ! is_array($sub_unit_ids) || (float) $qty == 0) {
+            return null;
+        }
+
+        if (! isset($this->business_sub_units[$business_id])) {
+            $this->business_sub_units[$business_id] = DB::table('units')->where('business_id', $business_id)
+                ->whereNotNull('base_unit_id')
+                ->get(['id', 'short_name', 'base_unit_multiplier'])
+                ->keyBy('id');
+        }
+        $sub_units = $this->business_sub_units[$business_id];
+
+        $biggest = null;
+        foreach ($sub_unit_ids as $id) {
+            $unit = $sub_units[$id] ?? null;
+            if (! empty($unit) && (float) $unit->base_unit_multiplier > 1
+                && (empty($biggest) || (float) $unit->base_unit_multiplier > (float) $biggest->base_unit_multiplier)) {
+                $biggest = $unit;
+            }
+        }
+        if (empty($biggest)) {
+            return null;
+        }
+
+        $multiplier = (float) $biggest->base_unit_multiplier;
+        $abs_qty = abs((float) $qty);
+        $whole = floor($abs_qty / $multiplier);
+        $remainder = round($abs_qty - ($whole * $multiplier), 4);
+
+        $text = $this->num_f($whole, false, null, true).' '.$biggest->short_name;
+        if ($remainder > 0) {
+            $text .= ' + '.$this->num_f($remainder, false, null, true).' '.$base_unit_name;
+        }
+
+        //Negative: minus applies to the whole amount, e.g. -121 KG => -(5 Bag 24 KG + 1 KG)
+        if ((float) $qty < 0) {
+            $text = $remainder > 0 ? '-('.$text.')' : '-'.$text;
+        }
+
+        return $text;
+    }
+
+    /**
      * Create single type product variation
      *
      * @param (int or object) $product
@@ -1940,6 +1997,7 @@ class ProductUtil extends Util
             'p.alert_quantity',
             'p.id as product_id',
             'units.short_name as unit',
+            'p.sub_unit_ids',
             'p.enable_stock as enable_stock',
             'variations.sell_price_inc_tax as unit_price',
             'pv.name as product_variation',

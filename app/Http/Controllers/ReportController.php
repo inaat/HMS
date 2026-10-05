@@ -370,11 +370,13 @@ class ReportController extends Controller
             }
 
             $datatable = Datatables::of($products)
-                ->editColumn('stock', function ($row) {
+                ->editColumn('stock', function ($row) use ($business_id) {
                     if ($row->enable_stock) {
                         $stock = $row->stock ? $row->stock : 0;
+                        $in_sub_unit = $this->productUtil->stockInBiggestSubUnit($business_id, $stock, $row->sub_unit_ids, $row->unit);
 
-                        return  '<span class="current_stock" data-orig-value="'.(float) $stock.'" data-unit="'.$row->unit.'"> '.$this->transactionUtil->num_f($stock, false, null, true).'</span>'.' '.$row->unit;
+                        return  '<span class="current_stock" data-orig-value="'.(float) $stock.'" data-unit="'.$row->unit.'"> '.$this->transactionUtil->num_f($stock, false, null, true).'</span>'.' '.$row->unit
+                            .(! empty($in_sub_unit) ? '<br><small class="text-muted">'.$in_sub_unit.'</small>' : '');
                     } else {
                         return '--';
                     }
