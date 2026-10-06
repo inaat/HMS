@@ -3711,6 +3711,11 @@ class TransactionUtil extends Util
                 'u.short_name as unit',
                 'bl.name as location'
             )
+            //where the delete came from (deletion_audit triggers, from 2026-10 on)
+            ->when(\Schema::hasTable('deletion_audit'), function ($q) {
+                $audit = fn ($col) => DB::raw("(SELECT da.$col FROM deletion_audit da WHERE da.table_name = 'transaction_sell_lines' AND da.row_id = m.sell_line_id ORDER BY da.id DESC LIMIT 1) as deleted_$col");
+                $q->addSelect($audit('created_at'), $audit('app_context'), $audit('db_user'), $audit('info'));
+            })
             ->orderBy('p.name')
             ->get();
     }

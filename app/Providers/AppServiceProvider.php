@@ -34,6 +34,16 @@ class AppServiceProvider extends ServiceProvider
         ini_set('memory_limit', '-1');
         set_time_limit(0);
 
+        //Deletion audit: commands (scheduler, artisan, tinker) tag their database connection too
+        if ($this->app->runningInConsole()) {
+            \Illuminate\Support\Facades\Event::listen(\Illuminate\Database\Events\ConnectionEstablished::class, function ($event) {
+                try {
+                    $event->connection->statement('SET @app_context = ?', ['console: '.substr(implode(' ', $_SERVER['argv'] ?? []), 0, 480)]);
+                } catch (\Throwable $e) {
+                }
+            });
+        }
+
         if (config('app.debug')) {
             error_reporting(E_ALL & ~E_USER_DEPRECATED);
         } else {

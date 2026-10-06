@@ -34,6 +34,7 @@
                                 <th>Location</th>
                                 <th>Purchases</th>
                                 <th>Qty held by deleted sales</th>
+                                <th>How it was deleted</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -45,6 +46,22 @@
                                     <td>{{ $first->location }}</td>
                                     <td>{{ $rows->pluck('ref_no')->unique()->implode(', ') }}</td>
                                     <td class="text-danger">{{ @format_quantity($held) }} {{ $first->unit }}</td>
+                                    <td><small>
+                                        @foreach ($rows->unique('sell_line_id') as $o)
+                                            @if (! empty($o->deleted_created_at))
+                                                {{ @format_datetime($o->deleted_created_at) }}:
+                                                @if (! empty($o->deleted_app_context))
+                                                    {{ $o->deleted_app_context }}
+                                                @else
+                                                    <b class="text-danger">outside the app</b> (database user {{ $o->deleted_db_user }})
+                                                @endif
+                                                <br><span class="text-muted">{{ $o->deleted_info }}</span>
+                                            @else
+                                                <span class="text-muted">before tracking (link made {{ @format_datetime($o->created_at) }}, sale line #{{ $o->sell_line_id }}; no delete record in the app log)</span>
+                                            @endif
+                                            @if (! $loop->last)<br>@endif
+                                        @endforeach
+                                    </small></td>
                                 </tr>
                             @endforeach
                         </tbody>
