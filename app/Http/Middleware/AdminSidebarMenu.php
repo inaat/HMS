@@ -802,6 +802,11 @@ class AdminSidebarMenu
                                 'Commission Agent Report',
                                 ['icon' => '', 'active' => request()->segment(2) == 'commission-agent-report']
                             );
+                            $sub->url(
+                                action([\App\Http\Controllers\CommissionPayoutController::class, 'index']),
+                                'Commission payouts',
+                                ['icon' => '', 'active' => request()->segment(1) == 'commission-payouts']
+                            );
                         }
                         if (auth()->user()->can('purchase_n_sell_report.view') && in_array('tables', $enabled_modules)) {
                             $sub->url(

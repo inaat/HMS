@@ -82,6 +82,11 @@
                     <button type="button" class="tw-dw-btn tw-dw-btn-sm tw-text-white cmmsn-whatsapp cmmsn-whatsapp-btn no-print" data-agent="{{ $filters['commission_agent'] }}">
                         <i class="fab fa-whatsapp"></i> Send to agent on WhatsApp
                     </button>
+                    @can('expense.add')
+                        <a class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-success tw-text-white btn-modal no-print" data-container=".cmmsn_pay_modal"
+                           data-href="{{ action([\App\Http\Controllers\CommissionPayoutController::class, 'payForm']) }}?agent_id={{ $filters['commission_agent'] }}&start={{ $filters['start_date'] }}&end={{ $filters['end_date'] }}">
+                            <i class="fa fa-money-bill-wave"></i> Pay commission</a>
+                    @endcan
                 @else
                     <span class="cmmsn-agent-name"><i class="fa fa-users"></i> All agents</span>
                 @endif
@@ -306,6 +311,10 @@
                                         <td class="no-print text-center">
                                             <a href="#" class="cmmsn-agent-detail tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary" data-agent="{{ $agent->agent_id }}"><i class="fa fa-eye"></i> Full detail</a>
                                             <button type="button" class="cmmsn-whatsapp tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-success" data-agent="{{ $agent->agent_id }}" title="Send this agent's report on WhatsApp"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+                                            @can('expense.add')
+                                                <a class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-success tw-text-white btn-modal" data-container=".cmmsn_pay_modal" title="Pay this agent's commission for this date range"
+                                                   data-href="{{ action([\App\Http\Controllers\CommissionPayoutController::class, 'payForm']) }}?agent_id={{ $agent->agent_id }}&start={{ $filters['start_date'] }}&end={{ $filters['end_date'] }}"><i class="fa fa-money-bill-wave"></i> Pay</a>
+                                            @endcan
                                         </td>
                                     </tr>
                                 @empty
@@ -604,6 +613,7 @@
 </section>
 
 <div class="modal fade view_modal" tabindex="-1" role="dialog"></div>
+<div class="modal fade cmmsn_pay_modal no-print" tabindex="-1" role="dialog"></div>
 @endsection
 
 @section('css')
