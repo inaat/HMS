@@ -33,12 +33,38 @@
         + {{$module_data['label']}} 
     @endif
 @endforeach
-) <br> - (Total Builty  +  @lang('report.total_stock_adjustment') + @lang('report.total_expense') + @lang('lang_v1.total_purchase_shipping_charge') + @lang('lang_v1.total_transfer_shipping_charge') + @lang('lang_v1.purchase_additional_expense') + @lang('lang_v1.total_sell_discount') + @lang('lang_v1.total_reward_amount') 
+) <br> - (Total Builty  +  @lang('report.total_stock_adjustment') + @lang('report.total_expense') @if(! empty($data['commission_earned']) && abs($data['commission_earned']) >= 0.01) + Sales commission @endif + @lang('lang_v1.total_purchase_shipping_charge') + @lang('lang_v1.total_transfer_shipping_charge') + @lang('lang_v1.purchase_additional_expense') + @lang('lang_v1.total_sell_discount') + @lang('lang_v1.total_reward_amount') 
 @foreach($data['left_side_module_data'] as $module_data)
     @if(!empty($module_data['add_to_net_profit']))
         + {{$module_data['label']}}
-    @endif 
+    @endif
 @endforeach )</small>
+@if(! empty($data['investor_lines']) && $data['investor_lines']->isNotEmpty())
+    @php
+        $inv_lines = $data['investor_lines'];
+        $inv_share = $inv_lines->sum('share_amount');
+        $owner_profit = $data['net_profit'] - $inv_share;
+    @endphp
+    <div style="margin-top: 10px; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px;">
+        <strong>Profit split</strong> <small class="text-muted">(investor share is not an expense: it is the investors' part of the profit)</small>
+        <table class="table table-condensed" style="margin: 6px 0 0;">
+            @foreach ($inv_lines->groupBy('investor_name') as $name => $rows)
+                <tr>
+                    <td>{{ $name }} <small class="text-muted">{{ $rows->pluck('scope_label')->implode(', ') }}</small></td>
+                    <td class="text-right"><span class="display_currency" data-currency_symbol="true">{{ $rows->sum('share_amount') }}</span></td>
+                </tr>
+            @endforeach
+            <tr>
+                <th>Investors' share</th>
+                <th class="text-right"><span class="display_currency" data-currency_symbol="true">{{ $inv_share }}</span></th>
+            </tr>
+            <tr style="font-size: 15px;">
+                <th>Owner's profit (net profit &minus; investors' share)</th>
+                <th class="text-right"><span class="display_currency" data-currency_symbol="true">{{ $owner_profit }}</span></th>
+            </tr>
+        </table>
+    </div>
+@endif
 @if($data['sold_without_stock']->isNotEmpty())
     @php
         $sws = $data['sold_without_stock'];

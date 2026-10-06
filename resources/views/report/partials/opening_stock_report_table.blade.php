@@ -31,8 +31,24 @@
         <th>{{ __('report.total_expense') }}:</th>
         <td>
             <span class="display_currency" data-currency_symbol="true">{{$data['total_expense']}}</span>
+            @if(! empty($data['commission_expensed']) && abs($data['commission_expensed']) >= 0.01)
+                <br><small class="text-muted">commission payouts are under Sales commission below</small>
+            @endif
         </td>
     </tr>
+    @if(! empty($data['commission_earned']) && abs($data['commission_earned']) >= 0.01 || ! empty($data['commission_expensed']) && abs($data['commission_expensed']) >= 0.01)
+    <tr>
+        <th>Sales commission (agents):
+            <br><small class="text-muted">earned on sales of these dates, returns taken off</small>
+        </th>
+        <td>
+            <span class="display_currency" data-currency_symbol="true">{{ $data['commission_earned'] }}</span>
+            <br><small class="text-muted">paid (expenses):</small> <small><span class="display_currency" data-currency_symbol="true">{{ $data['commission_expensed'] }}</span></small>
+            <br><small class="{{ $data['commission_due'] > 0.009 ? 'text-danger' : 'text-muted' }}">due, not paid yet:</small>
+            <small><span class="display_currency" data-currency_symbol="true">{{ $data['commission_due'] }}</span></small>
+        </td>
+    </tr>
+    @endif
        <tr>
                 <th>Total Builty:</th>
                 <td>

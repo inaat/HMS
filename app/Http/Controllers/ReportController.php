@@ -107,7 +107,14 @@ class ReportController extends Controller
 
             $permitted_locations = auth()->user()->permitted_locations();
             $data = $this->transactionUtil->getProfitLossDetails($business_id, $location_id, $start_date, $end_date, $user_id, $permitted_locations);
-    
+
+            //Investors: their share is a split of the profit (not an expense), shown under net profit.
+            //Only for the whole business (deals are per brand / product / location, not per user)
+            $data['investor_lines'] = collect();
+            if (empty($location_id) && empty($user_id) && $permitted_locations == 'all' && \App\InvestorDeal::where('business_id', $business_id)->where('is_active', 1)->exists()) {
+                $data['investor_lines'] = app(\App\Utils\InvestorUtil::class)->calculate($business_id, $start_date, $end_date);
+            }
+
             // $data['closing_stock'] = $data['closing_stock'] - $data['total_sell_return'];
 
             return view('report.partials.profit_loss_details', compact('data'))->render();

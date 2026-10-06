@@ -6529,6 +6529,15 @@ class TransactionUtil extends Util
         //Expense
         $data['total_expense'] = $transaction_totals['total_expense'];
 
+        //Commission agents: counted when earned (dates of the sales / returns), paid or not. Commission payout
+        //expenses are taken out of "Expenses" so they don't count twice; due = earned and not paid yet
+        $commission = (new CommissionPayoutUtil($this))->profitLoss($business_id, $start_date, $end_date, $location_id, $user_id, $permitted_locations);
+        $data['commission_earned'] = $commission['earned'];
+        $data['commission_expensed'] = $commission['expensed'];
+        $data['commission_due'] = $commission['due'];
+        $data['commission_agents'] = $commission['agents'];
+        $data['total_expense'] = $data['total_expense'] - $commission['expensed'];
+
         //Stock adjustments
         $data['total_adjustment'] = $transaction_totals['total_adjustment'];
         $data['total_recovered'] = $transaction_totals['total_recovered'];
@@ -6593,7 +6602,7 @@ class TransactionUtil extends Util
         $data['net_profit'] = $module_total + $gross_profit + $data['without_invoice_return_adjustment']
                                 + ($data['total_sell_round_off'] + $data['total_recovered'] + $data['total_sell_shipping_charge'] + $data['total_purchase_discount'] + $data['total_sell_additional_expense'] + $data['total_sell_return_discount']
                                 ) - ($data['total_reward_amount'] + $data['total_expense'] + $data['total_adjustment'] + $data['total_transfer_shipping_charges'] + $data['total_purchase_shipping_charge'] + $data['total_purchase_additional_expense'] + $data['total_sell_discount']
-                                + $data['total_builty']
+                                + $data['total_builty'] + $data['commission_earned']
                                 );
 
         //get gross profit from Project Module

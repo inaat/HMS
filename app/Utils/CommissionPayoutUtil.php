@@ -60,7 +60,25 @@ class CommissionPayoutUtil extends Util
     /**
      * Lines sold by the agent in the period, full quantity as sold (returns are handled on their own date)
      */
-    public function salesLines($business_id, $agent, $start, $end)
+    /**
+     * Optional location / user filters (Profit / Loss report) on the sale
+     */
+    protected function applyFilters($query, $filters, $alias = 't')
+    {
+        if (! empty($filters['location_id'])) {
+            $query->where("$alias.location_id", $filters['location_id']);
+        }
+        if (! empty($filters['permitted_locations']) && $filters['permitted_locations'] != 'all') {
+            $query->whereIn("$alias.location_id", $filters['permitted_locations']);
+        }
+        if (! empty($filters['user_id'])) {
+            $query->where("$alias.created_by", $filters['user_id']);
+        }
+
+        return $query;
+    }
+
+    public function salesLines($business_id, $agent, $start, $end, $filters = [])
     {
         $rules = CommissionAgentRule::forAgents($business_id, [$agent->id]);
 
@@ -76,6 +94,7 @@ class CommissionPayoutUtil extends Util
             ->where('t.commission_agent', $agent->id)
             ->whereDate('t.transaction_date', '>=', $start)
             ->whereDate('t.transaction_date', '<=', $end)
+            ->tap(fn ($q) => $this->applyFilters($q, $filters))
             ->select(
                 't.id as transaction_id', 't.invoice_no', 't.transaction_date',
                 DB::raw("COALESCE(NULLIF(ct.supplier_business_name, ''), ct.name) as customer"),
@@ -98,12 +117,14 @@ class CommissionPayoutUtil extends Util
      * Returns MADE in the period of the agent's sales (any sale date): against the invoice and without invoice.
      * Valued at the sale price of the line, like the Commission Agent Report.
      */
-    public function returnLines($business_id, $agent, $start, $end)
+    public function returnLines($business_id, $agent, $start, $end, $filters = [])
     {
         $rules = CommissionAgentRule::forAgents($business_id, [$agent->id]);
         $without_invoice_qty = '(SELECT COALESCE(SUM(r.quantity), 0) FROM return_sell_lines AS r WHERE r.transaction_sell_id = sl.id)';
 
-        $base = function ($query) use ($business_id, $agent, $start, $end) {
+        $base = function ($query) use ($business_id, $agent, $start, $end, $filters) {
+            $this->applyFilters($query, $filters, 'ret');
+
             return $query->join('transactions as t', 't.id', '=', 'sl.transaction_id')
                 ->join('products as p', 'p.id', '=', 'sl.product_id')
                 ->leftJoin('brands as b', 'b.id', '=', 'p.brand_id')
@@ -148,6 +169,46 @@ class CommissionPayoutUtil extends Util
                 return $this->applyRule($row, $agent, $rules);
             })
             ->sortBy('return_date')->values();
+    }
+
+    /**
+     * Commission for the Profit / Loss report, by the dates of the sales and returns (accrual):
+     *   earned   = commission on sales in the dates - commission on returns made in the dates (all agents)
+     *   expensed = commission payout expenses dated in the dates (left out of "Expenses" so nothing counts twice)
+     *   due      = earned - expensed (earned, not paid yet)
+     */
+    public function profitLoss($business_id, $start, $end, $location_id = null, $user_id = null, $permitted_locations = null)
+    {
+        $filters = compact('location_id', 'user_id', 'permitted_locations');
+        $out = ['earned' => 0, 'expensed' => 0, 'due' => 0, 'agents' => collect()];
+
+        $agent_ids = User::where('business_id', $business_id)->where('is_cmmsn_agnt', 1)->pluck('id');
+        if ($agent_ids->isEmpty()) {
+            return $out;
+        }
+
+        $out['expensed'] = (float) $this->applyFilters(
+            DB::table('transactions as t')->where('t.business_id', $business_id)->where('t.type', 'expense')
+                ->whereIn('t.expense_for', $agent_ids)
+                ->where('t.expense_category_id', $this->expenseCategory($business_id)->id)
+                ->whereDate('t.transaction_date', '>=', $start)->whereDate('t.transaction_date', '<=', $end),
+            $filters
+        )->sum('t.final_total');
+
+        foreach (User::whereIn('id', $agent_ids)->get() as $agent) {
+            $sales = $this->salesLines($business_id, $agent, $start, $end, $filters);
+            $returns = $this->returnLines($business_id, $agent, $start, $end, $filters);
+            $earned = $sales->sum('commission') - $returns->sum('commission');
+            if ($sales->isEmpty() && $returns->isEmpty()) {
+                continue;
+            }
+            $out['agents']->push((object) ['agent_id' => $agent->id, 'agent' => $this->agentName($agent), 'earned' => round($earned, 4)]);
+            $out['earned'] += $earned;
+        }
+        $out['earned'] = round($out['earned'], 4);
+        $out['due'] = round($out['earned'] - $out['expensed'], 4);
+
+        return $out;
     }
 
     /**
@@ -268,8 +329,9 @@ class CommissionPayoutUtil extends Util
         $note = 'Commission '.$this->agentName($agent).' '.$this->format_date($settlement->period_start).' ~ '.$this->format_date($settlement->period_end)
             .(! empty($data['note']) ? ' - '.$data['note'] : '');
         //$data['paid_on'] is Y-m-d H:i:s, $amount a plain number: nothing is converted from the business format
+        //the expense belongs to the month of the sales (period end); the payment keeps the real pay day
         $request = new Request([
-            'transaction_date' => $data['paid_on'],
+            'transaction_date' => $settlement->period_end->toDateString().' 23:59:00',
             'location_id' => $data['location_id'],
             'final_total' => $amount,
             'expense_for' => $agent->id,
