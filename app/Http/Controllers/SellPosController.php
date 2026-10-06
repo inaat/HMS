@@ -3382,6 +3382,11 @@ foreach ($contact_ids as $item) {
 
         $result = $this->transactionUtil->sendReceiptViaWhatsApp($receipt_details, $business_id, $transaction_id);
 
+        //Opened as a normal page (new tab, page without the button script): go back and show the result as a toast
+        if (! request()->ajax() && ! request()->wantsJson()) {
+            return redirect()->back()->with('status', ['success' => ! empty($result['success']) ? 1 : 0, 'msg' => $result['msg'] ?? '']);
+        }
+
         return response()->json($result);
     }
 
