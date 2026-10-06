@@ -141,9 +141,10 @@ class ReportController extends Controller
         $overlinked = $this->transactionUtil->getOverlinkedPurchaseLines($business_id);
         $stock_mismatches = $this->transactionUtil->getStockMismatches($business_id);
         $payment_mismatches = $this->transactionUtil->getPaymentContactMismatches($business_id);
+        $orphans = $this->transactionUtil->getOrphanSellLinks($business_id);
         $can_repair = auth()->user()->can('purchase.update');
 
-        return view('report.stock_link_check', compact('issues', 'overlinked', 'stock_mismatches', 'payment_mismatches', 'can_repair'));
+        return view('report.stock_link_check', compact('issues', 'overlinked', 'stock_mismatches', 'payment_mismatches', 'orphans', 'can_repair'));
     }
 
     /**
@@ -192,7 +193,8 @@ class ReportController extends Controller
 
         \Log::info('Stock links repaired', ['business_id' => $business_id, 'user_id' => auth()->id()] + $summary);
 
-        return ['success' => true, 'msg' => ($summary['sell_lines_repaired'] + $summary['unlinked_sell_lines']).' sell line(s), '.$summary['overlinked_purchase_lines'].' purchase line(s) and '.$summary['stock_corrected'].' stock row(s) and '.$summary['payments_moved'].' payment(s) repaired'];
+        return ['success' => true, 'msg' => ($summary['orphan_links_removed'] ? $summary['orphan_links_removed'].' link(s) of deleted sales removed ('.$this->transactionUtil->num_f($summary['orphan_qty_freed']).' qty freed), ' : '')
+            .($summary['sell_lines_repaired'] + $summary['unlinked_sell_lines']).' sell line(s), '.$summary['overlinked_purchase_lines'].' purchase line(s) and '.$summary['stock_corrected'].' stock row(s) and '.$summary['payments_moved'].' payment(s) repaired'];
     }
 
     /**

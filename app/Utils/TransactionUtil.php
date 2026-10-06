@@ -3679,6 +3679,43 @@ class TransactionUtil extends Util
     }
 
     /**
+     * Stock links left behind by sale lines that no longer exist (deleted lines whose links were not removed).
+     * Their purchase stays "sold", so POS shows stock but a sale fails with "Mismatch between sold and purchase quantity".
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    public function getOrphanSellLinks($business_id = null)
+    {
+        return DB::table('transaction_sell_lines_purchase_lines as m')
+            ->leftJoin('transaction_sell_lines as sl', 'sl.id', '=', 'm.sell_line_id')
+            ->join('purchase_lines as pl', 'pl.id', '=', 'm.purchase_line_id')
+            ->join('transactions as t', 't.id', '=', 'pl.transaction_id')
+            ->join('products as p', 'p.id', '=', 'pl.product_id')
+            ->join('variations as v', 'v.id', '=', 'pl.variation_id')
+            ->leftJoin('units as u', 'u.id', '=', 'p.unit_id')
+            ->leftJoin('business_locations as bl', 'bl.id', '=', 't.location_id')
+            ->whereNotNull('m.sell_line_id')
+            ->whereNull('sl.id')
+            ->when(! empty($business_id), fn ($q) => $q->where('t.business_id', $business_id))
+            ->select(
+                'm.id',
+                'm.sell_line_id',
+                'm.purchase_line_id',
+                'm.quantity',
+                'm.qty_returned',
+                'm.created_at',
+                't.ref_no',
+                't.transaction_date',
+                'p.name as product',
+                'v.sub_sku',
+                'u.short_name as unit',
+                'bl.name as location'
+            )
+            ->orderBy('p.name')
+            ->get();
+    }
+
+    /**
      * Repairs transaction_sell_lines_purchase_lines where a sell line is linked to more quantity than it
      * sold (duplicate mapping rows created by the old invoice-edit bug). The extra quantity is removed from
      * the newest mapping rows, purchase_lines.quantity_sold is recalculated from the real links and freed
@@ -3688,6 +3725,13 @@ class TransactionUtil extends Util
      */
     public function repairSellPurchaseMapping($business_id = null)
     {
+        //Links of sale lines that no longer exist: remove them, their purchases are free again
+        $orphans = $this->getOrphanSellLinks($business_id);
+        $orphan_purchase_lines = $orphans->pluck('purchase_line_id')->unique()->values()->all();
+        foreach ($orphans->pluck('id')->chunk(500) as $chunk) {
+            TransactionSellLinesPurchaseLines::whereIn('id', $chunk->all())->delete();
+        }
+
         $lines = TransactionSellLine::join('transactions as t', 't.id', '=', 'transaction_sell_lines.transaction_id')
             ->where('t.type', 'sell')
             ->where('t.status', 'final')
@@ -3696,7 +3740,7 @@ class TransactionUtil extends Util
             ->select('transaction_sell_lines.id', 'transaction_sell_lines.quantity')
             ->get();
 
-        $affected_purchase_lines = [];
+        $affected_purchase_lines = $orphan_purchase_lines;
         $removed_qty = 0;
         foreach ($lines as $line) {
             $mappings = TransactionSellLinesPurchaseLines::where('sell_line_id', $line->id)->orderBy('id', 'desc')->get();
@@ -3836,6 +3880,8 @@ class TransactionUtil extends Util
         }
 
         return [
+            'orphan_links_removed' => $orphans->count(),
+            'orphan_qty_freed' => $orphans->sum(fn ($o) => $o->quantity - $o->qty_returned),
             'sell_lines_repaired' => $lines->count(),
             'extra_qty_removed' => $removed_qty,
             'overlinked_purchase_lines' => $overlinked->count(),

@@ -13,10 +13,43 @@
             @php
                 $extra = $issues->filter(fn ($i) => $i->linked_qty > $i->quantity);
             @endphp
-            @if($can_repair && ($issues->isNotEmpty() || $overlinked->isNotEmpty() || $stock_mismatches->isNotEmpty() || $payment_mismatches->isNotEmpty()))
+            @if($can_repair && ($issues->isNotEmpty() || $overlinked->isNotEmpty() || $stock_mismatches->isNotEmpty() || $payment_mismatches->isNotEmpty() || $orphans->isNotEmpty()))
                 <button type="button" class="tw-dw-btn tw-dw-btn-warning tw-text-white tw-dw-btn-sm" id="repair_stock_links" style="margin-bottom: 10px;">
                     <i class="fa fa-wrench"></i> Repair
                 </button>
+            @endif
+
+            @if($orphans->isNotEmpty())
+                @php $orphan_groups = $orphans->groupBy(fn ($o) => $o->product.'|'.$o->location); @endphp
+                <h4>Purchases still used by deleted sales ({{ $orphans->count() }} links, {{ $orphan_groups->count() }} products)</h4>
+                <p class="text-muted">These sales lines were deleted, but their purchases were left marked as sold. POS shows the stock,
+                    but selling it fails with "Mismatch between sold and purchase quantity". Repair frees these purchases, links any
+                    "sold without stock" sales to them, and checks the stock.</p>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-striped table-condensed">
+                        <thead>
+                            <tr>
+                                <th>Product</th>
+                                <th>SKU</th>
+                                <th>Location</th>
+                                <th>Purchases</th>
+                                <th>Qty held by deleted sales</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($orphan_groups as $rows)
+                                @php $first = $rows->first(); $held = $rows->sum(fn ($o) => $o->quantity - $o->qty_returned); @endphp
+                                <tr>
+                                    <td>{{ $first->product }}</td>
+                                    <td>{{ $first->sub_sku }}</td>
+                                    <td>{{ $first->location }}</td>
+                                    <td>{{ $rows->pluck('ref_no')->unique()->implode(', ') }}</td>
+                                    <td class="text-danger">{{ @format_quantity($held) }} {{ $first->unit }}</td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
             @endif
 
             @if($stock_mismatches->isNotEmpty())
