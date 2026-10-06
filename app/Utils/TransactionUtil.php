@@ -5226,7 +5226,7 @@ class TransactionUtil extends Util
             ->get();
     }
 
-    public function getGrossProfit($business_id, $start_date = null, $end_date = null, $location_id = null, $user_id = null, $permitted_locations)
+    public function getGrossProfit($business_id, $start_date = null, $end_date = null, $location_id = null, $user_id = null, $permitted_locations = null, $filters = [])
     {
         $query = TransactionSellLine::join('transactions as sale', 'transaction_sell_lines.transaction_id', '=', 'sale.id')
             ->leftjoin('transaction_sell_lines_purchase_lines as TSPL', 'transaction_sell_lines.id', '=', 'TSPL.sell_line_id')
@@ -5248,7 +5248,13 @@ class TransactionUtil extends Util
         //Exc. tax on both sides, like Total sell / Total purchase (collected tax is not profit)
         $unit_cost = 'COALESCE(PL.purchase_price, V.default_purchase_price, 0)';
         $sold_qty = 'IF(TSPL.id IS NULL, transaction_sell_lines.quantity - transaction_sell_lines.quantity_returned, TSPL.quantity - TSPL.qty_returned)';
-        $combo_cost = '(SELECT SUM((tspl2.quantity - tspl2.qty_returned) * COALESCE(pl2.purchase_price, v2.default_purchase_price, 0))
+        $combo_qty = 'tspl2.quantity - tspl2.qty_returned';
+        //Optional: as sold, before any return (investor deals take returns off on the day of the return instead)
+        if (! empty($filters['gross_of_returns'])) {
+            $sold_qty = 'IF(TSPL.id IS NULL, transaction_sell_lines.quantity, TSPL.quantity)';
+            $combo_qty = 'tspl2.quantity';
+        }
+        $combo_cost = '(SELECT SUM(('.$combo_qty.') * COALESCE(pl2.purchase_price, v2.default_purchase_price, 0))
                 FROM transaction_sell_lines AS tsl
                 JOIN transaction_sell_lines_purchase_lines AS tspl2 ON tsl.id = tspl2.sell_line_id
                 JOIN variations AS v2 ON tsl.variation_id = v2.id
@@ -5283,6 +5289,64 @@ class TransactionUtil extends Util
 
         if (! empty($user_id)) {
             $query->where('sale.created_by', $user_id);
+        }
+
+        //Optional: only one brand / product (investor deals)
+        if (! empty($filters['brand_id'])) {
+            $query->where('P.brand_id', $filters['brand_id']);
+        }
+        if (! empty($filters['product_id'])) {
+            $query->where('P.id', $filters['product_id']);
+        }
+
+        //Optional: one row per product (investor report) with net qty sold, sale, purchase cost and gross profit
+        if (! empty($filters['group_by_product'])) {
+            return $query->leftJoin('brands as B', 'P.brand_id', '=', 'B.id')
+                ->leftJoin('units as U', 'P.unit_id', '=', 'U.id')
+                ->groupBy('P.id', 'P.name', 'P.sku', 'B.name', 'U.short_name')
+                ->select(
+                    'P.id as product_id',
+                    'P.name as product',
+                    'P.sku',
+                    'B.name as brand',
+                    'U.short_name as unit',
+                    DB::raw('SUM('.$sold_qty.') AS qty'),
+                    DB::raw('SUM('.$line_sale.') AS sales'),
+                    DB::raw('SUM('.$line_cost.') AS cost'),
+                    DB::raw('SUM('.$line_sale.' - '.$line_cost.') AS profit')
+                )
+                ->orderByDesc('sales')
+                ->get();
+        }
+
+        //Optional: one row per sell line (investor report: sales detail / invoices) with date, invoice and customer
+        if (! empty($filters['group_by_line'])) {
+            return $query->leftJoin('brands as B', 'P.brand_id', '=', 'B.id')
+                ->leftJoin('units as U', 'P.unit_id', '=', 'U.id')
+                ->leftJoin('contacts as C', 'sale.contact_id', '=', 'C.id')
+                ->groupBy('transaction_sell_lines.id')
+                ->select(
+                    'sale.id as transaction_id',
+                    'sale.invoice_no',
+                    'sale.transaction_date',
+                    'sale.final_total',
+                    'sale.payment_status',
+                    DB::raw("COALESCE(NULLIF(C.supplier_business_name, ''), C.name) as customer"),
+                    'P.id as product_id',
+                    'P.name as product',
+                    'P.sku',
+                    'B.name as brand',
+                    'U.short_name as unit',
+                    DB::raw('MAX(transaction_sell_lines.unit_price_inc_tax - COALESCE(transaction_sell_lines.item_tax, 0)) AS unit_price'),
+                    DB::raw('SUM('.$sold_qty.') AS qty'),
+                    DB::raw('MAX(transaction_sell_lines.quantity_returned) AS qty_returned'),
+                    DB::raw('SUM('.$line_sale.') AS sales'),
+                    DB::raw('SUM('.$line_cost.') AS cost'),
+                    DB::raw('SUM('.$line_sale.' - '.$line_cost.') AS profit')
+                )
+                ->orderBy('sale.transaction_date')
+                ->orderBy('transaction_sell_lines.id')
+                ->get();
         }
 
         $gross_profit_obj = $query->first();
@@ -6303,7 +6367,7 @@ class TransactionUtil extends Util
      *
      * @return float
      */
-    public function getWithoutInvoiceReturnAdjustment($business_id, $start_date, $end_date, $location_id = null, $user_id = null, $permitted_locations = null)
+    public function getWithoutInvoiceReturnAdjustment($business_id, $start_date, $end_date, $location_id = null, $user_id = null, $permitted_locations = null, $part = 'all')
     {
         $apply_filters = function ($query, $alias) use ($start_date, $end_date, $location_id, $user_id, $permitted_locations) {
             $query->whereDate("$alias.transaction_date", '>=', $start_date)
@@ -6331,6 +6395,10 @@ class TransactionUtil extends Util
                 ->where('ret.type', 'sell_return'),
             'sale'
         )->sum(DB::raw('rsl.quantity * ((sl.unit_price_inc_tax - COALESCE(sl.item_tax, 0)) - COALESCE(rsl.unit_price, 0))'));
+        //$part = 'price': only the price difference part (investor deals)
+        if ($part == 'price') {
+            return (float) $price_diff;
+        }
 
         //Return total vs. its lines (discount / rounding on the return), dated on the return
         $header_diff = $apply_filters(

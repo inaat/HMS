@@ -85,6 +85,30 @@ class AdminSidebarMenu
                 )->order(10);
             }
 
+            //Investors dropdown (profit share, capital, settlements, payouts)
+            if (auth()->user()->can('investor.view')) {
+                $menu->dropdown(
+                    'Investors',
+                    function ($sub) {
+                        $sub->url(
+                            action([\App\Http\Controllers\InvestorController::class, 'index']),
+                            'Investors',
+                            ['icon' => '', 'active' => request()->segment(1) == 'investors' && request()->segment(2) != 'settlements']
+                        );
+                        $sub->url(
+                            action([\App\Http\Controllers\InvestorSettlementController::class, 'index']),
+                            'Profit settlements',
+                            ['icon' => '', 'active' => request()->segment(1) == 'investors' && request()->segment(2) == 'settlements']
+                        );
+                    },
+                    ['icon' => '<svg aria-hidden="true" class="tw-size-5 tw-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+                    <path d="M3 17l6 -6l4 4l8 -8"></path>
+                    <path d="M14 7l7 0l0 7"></path>
+                  </svg>', ]
+                )->order(11);
+            }
+
             //Contacts dropdown
             if (auth()->user()->can('supplier.view') || auth()->user()->can('customer.view') || auth()->user()->can('supplier.view_own') || auth()->user()->can('customer.view_own')) {
                 $menu->dropdown(

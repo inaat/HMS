@@ -367,6 +367,26 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     //Sales Commission Agent
     Route::get('/sales-commission-agents/{id}/rules', [SalesCommissionAgentController::class, 'rules']);
     Route::post('/sales-commission-agents/{id}/rules', [SalesCommissionAgentController::class, 'saveRules']);
+
+    //Investors: profit share by brand / product / overall, capital, settlements and payouts
+    Route::get('/investors/settlements', [\App\Http\Controllers\InvestorSettlementController::class, 'index']);
+    Route::get('/investors/settlements/preview', [\App\Http\Controllers\InvestorSettlementController::class, 'preview']);
+    Route::post('/investors/settlements/lock', [\App\Http\Controllers\InvestorSettlementController::class, 'lock']);
+    Route::get('/investors/settlements/{id}', [\App\Http\Controllers\InvestorSettlementController::class, 'show']);
+    Route::post('/investors/settlements/{id}/unlock', [\App\Http\Controllers\InvestorSettlementController::class, 'unlock']);
+    Route::get('/investors/{id}/capital', [\App\Http\Controllers\InvestorController::class, 'capital']);
+    Route::post('/investors/{id}/capital', [\App\Http\Controllers\InvestorController::class, 'storeCapital']);
+    Route::delete('/investors/{id}/capital/{capital_id}', [\App\Http\Controllers\InvestorController::class, 'deleteCapital']);
+    Route::get('/investors/{id}/deals', [\App\Http\Controllers\InvestorController::class, 'deals']);
+    Route::post('/investors/{id}/deals', [\App\Http\Controllers\InvestorController::class, 'saveDeals']);
+    Route::delete('/investors/{id}/deals/{deal_id}', [\App\Http\Controllers\InvestorController::class, 'deleteDeal']);
+    Route::get('/investors/{id}/pay', [\App\Http\Controllers\InvestorController::class, 'pay']);
+    Route::post('/investors/{id}/pay', [\App\Http\Controllers\InvestorController::class, 'storePayout']);
+    Route::delete('/investors/{id}/payouts/{payout_id}', [\App\Http\Controllers\InvestorController::class, 'deletePayout']);
+    Route::get('/investors/{id}/statement', [\App\Http\Controllers\InvestorController::class, 'statement']);
+    Route::get('/investors/{id}/statement/pdf', [\App\Http\Controllers\InvestorController::class, 'statementPdf']);
+    Route::post('/investors/{id}/statement/send', [\App\Http\Controllers\InvestorController::class, 'sendStatement']);
+    Route::resource('investors', \App\Http\Controllers\InvestorController::class)->except(['show']);
     Route::resource('sales-commission-agents', SalesCommissionAgentController::class);
 
     //Stock Transfer
