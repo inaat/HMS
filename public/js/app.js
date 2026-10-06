@@ -2942,3 +2942,31 @@ $(document).on('submit', 'form#pay_contact_due_form', function(e){
     }
     
 })
+//WhatsApp invoice button (.send-whatsapp-btn) on every page: send in the background and show a toast,
+//so the browser never navigates to the JSON reply. Clicks while a send is running are ignored.
+$(document).on('click', '.send-whatsapp-btn', function(e) {
+    e.preventDefault();
+    var btn = $(this);
+    if (btn.data('sending')) {
+        return;
+    }
+    var original_html = btn.html();
+    btn.data('sending', true).html('<i class="fas fa-spinner fa-spin"></i>');
+    $.ajax({
+        url: btn.attr('href'),
+        dataType: 'json',
+        success: function(result) {
+            if (result && result.success === false) {
+                toastr.error(result.msg || 'Failed to send WhatsApp.');
+            } else {
+                toastr.success((result && result.msg) ? result.msg : 'WhatsApp sent successfully!');
+            }
+        },
+        error: function() {
+            toastr.error('Failed to send WhatsApp.');
+        },
+        complete: function() {
+            btn.data('sending', false).html(original_html);
+        }
+    });
+});

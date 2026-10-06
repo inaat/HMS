@@ -424,6 +424,10 @@ class WithOutSellReturnController extends Controller
                     $this->productUtil->updateProductQuantity($sell_return->location_id, $sell_line->product_id, $sell_line->variation_id, 0, $quantity_before);
                 }
             }
+                //Invoices this return settled become due again
+                $this->transactionUtil->removeSellReturnSettlement($sell_return->id);
+                $transaction_payments = $transaction_payments->where('method', '!=', \App\Utils\TransactionUtil::RETURN_ADJUSTMENT_METHOD);
+
                   $sell_return->delete();
                 foreach ($transaction_payments as $payment) {
                     event(new TransactionPaymentDeleted($payment));
@@ -829,7 +833,12 @@ class WithOutSellReturnController extends Controller
                 }
                
             }
-           
+
+            //The return settles the customer's unpaid invoices, oldest first
+            if (! empty($sell_return)) {
+                $this->transactionUtil->settleSellReturn($sell_return->fresh());
+            }
+
             DB::commit();
             $output = [
                 'success' => 1,

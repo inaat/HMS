@@ -636,6 +636,13 @@ class AdminSidebarMenu
                                 'Missing purchases',
                                 ['icon' => '', 'active' => request()->segment(2) == 'missing-purchases']
                             );
+                        }
+                        if (auth()->user()->can('customer.update')) {
+                            $sub->url(
+                                action([\App\Http\Controllers\ReturnAdvanceCheckController::class, 'index']),
+                                'Return & Advance Check',
+                                ['icon' => '', 'active' => request()->segment(2) == 'return-advance-check']
+                            );
                         }                        if (config('constants.show_report_606') == true) {
                             $sub->url(
                                 action([\App\Http\Controllers\ReportController::class, 'purchaseReport']),

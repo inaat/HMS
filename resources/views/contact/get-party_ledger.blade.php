@@ -57,8 +57,7 @@
             @endif
 
 			<tr >
-				<td><strong>@lang('lang_v1.balance_due')</strong></td>
-				<td class="align-right">@format_currency($ledger_details['all_balance_due'])</td>
+				@include('contact.partials.ledger_balance_due_cells', ['label_class' => 'text-bold', 'amount_class' => 'align-right'])
 			</tr>
 		</table>
 	</div>

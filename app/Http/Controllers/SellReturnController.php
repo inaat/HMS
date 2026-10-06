@@ -456,6 +456,10 @@ class SellReturnController extends Controller
                         }
                     }
 
+                    //Invoices this return settled become due again
+                    $this->transactionUtil->removeSellReturnSettlement($sell_return->id);
+                    $transaction_payments = $transaction_payments->where('method', '!=', \App\Utils\TransactionUtil::RETURN_ADJUSTMENT_METHOD);
+
                     $sell_return->delete();
                     foreach ($transaction_payments as $payment) {
                         event(new TransactionPaymentDeleted($payment));

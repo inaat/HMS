@@ -5826,6 +5826,16 @@ class TransactionUtil extends Util
                                     ->groupBy('return_transaction_id')
                                     ->map(fn ($rows) => $rows->pluck('invoice_no')->all());
 
+        //Returns settling invoices (return_adjustment pairs): shown as badges, not as payment rows
+        $adjustments = TransactionPayment::join('transactions as at', 'transaction_payments.transaction_id', '=', 'at.id')
+                            ->leftJoin('transactions as ar', 'transaction_payments.return_transaction_id', '=', 'ar.id')
+                            ->whereIn('transaction_payments.transaction_id', $transactions->pluck('id'))
+                            ->where('transaction_payments.method', self::RETURN_ADJUSTMENT_METHOD)
+                            ->select('transaction_payments.transaction_id', 'transaction_payments.amount', 'transaction_payments.note', 'at.type', 'ar.invoice_no as return_no')
+                            ->get()
+                            ->groupBy('transaction_id');
+        $badge = fn ($color, $text) => ' <span class="label" style="background-color: '.$color.'; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; display: inline-block; white-space: normal;">'.e($text).'</span>';
+
         foreach ($transactions as $transaction) {
             if ($transaction->type == 'opening_balance') {
                 //Skip opening balance, it will be added in the end
@@ -5863,6 +5873,24 @@ class TransactionUtil extends Util
                     if (! empty($sources)) {
                         $shown = array_slice($sources, 0, 5);
                         $temp_array['others'] .= ' <small>Items from invoice: '.e(implode(', ', $shown)).(count($sources) > 5 ? ' +'.(count($sources) - 5).' more' : '').'</small>';
+                    }
+                }
+            }
+
+            //Invoices this return settled / returns that paid this invoice
+            if (! empty($adjustments[$transaction->id])) {
+                $rows = $adjustments[$transaction->id];
+                if ($transaction->type == 'sell_return') {
+                    $settled = $rows->map(fn ($a) => trim(str_replace('Used for invoice', '', (string) $a->note)).' ('.$this->num_f($a->amount).')')->implode(', ');
+                    $temp_array['others'] .= $badge('#00a65a', 'Settled: '.$settled);
+                    $refunds = (float) TransactionPayment::where('transaction_id', $transaction->id)->where('method', '!=', self::RETURN_ADJUSTMENT_METHOD)->sum('amount');
+                    $credit_left = $transaction->final_total - $refunds - $rows->sum('amount');
+                    if ($credit_left >= 0.005) {
+                        $temp_array['others'] .= $badge('#605ca8', 'Credit left: '.$this->num_f($credit_left));
+                    }
+                } else {
+                    foreach ($rows as $a) {
+                        $temp_array['others'] .= $badge('#00a65a', 'Paid by return '.$a->return_no.' ('.$this->num_f($a->amount).')');
                     }
                 }
             }
@@ -5929,6 +5957,17 @@ class TransactionUtil extends Util
                                 ->all();
         }
 
+        //Advance payments: which invoices they paid (child payments), to show where the money went
+        $advance_usage = [];
+        if (! empty($payments) && $payments->isNotEmpty()) {
+            $advance_usage = TransactionPayment::join('transactions as ut', 'transaction_payments.transaction_id', '=', 'ut.id')
+                                ->whereIn('transaction_payments.parent_id', $payments->where('is_advance', 1)->pluck('id'))
+                                ->select('transaction_payments.parent_id', 'ut.invoice_no', 'ut.ref_no', 'ut.type', 'transaction_payments.amount')
+                                ->get()
+                                ->groupBy('parent_id')
+                                ->all();
+        }
+
         $total_reverse_payment = 0;
 
         foreach ($payments as $payment) {
@@ -5948,6 +5987,11 @@ class TransactionUtil extends Util
                 continue;
             }
 
+            //Return settling an invoice: the pair cancels out, shown as badges on the invoice and the return
+            if ($payment->method == self::RETURN_ADJUSTMENT_METHOD) {
+                continue;
+            }
+
             $ref_no = in_array($payment->transaction_type, ['sell', 'sell_return']) ? $payment->invoice_no : $payment->ref_no;
             $note = $payment->note;
             if ($payment->transaction_type == 'sell_return') {
@@ -5957,9 +6001,18 @@ class TransactionUtil extends Util
                 $note .= '<small>'.__('account.payment_for').': '.$ref_no.'</small>';
             }
 
-            // if ($payment->is_advance == 1) {
-            //     $note .= '<small>'.__('lang_v1.advance_payment').'</small>';
-            // }
+            //Advance: invoices it was used for and what is left unused
+            if ($payment->is_advance == 1 && empty($refunded_returns[$payment->id])) {
+                $used = collect($advance_usage[$payment->id] ?? []);
+                $parts = $used->map(fn ($u) => (in_array($u->type, ['sell', 'sell_return']) ? $u->invoice_no : $u->ref_no).' ('.$this->num_f($u->amount).')');
+                if ($parts->isNotEmpty()) {
+                    $note .= '<small>Used for: '.e($parts->implode(', ')).'</small>';
+                }
+                $unused = $payment->amount - $used->sum('amount');
+                if ($unused >= 0.005) {
+                    $note .= ' <span class="label bg-green" style="background-color: #00a65a; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; display: inline-block; white-space: normal;">Advance left: '.$this->num_f($unused).'</span>';
+                }
+            }
 
             if ($payment->is_return == 1) {
                 $note .= '<small>('.__('lang_v1.change_return').')</small>';
@@ -6126,6 +6179,19 @@ class TransactionUtil extends Util
         $total_overall_paid_supplier = $overall_total_purchase_paid - $overall_total_purchase_return_paid;
         $overall_due = $total_overall_invoice + $total_overall_purchase - $total_overall_paid_customer - $total_overall_paid_supplier - $overall_ledger_discount;
 
+        //Advance still unused: advance payments minus the part already used for invoices (their child payments).
+        //Money paid back out of the advance (customer: debit, supplier: credit) counts negative.
+        $reverse_type = $contact->type == 'supplier' ? 'credit' : 'debit';
+        $overall_advance_balance = $this->__paymentQuery($contact_id, null, null, $location_id)
+                                        ->where('transaction_payments.is_advance', 1)
+                                        ->whereNull('transaction_payments.parent_id')
+                                        ->select(
+                                            'transaction_payments.payment_type',
+                                            DB::raw('(transaction_payments.amount - COALESCE((SELECT SUM(amount) from transaction_payments as TP where TP.parent_id = transaction_payments.id), 0)) as unused')
+                                        )
+                                        ->get()
+                                        ->sum(fn ($p) => $p->payment_type == $reverse_type ? -$p->unused : $p->unused);
+
         $output = [
             'ledger' => $ledger,
             'start_date' => $start_date,
@@ -6145,6 +6211,9 @@ class TransactionUtil extends Util
             'all_purchase_paid' => $total_overall_paid_supplier,
             'all_balance_due' => $overall_due,
             'all_ledger_discount' => $overall_ledger_discount,
+            //Balance due ignores unused advance; the net balance is what the last ledger row shows
+            'all_advance_balance' => $overall_advance_balance,
+            'all_net_balance' => $overall_due - $overall_advance_balance,
         ];
 
         return $output;
@@ -6933,6 +7002,9 @@ class TransactionUtil extends Util
             }
         }
 
+        //The return settles the customer's unpaid invoices (its own sale first)
+        $this->settleSellReturn($sell_return->fresh());
+
         return $sell_return;
     }
 
@@ -7027,6 +7099,121 @@ class TransactionUtil extends Util
     const SELL_RETURN_REFUND_NOTE = 'Refund on sell return';
 
     /**
+     * Payment method of a return settling an invoice: no money moves, no cash/bank account entry.
+     * Stored as a pair: one payment on the invoice, one on the return, both with return_transaction_id.
+     */
+    const RETURN_ADJUSTMENT_METHOD = 'return_adjustment';
+
+    /**
+     * A sell return settles the customer's unpaid invoices: its own invoice first, then the oldest ones.
+     * Credit used = return total minus cash refunds; what's left stays as the customer's credit.
+     * Earlier settlements of this return are removed first, so it can run after every change.
+     *
+     * @return float credit left after settling
+     */
+    public function settleSellReturn($sell_return)
+    {
+        if (! is_object($sell_return)) {
+            $sell_return = Transaction::find($sell_return);
+        }
+        if (empty($sell_return) || $sell_return->type != 'sell_return' || $sell_return->status != 'final' || empty($sell_return->contact_id)) {
+            return 0;
+        }
+
+        $this->removeSellReturnSettlement($sell_return->id);
+
+        $refunded = (float) TransactionPayment::where('transaction_id', $sell_return->id)
+                        ->where('method', '!=', self::RETURN_ADJUSTMENT_METHOD)
+                        ->sum('amount');
+        $credit = round((float) $sell_return->final_total - $refunded, 4);
+        if ($credit <= 0) {
+            return 0;
+        }
+
+        $sales = Transaction::where('business_id', $sell_return->business_id)
+                    ->where('contact_id', $sell_return->contact_id)
+                    ->where('type', 'sell')
+                    ->where('status', 'final')
+                    ->where('payment_status', '!=', 'paid')
+                    ->orderByRaw('id = ? DESC', [(int) $sell_return->return_parent_id])
+                    ->orderBy('transaction_date')
+                    ->orderBy('id')
+                    ->get();
+
+        $ref_count = null;
+        foreach ($sales as $sale) {
+            if ($credit <= 0) {
+                break;
+            }
+            $due = round((float) $sale->final_total - (float) $this->getTotalPaid($sale->id), 4);
+            $amount = min($due, $credit);
+            if ($amount <= 0) {
+                continue;
+            }
+
+            $ref_count = $this->setAndGetReferenceCount('sell_payment', $sell_return->business_id);
+            $common = [
+                'business_id' => $sell_return->business_id,
+                'amount' => $amount,
+                'method' => self::RETURN_ADJUSTMENT_METHOD,
+                'is_return' => 0,
+                'paid_on' => $sell_return->transaction_date,
+                'created_by' => auth()->id() ?? $sell_return->created_by,
+                'payment_for' => $sell_return->contact_id,
+                'return_transaction_id' => $sell_return->id,
+                'payment_ref_no' => $this->generateReferenceNumber('sell_payment', $ref_count, $sell_return->business_id),
+            ];
+            //Invoice: paid by the return
+            TransactionPayment::create($common + ['transaction_id' => $sale->id, 'note' => 'Paid by return '.$sell_return->invoice_no]);
+            //Return: its credit used on the invoice
+            TransactionPayment::create($common + ['transaction_id' => $sell_return->id, 'note' => 'Used for invoice '.$sale->invoice_no]);
+
+            $this->updatePaymentStatus($sale->id, $sale->final_total);
+            $credit -= $amount;
+        }
+        $this->updatePaymentStatus($sell_return->id, $sell_return->final_total);
+
+        return max(0, $credit);
+    }
+
+    /**
+     * Removes the invoice settlements of a sell return and puts the invoices' payment status back
+     */
+    public function removeSellReturnSettlement($sell_return_id)
+    {
+        $payments = TransactionPayment::where('return_transaction_id', $sell_return_id)
+                        ->where('method', self::RETURN_ADJUSTMENT_METHOD)
+                        ->get();
+        if ($payments->isEmpty()) {
+            return;
+        }
+        $transaction_ids = $payments->pluck('transaction_id')->unique();
+        TransactionPayment::whereIn('id', $payments->pluck('id'))->delete();
+
+        foreach (Transaction::whereIn('id', $transaction_ids)->get() as $transaction) {
+            $this->updatePaymentStatus($transaction->id, $transaction->final_total);
+        }
+    }
+
+    /**
+     * Settles again every return of this customer that still has unused credit (after a new invoice,
+     * or after a return's cash refund changed)
+     */
+    public function settleCustomerReturns($business_id, $contact_id)
+    {
+        $returns = Transaction::where('business_id', $business_id)
+                    ->where('contact_id', $contact_id)
+                    ->where('type', 'sell_return')
+                    ->where('status', 'final')
+                    ->where('payment_status', '!=', 'paid')
+                    ->orderBy('transaction_date')
+                    ->get();
+        foreach ($returns as $sell_return) {
+            $this->settleSellReturn($sell_return);
+        }
+    }
+
+    /**
      * How a sell return is settled: the return first clears what is still due on the sale,
      * only the rest is refunded to the customer (e.g. paid sale: full refund; credit sale: no refund).
      *
@@ -7036,13 +7223,17 @@ class TransactionUtil extends Util
      */
     public function getSellReturnRefundInfo($sell, $sell_return = null)
     {
-        $sale_payments = TransactionPayment::where('transaction_id', $sell->id)->get();
+        $sale_payments = TransactionPayment::where('transaction_id', $sell->id)
+                            //What this return itself settled on the sale is not a payment from the customer
+                            ->where(fn ($q) => $q->whereNull('return_transaction_id')->orWhere('return_transaction_id', '!=', optional($sell_return)->id ?? 0))
+                            ->get();
         $sale_paid = $sale_payments->where('is_return', 0)->sum('amount') - $sale_payments->where('is_return', 1)->sum('amount');
 
         $refund_payment = null;
         $other_refunded = 0;
         if (! empty($sell_return)) {
-            $return_payments = TransactionPayment::where('transaction_id', $sell_return->id)->get();
+            //Cash refunds only: settlements of invoices are not money paid out
+            $return_payments = TransactionPayment::where('transaction_id', $sell_return->id)->where('method', '!=', self::RETURN_ADJUSTMENT_METHOD)->get();
             $refund_payment = $return_payments->first(fn ($p) => empty($p->parent_id) && $p->note == self::SELL_RETURN_REFUND_NOTE);
             $other_refunded = $return_payments->where('id', '!=', optional($refund_payment)->id)->sum('amount');
         }

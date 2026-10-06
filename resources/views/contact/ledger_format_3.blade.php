@@ -81,14 +81,14 @@
             <td>@lang('sale.total_paid')</td>
             <td class="sl-amount">@format_currency($ledger_details['total_paid'])</td>
             <td>@lang('lang_v1.advance_balance')</td>
-            <td class="sl-amount">@format_currency($contact->balance - $ledger_details['total_reverse_payment'])</td>
+            <td class="sl-amount">@format_currency($ledger_details['all_advance_balance'] ?? ($contact->balance - $ledger_details['total_reverse_payment']))</td>
         </tr>
         <tr>
             <td>@if($ledger_details['ledger_discount'] > 0) @lang('lang_v1.ledger_discount') @endif</td>
             <td class="sl-amount">@if($ledger_details['ledger_discount'] > 0) @format_currency($ledger_details['ledger_discount']) @endif</td>
-            <td class="sl-due">@lang('lang_v1.balance_due')</td>
-            <td class="sl-amount sl-due">@format_currency($ledger_details['all_balance_due'])</td>
+            @include('contact.partials.ledger_balance_due_cells', ['label_class' => 'sl-due', 'amount_class' => 'sl-amount sl-due'])
         </tr>
+        @include('contact.partials.ledger_net_balance_rows')
     </table>
 
     <br>

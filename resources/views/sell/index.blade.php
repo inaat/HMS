@@ -387,23 +387,5 @@
         });
     </script>
     <script src="{{ asset('js/payment.js?v=' . $asset_v) }}"></script>
-    <script>
-        $(document).on('click', '.send-whatsapp-btn', function(e) {
-            e.preventDefault();
-            var url = $(this).attr('href');
-            var btn = $(this);
-            btn.html('<i class="fas fa-spinner fa-spin"></i>');
-            $.get(url, function(response) {
-                btn.html('<i class="fab fa-whatsapp"></i>');
-                if (response && response.success === false) {
-                    toastr.error(response.msg);
-                } else {
-                    toastr.success((response && response.msg) ? response.msg : 'WhatsApp sent successfully!');
-                }
-            }).fail(function() {
-                btn.html('<i class="fab fa-whatsapp"></i>');
-                toastr.error('Failed to send WhatsApp.');
-            });
-        });
-    </script>
+    {{-- .send-whatsapp-btn is handled for every page in public/js/app.js --}}
 @endsection
