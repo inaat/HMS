@@ -71,6 +71,12 @@
 	  -webkit-transform: rotate(315deg);
 	  transform: rotate(315deg);
 	}
+	/* A select2 box next to an icon (input-group) fills its column instead of shrinking to its text
+	   ("None", "Please Select") — report filters, sale screens, etc. */
+	.input-group > .select2-container {
+	  display: table-cell;
+	  width: 100% !important;
+	}
 </style>
 @if(!empty($__system_settings['additional_css']))
     {!! $__system_settings['additional_css'] !!}
