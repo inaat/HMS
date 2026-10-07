@@ -104,7 +104,7 @@ Omit `since` on the first sync (full download). Response 200:
     "route_id": 1, "position": "34.8123456,71.8234567", "photo_url": "uploads/booker/<uuid>.jpg",
     "outlet_type": "Bakery", "outlet_class": "B", "visit_sequence": 1
   }],
-  "routes": [{"id": 1, "name": "Khwaza Khela Bazar", "location_id": 1, "days": [3], "booker_id": 11}],
+  "routes": [{"id": 1, "name": "Khwaza Khela Bazar", "location_id": 1, "days": [3], "booker_id": 11, "booker_ids": [11, 14]}],
   "outlet_types": ["Kiryana", "General store", "Wholesale", "Medical store", "Bakery", "Super store", "Hotel / Restaurant", "Other"],
   "visit_radius_m": 100,
   "can_edit_shops": true,
@@ -135,7 +135,8 @@ Rules for applying it (upsert into SQLite):
 - `stock` / `stock_by_location`: **always the full map; replace**. Values are **free quantity in the product's base
   unit** (already minus orders not yet invoiced). `null` = stock not tracked.
 - `routes`: **always the full list of active routes; replace**. `days` are weekdays 1 = Monday … 7 = Sunday.
-  `booker_id` null = not assigned to anyone.
+  `booker_ids` = the route's order bookers (several allowed; use it, `booker_id` is only the first one for old
+  apps); empty = not assigned to anyone.
 - Customer `position` is `"lat,lng"` (null = no location yet). `photo_url` is a path on the server: show it from
   `https://pos.explainerkhan.com/<photo_url>` (cache the image for offline). `mobile` may be null.
 - `outlet_types` and `visit_radius_m` (metres; a check-in further than this from the shop is flagged): replace.
@@ -301,7 +302,7 @@ lost; turning airplane mode OFF uploads all 14 items once and the statuses updat
    it immediately selectable (badge "new · not sent").
 9. Nothing in the outbox can be edited after saving except: error items → Try again / Delete.
 10. **Today's route:** weekday = 1 Monday … 7 Sunday. Routes for today = routes whose `days` contain today **and**
-    `booker_id` = this booker; if there are none, the routes for today with `booker_id` null. Shops = customers with
+    whose `booker_ids` contain this booker; if there are none, the routes for today with an empty `booker_ids`. Shops = customers with
     `route_id` in those routes, ordered by route, then `visit_sequence`, then name. A shop counts as visited when this
     phone has a visit for it started today. Show "N of M visited · K with orders" and the %.
 11. **Check in:** only one open visit at a time (to check in elsewhere, leave the current shop first). Get GPS (high

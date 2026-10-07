@@ -65,8 +65,11 @@ class MobileSyncController extends Controller
             }
 
             if (is_array($request->input('routes')) && Schema::hasTable('mb_routes')) {
-                $result['routes'] = $this->syncSet('mb_routes', 'id', $request->input('routes'),
-                    ['name', 'location_id', 'days', 'booker_id', 'active'], ['active' => 0]);
+                $route_fields = ['name', 'location_id', 'days', 'booker_id', 'active'];
+                if (Schema::hasColumn('mb_routes', 'booker_ids')) {
+                    $route_fields[] = 'booker_ids';
+                }
+                $result['routes'] = $this->syncSet('mb_routes', 'id', $request->input('routes'), $route_fields, ['active' => 0]);
             }
 
             if (is_array($request->input('invoices'))) {

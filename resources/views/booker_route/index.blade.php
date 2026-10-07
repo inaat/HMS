@@ -27,7 +27,7 @@
 
     @component('components.widget')
         <table class="table table-bordered table-hover">
-            <thead><tr style="background:#f5f5f5;"><th>Route</th><th>Days</th><th>Booker</th><th>Location</th><th class="text-right">Shops</th><th class="text-right">With GPS</th><th>Status</th><th></th></tr></thead>
+            <thead><tr style="background:#f5f5f5;"><th>Route</th><th>Days</th><th>Bookers</th><th>Location</th><th class="text-right">Shops</th><th class="text-right">With GPS</th><th>Status</th><th></th></tr></thead>
             <tbody>
                 @forelse ($routes as $r)
                     @php $d = json_decode($r->days ?? '[]', true) ?: []; @endphp

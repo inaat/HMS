@@ -250,10 +250,11 @@ class LocalSnapshot
     public function routes(): array
     {
         return DB::table('booker_routes')->where('business_id', $this->business_id)->orderBy('name')
-            ->get(['id', 'name', 'location_id', 'days', 'booker_id', 'is_active'])
+            ->get(['id', 'name', 'location_id', 'days', 'booker_id', 'booker_ids', 'is_active'])
             ->map(function ($r) {
                 return ['id' => $r->id, 'name' => $r->name, 'location_id' => $r->location_id, 'days' => $r->days,
-                    'booker_id' => $r->booker_id, 'active' => (int) $r->is_active];
+                    'booker_id' => $r->booker_id, 'active' => (int) $r->is_active,
+                    'booker_ids' => json_encode(\App\Http\Controllers\BookerRouteController::bookerIds($r))];
             })
             ->all();
     }

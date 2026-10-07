@@ -23,7 +23,7 @@
     <h1 class="tw-text-xl md:tw-text-3xl tw-font-bold tw-text-black">{{ $route->name }}
         <small>
             {{ implode(', ', array_map(fn ($x) => $days[$x] ?? $x, $d)) ?: 'no days set' }} ·
-            {{ $bookers[$route->booker_id] ?? 'no booker' }} ·
+            {{ implode(', ', array_filter(array_map(fn ($id) => $bookers[$id] ?? null, \App\Http\Controllers\BookerRouteController::bookerIds($route)))) ?: 'no booker' }} ·
             <a href="{{ action([\App\Http\Controllers\BookerRouteController::class, 'index']) }}">all routes</a>
         </small>
     </h1>

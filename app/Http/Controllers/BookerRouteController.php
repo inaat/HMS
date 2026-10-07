@@ -46,20 +46,25 @@ class BookerRouteController extends Controller
         $this->authorizeAccess();
         $business_id = $this->businessId();
 
+        $bookers = $this->bookers();
         $routes = DB::table('booker_routes as r')
-            ->leftJoin('users as u', 'u.id', '=', 'r.booker_id')
             ->leftJoin('business_locations as l', 'l.id', '=', 'r.location_id')
             ->where('r.business_id', $business_id)
-            ->select('r.*', 'l.name as location_name', DB::raw("TRIM(CONCAT(COALESCE(u.first_name,''),' ',COALESCE(u.last_name,''))) as booker_name"),
+            ->select('r.*', 'l.name as location_name',
                 DB::raw('(SELECT COUNT(*) FROM contacts c WHERE c.route_id = r.id AND c.deleted_at IS NULL) as shops'),
                 DB::raw("(SELECT COUNT(*) FROM contacts c WHERE c.route_id = r.id AND c.deleted_at IS NULL AND c.position IS NOT NULL AND c.position != '') as with_gps"))
-            ->orderBy('r.name')->get();
+            ->orderBy('r.name')->get()
+            ->each(function ($r) use ($bookers) {
+                $r->booker_name = implode(', ', array_filter(array_map(function ($id) use ($bookers) {
+                    return $bookers[$id] ?? null;
+                }, self::bookerIds($r))));
+            });
 
         $unassigned = DB::table('contacts')->where('business_id', $business_id)->whereIn('type', ['customer', 'both'])
             ->whereNull('deleted_at')->whereNull('route_id')->count();
 
         return view('booker_route.index', [
-            'routes' => $routes, 'unassigned' => $unassigned, 'bookers' => $this->bookers(), 'days' => self::DAYS,
+            'routes' => $routes, 'unassigned' => $unassigned, 'bookers' => $bookers, 'days' => self::DAYS,
             'locations' => \App\BusinessLocation::forDropdown($business_id),
         ]);
     }
@@ -322,9 +327,9 @@ class BookerRouteController extends Controller
             if ($booker && $booker != $id) {
                 continue;
             }
-            $route_ids = DB::table('booker_routes')->where('business_id', $business_id)->where('booker_id', $id)->where('is_active', 1)->get(['id', 'days'])
-                ->filter(function ($r) use ($weekday) {
-                    return in_array($weekday, json_decode($r->days ?? '[]', true) ?: []);
+            $route_ids = DB::table('booker_routes')->where('business_id', $business_id)->where('is_active', 1)->get(['id', 'days', 'booker_id', 'booker_ids'])
+                ->filter(function ($r) use ($weekday, $id) {
+                    return in_array($weekday, json_decode($r->days ?? '[]', true) ?: []) && in_array((int) $id, self::bookerIds($r), true);
                 })->pluck('id');
             $planned = $route_ids->isEmpty() ? collect() : DB::table('contacts')->whereIn('route_id', $route_ids)->whereNull('deleted_at')->pluck('id');
             if ($planned->isEmpty() && empty($summary[$id])) {
@@ -392,15 +397,28 @@ class BookerRouteController extends Controller
         return $route;
     }
 
+    /** Order bookers of a route (several allowed; old routes only have booker_id). */
+    public static function bookerIds($route): array
+    {
+        $ids = json_decode($route->booker_ids ?? '', true);
+        if (! is_array($ids)) {
+            $ids = ! empty($route->booker_id) ? [$route->booker_id] : [];
+        }
+
+        return array_values(array_map('intval', $ids));
+    }
+
     private function validated(Request $request): array
     {
         $request->validate(['name' => 'required|string|max:191']);
         $days = array_values(array_intersect(array_map('intval', (array) $request->input('days', [])), array_keys(self::DAYS)));
+        $ids = array_values(array_intersect(array_map('intval', (array) $request->input('booker_ids', [])), array_keys($this->bookers())));
 
         return [
             'name' => trim($request->input('name')),
             'location_id' => $request->filled('location_id') ? (int) $request->input('location_id') : null,
-            'booker_id' => $request->filled('booker_id') ? (int) $request->input('booker_id') : null,
+            'booker_ids' => $ids ? json_encode($ids) : null,
+            'booker_id' => $ids[0] ?? null, // first booker, for older booker apps
             'days' => json_encode($days),
             'is_active' => $request->has('is_active') ? 1 : (int) ! $request->has('_has_active'),
         ];

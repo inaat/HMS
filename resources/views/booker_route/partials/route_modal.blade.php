@@ -22,13 +22,14 @@
                     @endforeach
                 </div>
                 <div class="form-group">
-                    <label>Order booker</label>
-                    <select name="booker_id" class="form-control select2" style="width:100%;">
-                        <option value="">— none —</option>
+                    <label>Order bookers</label>
+                    @php $chosen = $route ? \App\Http\Controllers\BookerRouteController::bookerIds($route) : []; @endphp
+                    <select name="booker_ids[]" class="form-control select2" multiple style="width:100%;" data-placeholder="Choose one or more order bookers">
                         @foreach ($bookers as $id => $name)
-                            <option value="{{ $id }}" @if(($route->booker_id ?? null) == $id) selected @endif>{{ $name }}</option>
+                            <option value="{{ $id }}" @if(in_array((int) $id, $chosen, true)) selected @endif>{{ $name }}</option>
                         @endforeach
                     </select>
+                    <p class="help-block">Several bookers can share a route. None = any booker without a route of their own that day.</p>
                     @if (empty($bookers)) <p class="help-block">No order bookers yet (User Management → Users, role "Order Booker").</p> @endif
                 </div>
                 <div class="form-group">

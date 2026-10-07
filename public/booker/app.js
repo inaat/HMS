@@ -520,7 +520,7 @@ function customersView() {
   return `
     <div class="row" style="margin-bottom:10px"><input id="cust-q" placeholder="Search name, mobile, city" data-act="cust-search" class="grow" value="${h(S.custQuery || '')}">
       <button class="btn small" data-act="add-customer">+ New</button></div>
-    ${(S.routes || []).length ? `<select data-act="cust-route" style="margin-bottom:10px"><option value="">All customers</option>${myRoutes().map((r) => `<option value="${r.id}" ${num(S.custRoute) === r.id ? 'selected' : ''}>Route: ${h(r.name)} · ${h(routeDays(r))}${r.booker_id === S.user.id ? ' (yours)' : ''}</option>`).join('')}</select>` : ''}
+    ${(S.routes || []).length ? `<select data-act="cust-route" style="margin-bottom:10px"><option value="">All customers</option>${myRoutes().map((r) => `<option value="${r.id}" ${num(S.custRoute) === r.id ? 'selected' : ''}>Route: ${h(r.name)} · ${h(routeDays(r))}${isMine(r) ? ' (yours)' : ''}</option>`).join('')}</select>` : ''}
     <div class="card list" id="cust-list">${customerRows(S.custQuery || '', 'open-customer')}</div>`;
 }
 
@@ -589,7 +589,7 @@ function moreView() {
       const shops = [...S.customers.values()].filter((c) => num(c.route_id) === r.id);
       return `<div class="item tap row" data-act="route-shops" data-id="${r.id}"><div class="grow"><b>${h(r.name)}</b>
         <div class="muted">${h(routeDays(r))} · ${shops.length} shops · ${shops.filter((c) => c.position).length} with location</div></div>
-        <span class="pill ${r.booker_id === S.user.id ? 'ok' : ''}">${r.booker_id === S.user.id ? 'assigned to you' : 'open to all'}</span></div>`;
+        <span class="pill ${isMine(r) ? 'ok' : ''}">${isMine(r) ? (routeBookers(r).length > 1 ? 'assigned to you + ' + (routeBookers(r).length - 1) + ' more' : 'assigned to you') : 'open to all'}</span></div>`;
     }).join('') || '<div class="empty">No route assigned to you yet. The office sets it in Sell → Booker routes.</div>'}</div>
     <div class="card muted">Last sync: ${h(S.lastSync || 'never')}<br>Stock from: ${h(S.stockAt || '—')}<br>Products ${S.products.size} · Customers ${S.customers.size} · Not sent ${S.outbox.size}</div>
     <button class="btn block" data-act="sync" style="margin-bottom:10px">⟳ Sync now</button>
@@ -669,14 +669,17 @@ const posOf = (c) => { const p = String(c.position || '').split(',').map(Number)
 
 const routeDays = (r) => (r.days || []).map((d) => DAYS[d]).join(', ') || 'no days set';
 /** Routes the booker works: their own first, then routes not assigned to anyone. */
-const myRoutes = () => (S.routes || []).filter((r) => r.booker_id === S.user.id).concat((S.routes || []).filter((r) => !r.booker_id));
+/** Bookers of a route: several allowed (booker_ids); older data only has booker_id. */
+const routeBookers = (r) => (Array.isArray(r.booker_ids) ? r.booker_ids : (r.booker_id ? [r.booker_id] : [])).map(Number);
+const isMine = (r) => routeBookers(r).includes(S.user.id);
+const myRoutes = () => (S.routes || []).filter(isMine).concat((S.routes || []).filter((r) => !routeBookers(r).length));
 
 /** Today's routes for this booker (their own; when none, the routes nobody is assigned to). */
 function todayRoutes() {
   const wd = ((new Date().getDay() + 6) % 7) + 1;
   const today = (S.routes || []).filter((r) => (r.days || []).includes(wd));
-  const own = today.filter((r) => r.booker_id === S.user.id);
-  return own.length ? own : today.filter((r) => !r.booker_id);
+  const own = today.filter(isMine);
+  return own.length ? own : today.filter((r) => !routeBookers(r).length);
 }
 
 /** Visits of today by shop key (finished ones and the open one). */
@@ -699,7 +702,7 @@ function todayCard() {
   const orders = shops.filter((c) => (done.get(c.key) || {}).outcome === 'order').length;
   return `<div class="card list">
     <div class="row"><div class="grow"><b>📍 Today's route: ${routes.map((r) => h(r.name)).join(', ')}</b>
-      <div class="muted">${visited} of ${shops.length} shops visited · ${orders} with orders · ${routes.some((r) => r.booker_id === S.user.id) ? 'assigned to you' : 'open route (no booker set)'}</div></div>
+      <div class="muted">${visited} of ${shops.length} shops visited · ${orders} with orders · ${routes.some(isMine) ? 'assigned to you' : 'open route (no booker set)'}</div></div>
       <span class="pill ${shops.length && visited === shops.length ? 'ok' : 'warn'}">${shops.length ? Math.round(visited * 100 / shops.length) : 0}%</span></div>
     ${shops.map((c, i) => {
       const v = done.get(c.key);

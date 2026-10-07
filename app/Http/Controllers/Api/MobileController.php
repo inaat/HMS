@@ -112,9 +112,11 @@ class MobileController extends Controller
 
         // Routes are few: always sent in full (the app shows the booker's own routes per weekday).
         $routes = Schema::hasTable('mb_routes')
-            ? DB::table('mb_routes')->where('active', 1)->orderBy('name')->get(['id', 'name', 'location_id', 'days', 'booker_id'])
+            ? DB::table('mb_routes')->where('active', 1)->orderBy('name')
+                ->get(array_merge(['id', 'name', 'location_id', 'days', 'booker_id'], Schema::hasColumn('mb_routes', 'booker_ids') ? ['booker_ids'] : []))
                 ->each(function ($r) {
                     $r->days = json_decode($r->days ?? '[]', true) ?: [];
+                    $r->booker_ids = \App\Http\Controllers\BookerRouteController::bookerIds($r);
                 })
             : [];
 
