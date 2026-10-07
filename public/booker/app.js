@@ -863,6 +863,11 @@ async function setGpsHere(btn) {
   try {
     const g = await getGps();
     S.gpsFix = g;
+    if (g.accuracy > 500) {
+      // A computer (no GPS) or no satellite fix: the guess is kilometres off, never save it as the shop.
+      text.innerHTML = `<span style="color:var(--bad)">This device cannot find its exact location (±${g.accuracy >= 1000 ? Math.round(g.accuracy / 1000) + ' km' : Math.round(g.accuracy) + ' m'}). Use the booker's phone at the shop with Location (GPS) switched on.</span>`;
+      return;
+    }
     if (g.accuracy > 50) {
       // Weak fix (indoors, or a computer guessing from Wi-Fi): let the booker retry outside or keep it knowingly.
       text.innerHTML = `<span style="color:var(--bad)">GPS is weak (±${Math.round(g.accuracy)} m). Best: step outside the shop and tap again.</span>
