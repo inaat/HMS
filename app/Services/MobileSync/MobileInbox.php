@@ -344,7 +344,7 @@ class MobileInbox
                 'tax_rate_id' => $so->tax_id,
                 'discount_type' => $discount['discount_type'],
                 'discount_amount' => $discount['discount_amount'],
-                'is_direct_sale' => 1,
+                'is_direct_sale' => 0, // a POS sale: Edit opens the POS screen, like the shop's own invoices
                 'sale_note' => $so->additional_notes,
                 'staff_note' => $so->staff_note,
                 'commission_agent' => $so->commission_agent,
