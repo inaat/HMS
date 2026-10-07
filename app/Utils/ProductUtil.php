@@ -1850,6 +1850,21 @@ class ProductUtil extends Util
      *
      * @return array
      */
+    /**
+     * Which name/sku fulltext index the fast-search migration could build: 'ngram' (MySQL, any part of a word
+     * matches), 'word' (MariaDB, no ngram parser: matches word starts) or null.
+     */
+    private function nameFulltextIndex(): ?string
+    {
+        static $type = false;
+        if ($type === false) {
+            $names = array_column(DB::select("SHOW INDEX FROM `products` WHERE Key_name IN ('ft_products_name_sku', 'ft_products_name_sku_word')"), 'Key_name');
+            $type = in_array('ft_products_name_sku', $names) ? 'ngram' : (in_array('ft_products_name_sku_word', $names) ? 'word' : null);
+        }
+
+        return $type;
+    }
+
     private function searchProductIds($business_id, $search_term, $location_id, $not_for_selling, $product_types, $search_fields, $max = 200)
     {
         $base = function ($query) use ($business_id, $location_id, $not_for_selling, $product_types) {
@@ -1883,8 +1898,27 @@ class ProductUtil extends Util
             }
 
             $query = $base(DB::table('products'));
-            if (! empty($words)) {
+            $index = empty($words) ? null : $this->nameFulltextIndex();
+            if ($index === 'ngram') {
                 $query->whereRaw('MATCH(products.name, products.sku) AGAINST(? IN BOOLEAN MODE)', [implode(' ', $words)]);
+            } elseif (! empty($words)) {
+                // Word index (MariaDB): words of 3+ letters match by word start through the index; shorter
+                // words (below the server's minimum token size) and the no-index case use LIKE.
+                $indexed = [];
+                foreach ($words as $word) {
+                    $word = trim($word, '+"');
+                    if ($index === 'word' && mb_strlen($word) >= 3) {
+                        $indexed[] = '+'.$word.'*';
+                    } else {
+                        $query->where(function ($q) use ($word) {
+                            $q->where('products.name', 'like', '%'.$word.'%')
+                                ->orWhere('products.sku', 'like', '%'.$word.'%');
+                        });
+                    }
+                }
+                if (! empty($indexed)) {
+                    $query->whereRaw('MATCH(products.name, products.sku) AGAINST(? IN BOOLEAN MODE)', [implode(' ', $indexed)]);
+                }
             } else {
                 $query->where(function ($q) use ($search_term) {
                     $q->where('products.name', 'like', '%'.$search_term.'%')

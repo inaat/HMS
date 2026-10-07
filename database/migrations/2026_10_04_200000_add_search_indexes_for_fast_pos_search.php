@@ -34,8 +34,20 @@ return new class extends Migration
 
         foreach ($this->indexes as $table => $indexes) {
             foreach ($indexes as $name => $definition) {
-                if (! $this->hasIndex($table, $name)) {
+                if ($this->hasIndex($table, $name)) {
+                    continue;
+                }
+                try {
                     DB::statement("ALTER TABLE `{$table}` ADD {$definition}");
+                } catch (\Illuminate\Database\QueryException $e) {
+                    if ($name !== 'ft_products_name_sku' || stripos($e->getMessage(), 'ngram') === false) {
+                        throw $e;
+                    }
+                    // MariaDB (shared hosting) has no ngram parser: build a plain word fulltext index instead.
+                    // ProductUtil::searchProductIds searches it by word start ("lem" finds "LEMON").
+                    if (! $this->hasIndex($table, 'ft_products_name_sku_word')) {
+                        DB::statement("ALTER TABLE `{$table}` ADD FULLTEXT ft_products_name_sku_word (name, sku)");
+                    }
                 }
             }
         }
@@ -43,6 +55,9 @@ return new class extends Migration
 
     public function down(): void
     {
+        if ($this->hasIndex('products', 'ft_products_name_sku_word')) {
+            DB::statement('ALTER TABLE `products` DROP INDEX `ft_products_name_sku_word`');
+        }
         foreach ($this->indexes as $table => $indexes) {
             foreach (array_keys($indexes) as $name) {
                 if ($this->hasIndex($table, $name)) {
