@@ -521,7 +521,15 @@ class MobileInbox
             if (! WhatsappDevice::where('business_id', $this->business_id)->where('status', 'connected')->exists()) {
                 return;
             }
-            (new WhatsappApiService())->sendTestMsg(WhatsappDevice::instanceFor($this->business_id), $contact->mobile, $text);
+            // After the response / command, so a slow gateway never holds up the approval.
+            $instance = WhatsappDevice::instanceFor($this->business_id);
+            app()->terminating(function () use ($instance, $contact, $text, $contact_id) {
+                try {
+                    (new WhatsappApiService())->sendTestMsg($instance, $contact->mobile, $text);
+                } catch (\Throwable $e) {
+                    \Log::warning('Mobile booker WhatsApp to contact '.$contact_id.' failed: '.$e->getMessage());
+                }
+            });
         } catch (\Throwable $e) {
             \Log::warning('Mobile booker WhatsApp to contact '.$contact_id.' failed: '.$e->getMessage());
         }
