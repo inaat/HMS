@@ -102,7 +102,7 @@ class BookerRouteController extends Controller
         $route = $this->route($id);
         $shops = DB::table('contacts')->where('route_id', $id)->whereNull('deleted_at')
             ->orderByRaw('visit_sequence IS NULL, visit_sequence')->orderBy('name')
-            ->get(['id', 'name', 'supplier_business_name', 'mobile', 'city', 'address_line_1', 'position', 'outlet_type', 'outlet_class', 'visit_sequence']);
+            ->get(['id', 'contact_id', 'name', 'supplier_business_name', 'mobile', 'city', 'address_line_1', 'position', 'shop_photo', 'outlet_type', 'outlet_class', 'visit_sequence']);
 
         return view('booker_route.show', [
             'route' => $route, 'shops' => $shops, 'bookers' => $this->bookers(), 'days' => self::DAYS,
@@ -147,6 +147,10 @@ class BookerRouteController extends Controller
             $update['outlet_type'] = in_array($type, self::OUTLET_TYPES) ? $type : null;
             $update['outlet_class'] = in_array($class, ['A', 'B', 'C']) ? $class : null;
             DB::table('contacts')->where('id', (int) $cid)->where('route_id', $id)->update($update);
+        }
+
+        if ($request->ajax()) {
+            return ['success' => 1, 'msg' => 'Saved'];
         }
 
         return redirect()->back()->with('status', ['success' => 1, 'msg' => 'Visit order saved']);

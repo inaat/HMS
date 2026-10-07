@@ -5,10 +5,19 @@
 @php
     $d = json_decode($route->days ?? '[]', true) ?: [];
     $api_key = env('GOOGLE_MAP_API_KEY');
-    $pins = $shops->filter(fn ($s) => ! empty($s->position))->values()->map(function ($s) {
+    // The POS keeps "0" or "-" when a customer has no mobile.
+    $phone = fn ($m) => in_array(trim((string) $m), ['', '0', '-'], true) ? '' : trim($m);
+    $pins = $shops->values()->map(function ($s, $i) use ($phone) {
+        if (empty($s->position)) {
+            return null;
+        }
         [$lat, $lng] = array_map('floatval', explode(',', $s->position) + [0, 0]);
-        return ['lat' => $lat, 'lng' => $lng, 'name' => $s->name, 'seq' => $s->visit_sequence];
-    });
+        return ['lat' => $lat, 'lng' => $lng, 'name' => $s->name, 'business' => $s->supplier_business_name, 'seq' => $i + 1,
+            'contact_id' => $s->contact_id, 'mobile' => $phone($s->mobile), 'address' => trim($s->address_line_1.' '.$s->city),
+            'type' => trim($s->outlet_type.($s->outlet_class ? ' · Class '.$s->outlet_class : '')),
+            'photo' => $s->shop_photo ? asset($s->shop_photo) : null,
+            'url' => action([\App\Http\Controllers\ContactController::class, 'show'], [$s->id])];
+    })->filter()->values();
 @endphp
 <section class="content-header no-print">
     <h1 class="tw-text-xl md:tw-text-3xl tw-font-bold tw-text-black">{{ $route->name }}
@@ -38,7 +47,7 @@
                     <button type="submit" class="tw-dw-btn tw-dw-btn-primary tw-text-white"><i class="fa fa-plus"></i> Add shops</button>
                 </form>
 
-                <form method="POST" action="{{ action([\App\Http\Controllers\BookerRouteController::class, 'saveOrder'], [$route->id]) }}">
+                <form method="POST" id="shops_form" action="{{ action([\App\Http\Controllers\BookerRouteController::class, 'saveOrder'], [$route->id]) }}">
                     @csrf
                     <table class="table table-condensed table-bordered" id="shops_table">
                         <thead><tr style="background:#f5f5f5;"><th style="width:60px;">#</th><th>Shop</th><th>Type</th><th>Class</th><th>GPS</th><th></th></tr></thead>
@@ -50,8 +59,13 @@
                                         <span class="seq-no">{{ $loop->iteration }}</span>
                                         <a href="#" class="move-up" title="Up">▲</a><a href="#" class="move-down" title="Down">▼</a>
                                     </td>
-                                    <td><b>{{ $s->name }}</b>@if($s->supplier_business_name) <small>({{ $s->supplier_business_name }})</small>@endif
-                                        <div class="text-muted small">{{ $s->mobile }} {{ $s->city }} {{ $s->address_line_1 }}</div></td>
+                                    <td><a href="{{ action([\App\Http\Controllers\ContactController::class, 'show'], [$s->id]) }}" target="_blank"><b>{{ $s->name }}</b></a>
+                                        @if($s->supplier_business_name) <small>({{ $s->supplier_business_name }})</small>@endif
+                                        <div class="small" style="margin-top:2px;">
+                                            <span class="label label-default">ID {{ $s->contact_id ?: $s->id }}</span>
+                                            @if ($phone($s->mobile)) <i class="fa fa-phone" style="margin-left:6px;"></i> {{ $phone($s->mobile) }} @else <span class="text-muted" style="margin-left:6px;">no mobile</span> @endif
+                                        </div>
+                                        @if (trim($s->address_line_1.' '.$s->city)) <div class="text-muted small"><i class="fa fa-map-marker-alt"></i> {{ trim($s->address_line_1.' '.$s->city) }}</div> @endif</td>
                                     <td><select name="outlet_type[{{ $s->id }}]" class="form-control input-sm"><option value="">—</option>@foreach ($outlet_types as $t)<option @if($s->outlet_type == $t) selected @endif>{{ $t }}</option>@endforeach</select></td>
                                     <td><select name="outlet_class[{{ $s->id }}]" class="form-control input-sm" style="width:60px;"><option value="">—</option>@foreach (['A','B','C'] as $c)<option @if($s->outlet_class == $c) selected @endif>{{ $c }}</option>@endforeach</select></td>
                                     <td>{!! $s->position ? '<span class="label label-success">✓</span>' : '<span class="label label-default" title="The booker sets it at the shop, or edit the customer">none</span>' !!}</td>
@@ -63,7 +77,7 @@
                         </tbody>
                     </table>
                     @if ($shops->count())
-                        <button type="submit" class="tw-dw-btn tw-dw-btn-primary tw-text-white"><i class="fa fa-save"></i> Save order, types & classes</button>
+                        <p class="text-muted small">▲▼ = the order the booker visits the shops. Moves, types and classes save by themselves.</p>
                     @endif
                 </form>
             @endcomponent
@@ -100,8 +114,15 @@
 
         // Reorder rows; numbers follow. "Save order" stores it.
         function renumber() { $('#shops_table tbody tr').each(function (i) { $(this).find('.seq-no').text(i + 1); }); }
-        $(document).on('click', '.move-up', function (e) { e.preventDefault(); var tr = $(this).closest('tr'); tr.prev().before(tr); renumber(); });
-        $(document).on('click', '.move-down', function (e) { e.preventDefault(); var tr = $(this).closest('tr'); tr.next().after(tr); renumber(); });
+        // Every move / type / class change is saved at once (no Save button).
+        function autosave() {
+            $.post($('#shops_form').attr('action'), $('#shops_form').serialize())
+                .done(function () { toastr.success('Saved'); })
+                .fail(function () { toastr.error('Not saved — check the internet / login and try again'); });
+        }
+        $(document).on('click', '.move-up', function (e) { e.preventDefault(); var tr = $(this).closest('tr'); if (tr.prev().length) { tr.prev().before(tr); renumber(); autosave(); } });
+        $(document).on('click', '.move-down', function (e) { e.preventDefault(); var tr = $(this).closest('tr'); if (tr.next().length) { tr.next().after(tr); renumber(); autosave(); } });
+        $(document).on('change', '#shops_form select', autosave);
         $(document).on('click', '.remove-shop', function (e) {
             e.preventDefault();
             if (confirm('Remove this shop from the route?')) { $('#remove_form').attr('action', $(this).data('href')).submit(); }
@@ -116,8 +137,17 @@
         var bounds = new google.maps.LatLngBounds();
         routePins.forEach(function (p, i) {
             var pos = {lat: p.lat, lng: p.lng};
-            var m = new google.maps.Marker({position: pos, map: map, label: String(p.seq || i + 1), title: p.name});
-            var info = new google.maps.InfoWindow({content: '<b>' + $('<div>').text(p.name).html() + '</b>'});
+            var esc = function (t) { return $('<div>').text(t || '').html(); };
+            var m = new google.maps.Marker({position: pos, map: map, label: String(p.seq), title: p.seq + '. ' + p.name + ' (ID ' + p.contact_id + ')' + (p.mobile ? ' · ' + p.mobile : '')});
+            var info = new google.maps.InfoWindow({content: '<div style="min-width:200px;">'
+                + (p.photo ? '<img src="' + esc(p.photo) + '" style="width:100%;max-height:120px;object-fit:cover;border-radius:6px;margin-bottom:6px;">' : '')
+                + '<b>' + p.seq + '. <a href="' + esc(p.url) + '" target="_blank">' + esc(p.name) + '</a></b>'
+                + (p.business ? '<div>' + esc(p.business) + '</div>' : '')
+                + '<div>ID: <b>' + esc(p.contact_id) + '</b></div>'
+                + '<div>📞 ' + (p.mobile ? '<a href="tel:' + esc(p.mobile) + '">' + esc(p.mobile) + '</a>' : '<span style="color:#999">no mobile</span>') + '</div>'
+                + (p.address ? '<div>📍 ' + esc(p.address) + '</div>' : '')
+                + (p.type ? '<div style="color:#666">' + esc(p.type) + '</div>' : '')
+                + '<div><a href="https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lng + '" target="_blank">Directions</a></div></div>'});
             m.addListener('click', function () { info.open(map, m); });
             bounds.extend(pos);
         });
