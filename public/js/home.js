@@ -175,6 +175,7 @@ function update_statistics(start, end) {
         location_id = $('#dashboard_location').val();
     }
     var data = { start: start, end: end, location_id: location_id };
+    window.dashboardRange = data; // used by the Total Recover Amount list
     //get purchase details
     var loader = '<i class="fas fa-sync fa-spin fa-fw margin-bottom"></i>';
     $('.total_receivable').html(loader);
@@ -243,3 +244,17 @@ function update_statistics(start, end) {
         },
     });
 }
+
+// Dashboard > Total Recover Amount: click shows the payments behind the number.
+$(document).on('click', '.recover_tile', function () {
+    var range = window.dashboardRange || {};
+    $.ajax({
+        url: '/home/recover-details',
+        data: { start: range.start, end: range.end },
+        dataType: 'html',
+        success: function (html) {
+            $('.view_modal').html(html).modal('show');
+            __currency_convert_recursively($('.view_modal'));
+        },
+    });
+});

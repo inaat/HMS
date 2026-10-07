@@ -60,7 +60,7 @@
                         <p class="sub total_payable_count"></p>
                     </div>
                 </a>
-                <div class="dv-stat big t-teal">
+                <div class="dv-stat big t-teal recover_tile" style="cursor:pointer;" title="Click to see the payments">
                     <div class="ic"><i class="fa fa-hand-holding-usd"></i></div>
                     <div class="txt">
                         <div class="lbl">Total Recover Amount</div>

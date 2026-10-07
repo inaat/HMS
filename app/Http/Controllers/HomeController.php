@@ -286,6 +286,46 @@ class HomeController extends Controller
         return ['labels' => $labels, 'sell' => $series['sell'], 'purchase' => $series['purchase'], 'expense' => $series['expense']];
     }
 
+    /**
+     * "Total Recover Amount" on the dashboard: customer payments received in the period against older invoices /
+     * opening balances (invoices not dated on the first or last day of the period). The tile and its list use this.
+     */
+    private function recoverQuery($business_id, $start, $end)
+    {
+        return DB::table('transaction_payments')
+            ->join('transactions AS t', 'transaction_payments.transaction_id', '=', 't.id')
+            ->join('contacts', 'contacts.id', '=', 't.contact_id')
+            ->where('t.business_id', $business_id)
+            ->whereIn('contacts.type', ['customer', 'both'])
+            ->whereIn('t.type', ['sell', 'opening_balance'])
+            ->whereDate('t.transaction_date', '!=', $start)
+            ->whereDate('t.transaction_date', '!=', $end)
+            ->whereDate('transaction_payments.paid_on', '>=', $start)
+            ->whereDate('transaction_payments.paid_on', '<=', $end);
+    }
+
+    /** Click on "Total Recover Amount": the payments behind it, in a modal. */
+    public function recoverDetails()
+    {
+        if (! auth()->user()->can('dashboard.data')) {
+            abort(403, 'Unauthorized action.');
+        }
+        $business_id = request()->session()->get('user.business_id');
+        $start = request()->start;
+        $end = request()->end;
+
+        $payments = $this->recoverQuery($business_id, $start, $end)
+            ->leftJoin('users AS u', 'u.id', '=', 'transaction_payments.created_by')
+            ->select('transaction_payments.paid_on', 'transaction_payments.amount', 'transaction_payments.method',
+                'transaction_payments.payment_ref_no', 't.id as transaction_id', 't.type', 't.invoice_no', 't.transaction_date',
+                'contacts.id as contact_id', 'contacts.name', 'contacts.supplier_business_name', 'contacts.mobile',
+                DB::raw("TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as received_by"))
+            ->orderBy('transaction_payments.paid_on', 'desc')
+            ->get();
+
+        return view('home.partials.recover_details', compact('payments', 'start', 'end'));
+    }
+
     public function getTotals()
     {
         if (request()->ajax()) {
@@ -350,17 +390,7 @@ class HomeController extends Controller
                DB::raw('SUM(amount) as total_builty'))->first();
 
    $output['total_builty'] = $builty['total_builty'];
-   $recover_details = DB::table('transaction_payments')
-    ->join('transactions AS t', 'transaction_payments.transaction_id', '=', 't.id')
-    ->join('contacts', 'contacts.id', '=', 't.contact_id')
-    ->whereIn('contacts.type', ['customer', 'both']) // Filter for customers
-    ->whereIn('t.type', ['sell', 'opening_balance']) // Include relevant transaction types
-   ->whereDate('t.transaction_date', '!=', $start)
-           ->whereDate('t.transaction_date', '!=', $end)
-   ->whereDate('transaction_payments.paid_on', '>=', $start)
-           ->whereDate('transaction_payments.paid_on', '<=', $end)
-    ->sum('transaction_payments.amount'); // Sum the `amount` field
-    $output['recover_amount'] = $recover_details ;
+    $output['recover_amount'] = $this->recoverQuery($business_id, $start, $end)->sum('transaction_payments.amount');
 
 
             return $output;
