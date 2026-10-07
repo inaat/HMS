@@ -19,6 +19,14 @@ class CheckUserLogin
             abort(403, 'Unauthorized action.');
         }
 
+        // Order bookers use only the mobile app; also ends a website session that was open before the role was given.
+        $user = $request->user();
+        if ($user->hasRole(\App\Services\MobileSync\LocalSnapshot::BOOKER_ROLE.'#'.$user->business_id)) {
+            \Auth::logout();
+
+            return redirect('/login')->with('status', ['success' => 0, 'msg' => 'This is an order booker account: use the mobile app, not the website.']);
+        }
+
         return $next($request);
     }
 }

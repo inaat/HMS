@@ -113,6 +113,15 @@ class LoginController extends Controller
                     'status',
                     ['success' => 0, 'msg' => __('lang_v1.login_not_allowed')]
                 );
+        } elseif ($user->hasRole(\App\Services\MobileSync\LocalSnapshot::BOOKER_ROLE.'#'.$user->business_id)) {
+            // Order bookers use only the mobile app (/booker), never the POS website.
+            \Auth::logout();
+
+            return redirect('/login')
+                ->with(
+                    'status',
+                    ['success' => 0, 'msg' => 'This is an order booker account: use the mobile app, not the website.']
+                );
         } elseif (($user->user_type == 'user_customer') && ! $this->moduleUtil->hasThePermissionInSubscription($user->business_id, 'crm_module')) {
             \Auth::logout();
 
