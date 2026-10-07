@@ -46,7 +46,15 @@ class ManageUserController extends Controller
                         ->user()
                         ->where('is_cmmsn_agnt', 0)
                         ->select(['id', 'username',
-                            DB::raw("CONCAT(COALESCE(surname, ''), ' ', COALESCE(first_name, ''), ' ', COALESCE(last_name, '')) as full_name"), 'email', 'allow_login', ]);
+                            DB::raw("CONCAT(COALESCE(surname, ''), ' ', COALESCE(first_name, ''), ' ', COALESCE(last_name, '')) as full_name"), 'email', 'allow_login', 'mobile_commission_agent_id', ]);
+
+            // Order bookers get a "Commission agent" button (their mobile orders earn commission for that agent).
+            $bookers = DB::table('model_has_roles as mr')->join('roles as r', 'r.id', '=', 'mr.role_id')
+                ->where('r.name', \App\Services\MobileSync\LocalSnapshot::BOOKER_ROLE.'#'.$business_id)->pluck('mr.model_id')->all();
+            $agents = User::where('business_id', $business_id)->where('is_cmmsn_agnt', 1)->get()
+                ->mapWithKeys(function ($a) {
+                    return [$a->id => trim($a->first_name.' '.$a->last_name)];
+                });
 
             return Datatables::of($users)
                 ->editColumn('username', '{{$username}} @if(empty($allow_login)) <span class="label bg-gray">@lang("lang_v1.login_not_allowed")</span>@endif')
@@ -60,17 +68,26 @@ class ManageUserController extends Controller
                 )
                 ->addColumn(
                     'action',
-                    '@can("user.update")
-                        <a href="{{action(\'App\Http\Controllers\ManageUserController@edit\', [$id])}}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary"><i class="glyphicon glyphicon-edit"></i> @lang("messages.edit")</a>
-                        &nbsp;
-                    @endcan
-                    @can("user.view")
-                    <a href="{{action(\'App\Http\Controllers\ManageUserController@show\', [$id])}}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline  tw-dw-btn-info"><i class="fa fa-eye"></i> @lang("messages.view")</a>
-                    &nbsp;
-                    @endcan
-                    @can("user.delete")
-                        <button data-href="{{action(\'App\Http\Controllers\ManageUserController@destroy\', [$id])}}" class="tw-dw-btn tw-dw-btn-outline tw-dw-btn-xs tw-dw-btn-error delete_user_button"><i class="glyphicon glyphicon-trash"></i> @lang("messages.delete")</button>
-                    @endcan'
+                    function ($row) use ($bookers, $agents) {
+                        $html = '';
+                        if (auth()->user()->can('user.update')) {
+                            $html .= '<a href="'.action([self::class, 'edit'], [$row->id]).'" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary"><i class="glyphicon glyphicon-edit"></i> '.__('messages.edit').'</a>&nbsp;';
+                            // Order booker: link the commission agent their mobile orders earn commission for.
+                            if (in_array($row->id, $bookers)) {
+                                $agent = $agents[$row->mobile_commission_agent_id] ?? null;
+                                $html .= '<button type="button" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-success tw-text-white set_booker_agent" data-href="'.action([self::class, 'setMobileAgent'], [$row->id]).'" data-agent="'.e($row->mobile_commission_agent_id).'" data-name="'.e(trim($row->full_name)).'">'
+                                    .'<i class="fa fa-user-tie"></i> '.($agent ? 'Agent: '.e($agent) : 'Commission agent').'</button>&nbsp;';
+                            }
+                        }
+                        if (auth()->user()->can('user.view')) {
+                            $html .= '<a href="'.action([self::class, 'show'], [$row->id]).'" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline  tw-dw-btn-info"><i class="fa fa-eye"></i> '.__('messages.view').'</a>&nbsp;';
+                        }
+                        if (auth()->user()->can('user.delete')) {
+                            $html .= '<button data-href="'.action([self::class, 'destroy'], [$row->id]).'" class="tw-dw-btn tw-dw-btn-outline tw-dw-btn-xs tw-dw-btn-error delete_user_button"><i class="glyphicon glyphicon-trash"></i> '.__('messages.delete').'</button>';
+                        }
+
+                        return $html;
+                    }
                 )
                 ->filterColumn('full_name', function ($query, $keyword) {
                     $query->whereRaw("CONCAT(COALESCE(surname, ''), ' ', COALESCE(first_name, ''), ' ', COALESCE(last_name, '')) like ?", ["%{$keyword}%"]);
@@ -188,6 +205,28 @@ class ManageUserController extends Controller
            ->get();
 
         return view('manage_user.show')->with(compact('user', 'view_partials', 'users', 'activities'));
+    }
+
+    /**
+     * Users list > "Commission agent" button on an order booker: the agent their mobile orders earn commission for
+     * (empty = none). Same field as "Commission agent for mobile orders" on the edit screen.
+     */
+    public function setMobileAgent(Request $request, $id)
+    {
+        if (! auth()->user()->can('user.update')) {
+            abort(403, 'Unauthorized action.');
+        }
+        $business_id = request()->session()->get('user.business_id');
+        $user = User::where('business_id', $business_id)->findOrFail($id);
+
+        $agent_id = $request->filled('agent_id') ? (int) $request->input('agent_id') : null;
+        if ($agent_id && ! User::where('business_id', $business_id)->where('is_cmmsn_agnt', 1)->where('id', $agent_id)->exists()) {
+            return ['success' => 0, 'msg' => 'Commission agent not found'];
+        }
+        $user->mobile_commission_agent_id = $agent_id;
+        $user->save();
+
+        return ['success' => 1, 'msg' => $agent_id ? 'Commission agent linked' : 'Commission agent removed'];
     }
 
     /**

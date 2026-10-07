@@ -100,9 +100,44 @@
                 }
              });
         });
-        
+
+        // Order booker > "Commission agent": pick the agent their mobile orders earn commission for.
+        @php
+            $booker_agent_list = \App\User::where('business_id', session('user.business_id'))->where('is_cmmsn_agnt', 1)->whereNull('deleted_at')->get()
+                ->map(function ($a) {
+                    return ['id' => $a->id, 'name' => trim($a->first_name.' '.$a->last_name)];
+                })->values();
+        @endphp
+        var agents = {!! json_encode($booker_agent_list) !!};
+        $(document).on('click', 'button.set_booker_agent', function () {
+            var btn = $(this);
+            var options = '<option value="">None</option>' + agents.map(function (a) {
+                return '<option value="' + a.id + '"' + (String(a.id) === String(btn.data('agent')) ? ' selected' : '') + '>' + $('<div>').text(a.name).html() + '</option>';
+            }).join('');
+            // Searchable select2 in the popup; its list opens on the page above the popup (the popup's animation would
+            // misplace a list attached inside it).
+            if (!$('#booker_agent_select2_css').length) {
+                $('head').append('<style id="booker_agent_select2_css">.select2-container--open{z-index:100001}</style>');
+            }
+            setTimeout(function () {
+                $('#booker_agent_select').select2({width: '100%', placeholder: 'None', allowClear: true})
+                    .on('change', function () { btn.data('picked', $(this).val()); });
+                btn.data('picked', $('#booker_agent_select').val());
+            }, 50);
+            swal({
+                title: 'Commission agent',
+                text: btn.data('name') + "'s mobile orders will earn commission for:",
+                content: $('<select id="booker_agent_select" class="form-control" style="margin-top:6px">' + options + '</select>')[0],
+                buttons: ['Cancel', 'Save'],
+            }).then(function (ok) {
+                $('#booker_agent_select').select2('destroy');
+                if (!ok) return;
+                $.post(btn.data('href'), {_token: $('meta[name="csrf-token"]').attr('content'), agent_id: btn.data('picked')}, function (result) {
+                    result.success ? toastr.success(result.msg) : toastr.error(result.msg);
+                    users_table.ajax.reload(null, false);
+                }, 'json');
+            });
+        });
     });
-    
-    
 </script>
 @endsection

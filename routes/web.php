@@ -245,6 +245,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
 
     Route::resource('roles', RoleController::class);
 
+    Route::post('users/{id}/mobile-agent', [ManageUserController::class, 'setMobileAgent']);
     Route::resource('users', ManageUserController::class);
 
     Route::resource('group-taxes', GroupTaxController::class);
