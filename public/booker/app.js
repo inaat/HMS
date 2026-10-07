@@ -281,20 +281,15 @@ function render() {
       ${[['home', '🏠', 'Home'], ['order', '🛒', 'New order'], ['customers', '👥', 'Customers'], ['activity', '📋', 'My work' + (waiting ? ' (' + waiting + ')' : '')], ['more', '⚙️', 'Account']]
         .map(([t, i, l]) => `<button data-act="tab" data-tab="${t}" class="${S.tab === t ? 'on' : ''}"><b>${i}</b>${h(l)}</button>`).join('')}
     </nav>
-    ${S.tab === 'order' ? cartBar() : ''}`;
+`;
   renderBar();
 }
 
-/** After a cart change: update the cards, the cart and the cart bar in place, so the product list keeps its scroll. */
+/** After an order change: update the lines and the bottom bar in place (the search boxes keep focus). */
 function refreshPos() {
-  if (S.tab !== 'order' || !$('#pcards')) { render(); return; }
-  $('#pcards').innerHTML = productCards();
-  $('#cart').innerHTML = cartInner();
-  const bar = document.querySelector('.cartbar');
-  if (bar) bar.remove();
-  $('#app').insertAdjacentHTML('beforeend', cartBar());
-  const sheetCart = document.querySelector('#sheet .cart');
-  if (sheetCart) sheetCart.innerHTML = cartInner();
+  if (S.tab !== 'order' || !$('#pos-lines')) { render(); return; }
+  $('#pos-lines').innerHTML = posLines();
+  $('#pos-bottom').innerHTML = posBottom();
 }
 
 // ---------- dashboard ----------
@@ -311,6 +306,12 @@ function homeView() {
   const pill = { 'not sent': 'warn', pending: '', received: '', approved: 'ok', invoiced: 'ok', rejected: 'bad' };
   const label = { pending: 'sent', received: 'at office' };
   const hour = new Date().getHours();
+  const thisMonth = today.slice(0, 7);
+  const month = all.filter((o) => String(o.created || '').startsWith(thisMonth) && o.status !== 'rejected');
+  const customers = [...S.customers.values()];
+  const totalDue = customers.reduce((s, c) => s + Math.max(0, num(c.balance_due)), 0);
+  const customersWithDue = customers.filter((c) => num(c.balance_due) > 0).length;
+  const inStock = [...S.products.values()].filter((p) => !p.enable_stock || (freeStock(p.variation_id) || 0) > 0).length;
 
   return `
     <div class="card" style="display:flex;align-items:center;gap:12px">
@@ -323,6 +324,12 @@ function homeView() {
       <div class="tile"><div class="l">Collected today (cash in hand)</div><div class="v">${money(collected.reduce((s, o) => s + num(o.amount), 0))}</div><div class="l">${collected.length} receipt(s)</div></div>
       <div class="tile tap" data-act="tab" data-tab="activity"><div class="l">Waiting at office</div><div class="v">${count(['pending', 'received'])}</div><div class="l">approved ${count(['approved'])} · invoiced ${count(['invoiced'])}</div></div>
       <div class="tile tap" data-act="tab" data-tab="activity"><div class="l">Not sent yet</div><div class="v" style="color:${S.outbox.size ? 'var(--warn)' : 'inherit'}">${S.outbox.size}</div><div class="l">${count(['rejected'])} rejected</div></div>
+    </div>
+    <div class="tiles">
+      <div class="tile tap" data-act="tab" data-tab="customers"><div class="l">👥 Total customers</div><div class="v">${S.customers.size.toLocaleString()}</div><div class="l">${customersWithDue} with dues</div></div>
+      <div class="tile tap" data-act="tab" data-tab="customers"><div class="l">💰 Total dues to collect</div><div class="v" style="color:var(--bad)">${money(totalDue)}</div><div class="l">${S.invoices.size} unpaid invoice(s)</div></div>
+      <div class="tile tap" data-act="tab" data-tab="order"><div class="l">📦 Products</div><div class="v">${S.products.size.toLocaleString()}</div><div class="l">${inStock} in stock · ${S.products.size - inStock} out</div></div>
+      <div class="tile tap" data-act="tab" data-tab="activity"><div class="l">📅 This month</div><div class="v">${money(month.filter((o) => o.type === 'order').reduce((s, o) => s + num(o.total), 0))}</div><div class="l">${month.filter((o) => o.type === 'order').length} orders · collected ${money(month.filter((o) => o.type === 'payment').reduce((s, o) => s + num(o.amount), 0))}</div></div>
     </div>
     <div class="actions">
       <button class="btn light" data-act="tab" data-tab="order">🛒<br>New order</button>
@@ -364,107 +371,107 @@ function loginView() {
   </div>`;
 }
 
-// ---------- POS order screen: product cards + cart ----------
+// ---------- New order: same layout as the POS screen (/pos/create) ----------
 function orderView() {
-  return `<div class="pos-grid">
-    <section class="pos-products">
-      <div class="pos-search"><input id="pos-q" data-act="pos-search" placeholder="🔍  Search product name or code…" value="${h(S.posQuery || '')}" autocomplete="off"></div>
-      <div class="chips">${brandChips()}</div>
-      <div class="cards" id="pcards">${productCards()}</div>
-    </section>
-    <aside class="cart" id="cart">${cartInner()}</aside>
-  </div>`;
+  const c = S.draft.customer ? findCustomer(S.draft.customer) : null;
+  return `<div class="pos-wrap">
+    <div class="pos-box">
+      <div class="pos-top">
+        <div class="ig-wrap">
+          <div class="ig">
+            <span class="ig-icon">👤</span>
+            <input id="cust-q" data-act="pos-cust" autocomplete="off" placeholder="Search customer name / mobile" value="${h(c ? custName(c) : '')}">
+            <button class="ig-btn" data-act="add-customer" title="Add new customer">＋</button>
+          </div>
+          <div class="dd" id="cust-dd"></div>
+          ${c ? `<div class="muted" style="margin-top:6px">📞 ${[c.mobile || '—', c.city].filter(Boolean).map(h).join(' · ')} · <b style="color:${num(customerDue(c).due) > 0 ? 'var(--bad)' : 'inherit'}">Due ${money(customerDue(c).due)}</b></div>` : ''}
+        </div>
+        <div class="ig-wrap">
+          <div class="ig">
+            <span class="ig-icon">🔍</span>
+            <input id="prod-q" data-act="pos-search" autocomplete="off" placeholder="Enter Product name / SKU" value="${h(S.posQuery || '')}">
+          </div>
+          <div class="dd" id="prod-dd"></div>
+        </div>
+      </div>
+      <div id="pos-lines">${posLines()}</div>
+      <textarea rows="2" data-act="note" placeholder="Note for the shop (optional)" style="margin-top:12px">${h(S.draft.note)}</textarea>
+    </div>
+  </div>
+  <div class="pos-bottom" id="pos-bottom">${posBottom()}</div>`;
 }
 
-function brandChips() {
-  const counts = {};
-  S.products.forEach((p) => { const b = p.brand || 'Other'; counts[b] = (counts[b] || 0) + 1; });
-  const brands = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
-  return [['', 'All']].concat(brands.map((b) => [b, b])).map(([v, l]) =>
-    `<button class="chip ${(S.posBrand || '') === v ? 'on' : ''}" data-act="pos-brand" data-brand="${h(v)}">${h(l)}${v ? ' <span style="opacity:.7">' + counts[v] + '</span>' : ''}</button>`).join('');
+function lineInfo(l) {
+  const p = S.products.get(l.variation_id);
+  if (!p) return null;
+  const unit = (p.units || []).find((u) => u.id === l.unit_id) || { id: null, name: p.unit, multiplier: 1 };
+  const price = num(p.price) * num(unit.multiplier);
+  const free = freeStock(p.variation_id);
+  return { p, unit, price, total: price * num(l.qty), short: p.enable_stock && free !== null && num(l.qty) * num(unit.multiplier) > free };
 }
 
-function productCards() {
-  const q = S.posQuery || '';
-  const inCart = {};
-  S.draft.lines.forEach((l) => { inCart[l.variation_id] = (inCart[l.variation_id] || 0) + num(l.qty); });
-  const list = [...S.products.values()]
-    .filter((p) => (!S.posBrand || (p.brand || 'Other') === S.posBrand) && (!q || match([p.name, p.sku, p.brand, p.category].join(' '), q)))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  if (!list.length) return '<div class="empty" style="grid-column:1/-1">No products found.</div>';
-  return list.slice(0, 150).map((p) => {
-    const unit = (p.units || [])[0] || { name: p.unit, multiplier: 1 };
-    const free = freeStock(p.variation_id);
-    const out = p.enable_stock && free !== null && free <= 0;
-    return `<button class="pcard ${out ? 'out' : ''}" data-act="add" data-v="${p.variation_id}">
-      ${inCart[p.variation_id] ? `<span class="incart">${qtyFmt(inCart[p.variation_id])}</span>` : ''}
-      <span class="pname">${h(p.name)}</span>
-      <span class="pmeta">${h(p.sku || '')}${p.brand ? ' · ' + h(p.brand) : ''}</span>
-      <span class="pprice">${money(num(p.price) * num(unit.multiplier))} <span class="pmeta">/ ${h(unit.name)}</span></span>
-      <span class="pstock ${out ? '' : 'muted'}">${stockText(p, unit) || '—'}</span>
-    </button>`;
-  }).join('') + (list.length > 150 ? `<div class="empty" style="grid-column:1/-1">Showing 150 of ${list.length}. Type to search.</div>` : '');
+function posLines() {
+  const rows = S.draft.lines.map((l, i) => {
+    const x = lineInfo(l);
+    if (!x) return `<tr><td colspan="4"><span class="pill bad">Product no longer available</span></td><td class="c"><button class="x" data-act="line-del" data-i="${i}">&times;</button></td></tr>`;
+    return `<tr>
+      <td data-label="Product"><b>${h(x.p.name)}</b><div class="muted">${h(x.p.sku || '')}${x.p.brand ? ' · ' + h(x.p.brand) : ''}</div>
+        <div class="muted">${stockText(x.p, x.unit) || ''} ${x.short ? '<span class="pill warn">short stock</span>' : ''}</div></td>
+      <td data-label="Quantity" class="c">
+        <div class="qty"><button data-act="qty" data-i="${i}" data-d="-1">−</button><input inputmode="decimal" data-act="qty-in" data-i="${i}" value="${h(l.qty)}"><button data-act="qty" data-i="${i}" data-d="1">+</button></div>
+        ${(x.p.units || []).length > 1 ? `<select data-act="line-unit" data-i="${i}" class="unit-sel">${x.p.units.map((u) => `<option value="${u.id}" ${u.id === l.unit_id ? 'selected' : ''}>${h(u.name)}</option>`).join('')}</select>` : `<div class="muted" style="margin-top:4px">${h(x.unit.name)}</div>`}
+      </td>
+      <td data-label="Price" class="r">${money(x.price)}</td>
+      <td data-label="Subtotal" class="r"><b>${money(x.total)}</b></td>
+      <td class="c"><button class="x" data-act="line-del" data-i="${i}" title="Remove">&times;</button></td>
+    </tr>`;
+  }).join('');
+  return `<table class="pos-table">
+      <thead><tr><th>Product</th><th class="c" style="width:200px">Quantity</th><th class="r" style="width:130px">Price</th><th class="r" style="width:140px">Subtotal</th><th class="c" style="width:50px">✕</th></tr></thead>
+      <tbody>${rows || '<tr class="empty-row"><td colspan="5"><div class="empty">Search a product above to add it.</div></td></tr>'}</tbody>
+    </table>
+    <div class="pos-sums"><span><b>Items:</b> ${S.draft.lines.length}</span><span><b>Total:</b> ${money(cartTotal())}</span></div>`;
+}
+
+function posBottom() {
+  const c = S.draft.customer ? findCustomer(S.draft.customer) : null;
+  const ready = c && S.draft.lines.length;
+  return `<button class="pbtn red" data-act="clear-order" ${S.draft.lines.length || S.draft.customer ? '' : 'disabled'}>✖ Cancel</button>
+    <button class="pbtn green" data-act="save-order" ${ready ? '' : 'disabled'}>✔ ${c ? 'Save order' : 'Choose customer'}</button>
+    <div class="payable"><span>Total<br>Payable:</span><b>${money(cartTotal())}</b></div>`;
 }
 
 function cartTotal() {
-  return S.draft.lines.reduce((s, l) => {
-    const p = S.products.get(l.variation_id);
-    if (!p) return s;
-    const unit = (p.units || []).find((u) => u.id === l.unit_id) || { multiplier: 1 };
-    return s + num(p.price) * num(unit.multiplier) * num(l.qty);
-  }, 0);
+  return S.draft.lines.reduce((s, l) => s + ((lineInfo(l) || {}).total || 0), 0);
 }
 
-function cartInner() {
-  const d = S.draft;
-  const c = d.customer ? findCustomer(d.customer) : null;
-  const lines = d.lines.map((l, i) => {
-    const p = S.products.get(l.variation_id);
-    if (!p) return `<div class="cline row"><span class="pill bad grow">Product no longer available</span><button class="x" data-act="line-del" data-i="${i}">&times;</button></div>`;
-    const unit = (p.units || []).find((u) => u.id === l.unit_id) || { id: null, name: p.unit, multiplier: 1 };
-    const price = num(p.price) * num(unit.multiplier);
-    const free = freeStock(p.variation_id);
-    const short = p.enable_stock && free !== null && num(l.qty) * num(unit.multiplier) > free;
-    return `<div class="cline">
-      <div class="row"><div class="grow"><b style="font-size:14px">${h(p.name)}</b><div class="muted">${money(price)} / ${h(unit.name)} ${short ? '<span class="pill warn">short stock</span>' : ''}</div></div>
-        <button class="x" data-act="line-del" data-i="${i}" title="Remove">&times;</button></div>
-      <div class="row" style="margin-top:6px">
-        ${(p.units || []).length > 1 ? `<select data-act="line-unit" data-i="${i}" style="width:auto;flex:1;padding:7px">${p.units.map((u) => `<option value="${u.id}" ${u.id === l.unit_id ? 'selected' : ''}>${h(u.name)}</option>`).join('')}</select>` : `<span class="grow muted">${h(unit.name)}</span>`}
-        <div class="qty"><button data-act="qty" data-i="${i}" data-d="-1">−</button><input inputmode="decimal" data-act="qty-in" data-i="${i}" value="${h(l.qty)}"><button data-act="qty" data-i="${i}" data-d="1">+</button></div>
-        <b style="min-width:80px;text-align:right">${money(price * num(l.qty))}</b>
-      </div>
-    </div>`;
+/** Product dropdown under the search box: best matches for what was typed. */
+function productDropdown() {
+  const q = (S.posQuery || '').trim();
+  if (!q) return '';
+  const list = [...S.products.values()].filter((p) => match([p.name, p.sku, p.brand].join(' '), q))
+    .sort((a, b) => a.name.localeCompare(b.name)).slice(0, 15);
+  if (!list.length) return '<div class="dd-item muted">No product found</div>';
+  return list.map((p, n) => {
+    const unit = (p.units || [])[0] || { name: p.unit, multiplier: 1 };
+    return `<div class="dd-item ${n === 0 ? 'first' : ''}" data-act="add" data-v="${p.variation_id}">
+      <div class="grow"><b>${h(p.name)}</b><div class="muted">${h(p.sku || '')}${p.brand ? ' · ' + h(p.brand) : ''} · ${stockText(p, unit) || ''}</div></div>
+      <b>${money(num(p.price) * num(unit.multiplier))}<span class="muted"> / ${h(unit.name)}</span></b></div>`;
   }).join('');
-
-  return `
-    <div class="cart-head">
-      <div class="row">
-        <div class="cust-pick grow ${c ? 'set' : ''}" data-act="pick-customer">
-          ${c ? `<div class="grow"><b>${h(custName(c))}</b><div class="muted">${h(c.mobile || '')} ${h(c.city || '')} · Due ${money(customerDue(c).due)}</div></div><span class="muted">Change</span>`
-            : '<div class="grow"><b>👤 Choose customer</b><div class="muted">Tap to pick the shop</div></div><span>›</span>'}
-        </div>
-        <button class="btn light" data-act="add-customer" title="Add a new shop" style="align-self:stretch">+ New<br>customer</button>
-      </div>
-    </div>
-    <div class="cart-lines">${lines || '<div class="empty">Tap a product to add it.</div>'}</div>
-    <div class="cart-foot">
-      <textarea rows="2" data-act="note" placeholder="Note for the shop (optional)">${h(d.note)}</textarea>
-      <div class="cart-total"><span class="muted">${d.lines.length} item(s)</span><b>${money(cartTotal())}</b></div>
-      <div class="row">
-        ${d.lines.length || d.customer ? '<button class="btn bad" data-act="clear-order">Clear</button>' : ''}
-        <button class="btn ok grow" data-act="save-order" ${!c || !d.lines.length ? 'disabled' : ''}>${!c ? 'Choose customer first' : 'Save order'}</button>
-      </div>
-    </div>`;
 }
 
-function cartBar() {
-  if (!S.draft.lines.length) return '';
-  return `<button class="cartbar" data-act="open-cart"><span>🛒 ${S.draft.lines.length} item(s) · ${money(cartTotal())}</span><span>View cart ›</span></button>`;
+function customerDropdown(q) {
+  q = (q || '').trim();
+  const list = [...S.customers.values()].filter((c) => !q || match([c.name, c.business_name, c.mobile, c.city].join(' '), q))
+    .sort((a, b) => a.name.localeCompare(b.name)).slice(0, 15);
+  const fresh = [...S.outbox.values()].filter((o) => o.type === 'customer' && (!q || match([o.name, o.mobile, o.city].join(' '), q)));
+  return fresh.map((o) => `<div class="dd-item" data-act="choose-customer" data-key="u${o.uuid}"><div class="grow"><b>${h(o.name)}</b> <span class="pill warn">new</span><div class="muted">${h(o.mobile || '')} ${h(o.city || '')}</div></div></div>`).join('')
+    + list.map((c) => `<div class="dd-item" data-act="choose-customer" data-key="${h(c.key)}"><div class="grow"><b>${h(custName(c))}</b><div class="muted">${h(c.mobile || '')} ${h(c.city || '')}</div></div><span class="muted">Due ${money(customerDue(c).due)}</span></div>`).join('')
+    + `<div class="dd-item add" data-act="add-customer">＋ Add new customer${q ? ' "' + h(q) + '"' : ''}</div>`;
 }
 
 function openCart() {
-  S.cartOpen = true;
-  sheet('Cart', `<div class="cart">${cartInner()}</div>`);
+  render();
 }
 
 function customersView() {
@@ -767,7 +774,10 @@ document.addEventListener('click', async (e) => {
       const uid = unit ? unit.id : null;
       const line = d.lines.find((l) => l.variation_id === p.variation_id && l.unit_id === uid);
       if (line) line.qty = num(line.qty) + 1; else d.lines.push({ variation_id: p.variation_id, unit_id: uid, qty: 1 });
-      await saveDraft(); refreshPos(); break;
+      S.posQuery = '';
+      await saveDraft(); refreshPos();
+      if ($('#prod-q')) { $('#prod-q').value = ''; $('#prod-dd').innerHTML = ''; $('#prod-q').focus(); }
+      break;
     }
     case 'pos-brand': S.posBrand = el.dataset.brand; render(); break;
     case 'open-cart': openCart(); break;
@@ -778,7 +788,7 @@ document.addEventListener('click', async (e) => {
     case 'pick-product': pickProduct(); break;
     case 'add-customer': customerForm(); break;
     case 'open-customer': openCustomer(el.dataset.key); break;
-    case 'choose-customer': d.customer = el.dataset.key; await saveDraft(); closeSheet(); refreshPos(); if (S.cartOpen && innerWidth < 900) openCart(); break;
+    case 'choose-customer': d.customer = el.dataset.key; await saveDraft(); closeSheet(); render(); if ($('#prod-q')) $('#prod-q').focus(); break;
     case 'order-for': d.customer = el.dataset.key; await saveDraft(); closeSheet(); S.tab = 'order'; render(); break;
     case 'collect': paymentForm(el.dataset.key); break;
     case 'choose-product': {
@@ -815,7 +825,8 @@ document.addEventListener('change', async (e) => {
 document.addEventListener('input', (e) => {
   const el = e.target;
   if (el.dataset.act === 'note') { S.draft.note = el.value; saveDraft(); }
-  if (el.dataset.act === 'pos-search') { S.posQuery = el.value; $('#pcards').innerHTML = productCards(); }
+  if (el.dataset.act === 'pos-search') { S.posQuery = el.value; $('#prod-dd').innerHTML = productDropdown(); }
+  if (el.dataset.act === 'pos-cust') { $('#cust-dd').innerHTML = customerDropdown(el.value); }
   if (el.dataset.act === 'cust-search') { S.custQuery = el.value; $('#cust-list').innerHTML = customerRows(el.value, 'open-customer'); }
 });
 
@@ -823,6 +834,19 @@ document.addEventListener('submit', (e) => {
   const form = e.target;
   e.preventDefault();
   ({ login, customer: saveCustomer, payment: savePayment }[form.dataset.form] || (() => {}))(form);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.id === 'prod-q') { e.preventDefault(); const first = document.querySelector('#prod-dd .dd-item[data-v]'); if (first) first.click(); }
+  if (e.key === 'Escape') document.querySelectorAll('.dd').forEach((d) => { d.innerHTML = ''; });
+});
+
+document.addEventListener('focusin', (e) => {
+  if (e.target.id === 'cust-q') { e.target.select(); $('#cust-dd').innerHTML = customerDropdown(''); }
+});
+
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('.ig-wrap')) document.querySelectorAll('.dd').forEach((d) => { d.innerHTML = ''; });
 });
 
 window.addEventListener('online', () => { renderBar(); sync(); });
