@@ -519,12 +519,14 @@ function customersView() {
   return `
     <div class="row" style="margin-bottom:10px"><input id="cust-q" placeholder="Search name, mobile, city" data-act="cust-search" class="grow" value="${h(S.custQuery || '')}">
       <button class="btn small" data-act="add-customer">+ New</button></div>
+    ${(S.routes || []).length ? `<select data-act="cust-route" style="margin-bottom:10px"><option value="">All customers</option>${myRoutes().map((r) => `<option value="${r.id}" ${num(S.custRoute) === r.id ? 'selected' : ''}>Route: ${h(r.name)} · ${h(routeDays(r))}${r.booker_id === S.user.id ? ' (yours)' : ''}</option>`).join('')}</select>` : ''}
     <div class="card list" id="cust-list">${customerRows(S.custQuery || '', 'open-customer')}</div>`;
 }
 
 function customerRows(q, act) {
-  const list = [...S.customers.values()].filter((c) => !q || match([c.name, c.business_name, c.mobile, c.city].join(' '), q))
-    .sort((a, b) => a.name.localeCompare(b.name)).slice(0, 60);
+  const route = act === 'open-customer' ? num(S.custRoute) : 0;
+  const list = [...S.customers.values()].filter((c) => (!route || num(c.route_id) === route) && (!q || match([c.name, c.business_name, c.mobile, c.city].join(' '), q)))
+    .sort((a, b) => (route ? num(a.visit_sequence) - num(b.visit_sequence) : 0) || a.name.localeCompare(b.name)).slice(0, route ? 1000 : 60);
   const newOnes = [...S.outbox.values()].filter((o) => o.type === 'customer' && (!q || match([o.name, o.mobile, o.city].join(' '), q)));
   const rows = [
     ...newOnes.map((o) => `<div class="item tap" data-act="${act}" data-key="u${o.uuid}"><b>${h(o.name)}</b> <span class="pill warn">new · not sent</span><div class="muted">${h(o.mobile || '')} ${h(o.city || '')}</div></div>`),
@@ -582,6 +584,12 @@ function moreView() {
     <div class="card"><b>${h(S.user.name)}</b><div class="muted">${h(S.user.username)} · slips ${h(S.user.code)}-…</div></div>
     <div class="card"><div class="row"><div class="grow">Booked today</div><b>${money(booked)}</b></div>
       <div class="row"><div class="grow">Collected today (cash in hand)</div><b>${money(collected)}</b></div></div>
+    <div class="card list"><b>📍 My routes</b>${myRoutes().map((r) => {
+      const shops = [...S.customers.values()].filter((c) => num(c.route_id) === r.id);
+      return `<div class="item tap row" data-act="route-shops" data-id="${r.id}"><div class="grow"><b>${h(r.name)}</b>
+        <div class="muted">${h(routeDays(r))} · ${shops.length} shops · ${shops.filter((c) => c.position).length} with location</div></div>
+        <span class="pill ${r.booker_id === S.user.id ? 'ok' : ''}">${r.booker_id === S.user.id ? 'assigned to you' : 'open to all'}</span></div>`;
+    }).join('') || '<div class="empty">No route assigned to you yet. The office sets it in Sell → Booker routes.</div>'}</div>
     <div class="card muted">Last sync: ${h(S.lastSync || 'never')}<br>Stock from: ${h(S.stockAt || '—')}<br>Products ${S.products.size} · Customers ${S.customers.size} · Not sent ${S.outbox.size}</div>
     <button class="btn block" data-act="sync" style="margin-bottom:10px">⟳ Sync now</button>
     <button class="btn bad block" data-act="logout">Log out</button>`;
@@ -657,6 +665,10 @@ function distanceM(lat1, lng1, lat2, lng2) {
 }
 const posOf = (c) => { const p = String(c.position || '').split(',').map(Number); return p.length === 2 && !isNaN(p[0]) && !isNaN(p[1]) ? p : null; };
 
+const routeDays = (r) => (r.days || []).map((d) => DAYS[d]).join(', ') || 'no days set';
+/** Routes the booker works: their own first, then routes not assigned to anyone. */
+const myRoutes = () => (S.routes || []).filter((r) => r.booker_id === S.user.id).concat((S.routes || []).filter((r) => !r.booker_id));
+
 /** Today's routes for this booker (their own; when none, the routes nobody is assigned to). */
 function todayRoutes() {
   const wd = ((new Date().getDay() + 6) % 7) + 1;
@@ -685,7 +697,7 @@ function todayCard() {
   const orders = shops.filter((c) => (done.get(c.key) || {}).outcome === 'order').length;
   return `<div class="card list">
     <div class="row"><div class="grow"><b>📍 Today's route: ${routes.map((r) => h(r.name)).join(', ')}</b>
-      <div class="muted">${visited} of ${shops.length} shops visited · ${orders} with orders</div></div>
+      <div class="muted">${visited} of ${shops.length} shops visited · ${orders} with orders · ${routes.some((r) => r.booker_id === S.user.id) ? 'assigned to you' : 'open route (no booker set)'}</div></div>
       <span class="pill ${shops.length && visited === shops.length ? 'ok' : 'warn'}">${shops.length ? Math.round(visited * 100 / shops.length) : 0}%</span></div>
     ${shops.map((c, i) => {
       const v = done.get(c.key);
@@ -1130,6 +1142,7 @@ document.addEventListener('click', async (e) => {
     case 'edit-shop': editShopForm(el.dataset.key); break;
     case 'gps-here': setGpsHere(el); break;
     case 'check-in': checkIn(el.dataset.key); break;
+    case 'route-shops': S.custRoute = num(el.dataset.id); S.custQuery = ''; S.tab = 'customers'; render(); window.scrollTo(0, 0); break;
     case 'leave-shop': leaveForm(); break;
     case 'save-shop-location': saveShopLocation(); break;
     case 'choose-customer': d.customer = el.dataset.key; await saveDraft(); closeSheet(); render(); if ($('#prod-q')) $('#prod-q').focus(); break;
@@ -1185,6 +1198,7 @@ document.addEventListener('change', async (e) => {
       form.querySelector('#photo-prev').innerHTML = `<img src="${data}" class="shop-photo" alt="">`;
     } catch (err) { toast(err.message); }
   }
+  if (el.dataset.act === 'cust-route') { S.custRoute = num(el.value) || null; $('#cust-list').innerHTML = customerRows(S.custQuery || '', 'open-customer'); }
   if (el.dataset.act === 'qty-in') { S.draft.lines[i].qty = num(el.value); await saveDraft(); refreshPos(); }
 });
 
