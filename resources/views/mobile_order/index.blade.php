@@ -276,10 +276,38 @@
             $(this).find('button').prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Working…');
         });
         // Reject only asks for the reason the booker will see.
+        // POS dialog (not the browser's prompt, which browsers can block): pick a reason or type one.
         $(document).on('submit', 'form.reject-form', function (e) {
-            var reason = prompt('Reason for the booker (e.g. out of stock):', 'Out of stock');
-            if (reason === null || !reason.trim()) { e.preventDefault(); return; }
-            $(this).find('input[name=reason]').val(reason.trim());
+            var form = this;
+            if ($(form).data('confirmed')) { return; }
+            e.preventDefault();
+            @php
+                $reject_reasons = $kind == 'payment'
+                    ? ['Money not received', 'Wrong amount', 'Wrong customer', 'Duplicate receipt', 'Other']
+                    : ['Out of stock', 'Wrong price', 'Customer cancelled', 'Duplicate order', 'Credit limit / old dues', 'Other'];
+            @endphp
+            var reasons = {!! json_encode($reject_reasons) !!};
+            var box = document.createElement('div');
+            box.innerHTML = '<select class="form-control" id="reject_reason_pick" style="margin-bottom:10px;">'
+                + reasons.map(function (r) { return '<option>' + $('<div>').text(r).html() + '</option>'; }).join('')
+                + '</select><input class="form-control" id="reject_reason_text" placeholder="Details for the booker (optional)">';
+            swal({
+                title: 'Reject {{ $kind == 'payment' ? 'payment' : 'order' }}?',
+                text: 'The booker will see this reason in the app.',
+                content: box,
+                icon: 'warning',
+                buttons: ['Cancel', 'Reject'],
+                dangerMode: true,
+            }).then(function (ok) {
+                if (!ok) { $(form).find('button').prop('disabled', false); return; }
+                var pick = $('#reject_reason_pick').val();
+                var text = $.trim($('#reject_reason_text').val());
+                var reason = pick === 'Other' ? (text || 'Other') : (text ? pick + ': ' + text : pick);
+                $(form).find('input[name=reason]').val(reason.substring(0, 190));
+                $(form).find('button').prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Rejecting…');
+                $(form).data('confirmed', true);
+                form.submit();
+            });
         });
     });
 </script>
