@@ -301,6 +301,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::post('/mobile-sync/start', [\App\Http\Controllers\MobileOrderController::class, 'syncNow']);
     Route::get('/mobile-orders/{id}', [\App\Http\Controllers\MobileOrderController::class, 'show']);
     Route::post('/mobile-orders/{id}/approve', [\App\Http\Controllers\MobileOrderController::class, 'approve']);
+    Route::post('/mobile-orders/{id}/invoice', [\App\Http\Controllers\MobileOrderController::class, 'invoice']);
     Route::post('/mobile-orders/{id}/reject', [\App\Http\Controllers\MobileOrderController::class, 'reject']);
     Route::post('/reports/commission-agent-report/send-whatsapp', [ReportController::class, 'sendCommissionAgentReportWhatsapp']);
     Route::get('/reports/sales-representative-total-expense', [ReportController::class, 'getSalesRepresentativeTotalExpense']);

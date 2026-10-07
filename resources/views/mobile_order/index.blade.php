@@ -87,12 +87,27 @@
                                 @if ($r->invoice_no) <br><small>Invoice {{ $r->invoice_no }}</small> @endif
                             </td>
                             <td class="no-print" style="white-space: nowrap;">
-                                <a href="{{ action([\App\Http\Controllers\MobileOrderController::class, 'show'], [$r->id]) }}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary">
-                                    <i class="fa fa-eye"></i> {{ $r->status == 'waiting' ? 'Check & approve' : 'View' }}</a>
-                                @if ($r->kind == 'order' && $r->status == 'approved')
-                                    <a href="{{ action([\App\Http\Controllers\SellController::class, 'create']) }}?mobile_so={{ $r->transaction_id }}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-success tw-text-white">
-                                        <i class="fa fa-file-invoice"></i> Make invoice</a>
+                                {{-- One click: no extra screens or confirmations. --}}
+                                @if ($r->kind == 'order' && in_array($r->status, ['waiting', 'approved']))
+                                    <form method="POST" action="{{ action([\App\Http\Controllers\MobileOrderController::class, 'invoice'], [$r->id]) }}" style="display:inline" class="one-click">
+                                        @csrf
+                                        <button type="submit" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-success tw-text-white"><i class="fa fa-file-invoice"></i> Make invoice</button>
+                                    </form>
+                                @elseif ($r->kind == 'payment' && $r->status == 'waiting')
+                                    <form method="POST" action="{{ action([\App\Http\Controllers\MobileOrderController::class, 'approve'], [$r->id]) }}" style="display:inline" class="one-click">
+                                        @csrf
+                                        <button type="submit" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-success tw-text-white"><i class="fa fa-check"></i> Approve payment</button>
+                                    </form>
                                 @endif
+                                @if ($r->status == 'waiting')
+                                    <form method="POST" action="{{ action([\App\Http\Controllers\MobileOrderController::class, 'reject'], [$r->id]) }}" style="display:inline" class="reject-form">
+                                        @csrf
+                                        <input type="hidden" name="reason" value="">
+                                        <button type="submit" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-error"><i class="fa fa-times"></i> Reject</button>
+                                    </form>
+                                @endif
+                                <a href="{{ action([\App\Http\Controllers\MobileOrderController::class, 'show'], [$r->id]) }}" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-ghost" title="Details">
+                                    <i class="fa fa-eye"></i></a>
                             </td>
                         </tr>
                     @empty
@@ -168,6 +183,17 @@
         });
 
         poll();
+
+        // One click, but never twice: the button locks while the invoice is made.
+        $(document).on('submit', 'form.one-click', function () {
+            $(this).find('button').prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Working…');
+        });
+        // Reject only asks for the reason the booker will see.
+        $(document).on('submit', 'form.reject-form', function (e) {
+            var reason = prompt('Reason for the booker (e.g. out of stock):', 'Out of stock');
+            if (reason === null || !reason.trim()) { e.preventDefault(); return; }
+            $(this).find('input[name=reason]').val(reason.trim());
+        });
     });
 </script>
 @endsection

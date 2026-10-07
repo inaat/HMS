@@ -274,6 +274,123 @@ class MobileInbox
     }
 
     /**
+     * One click from Mobile orders: the booker order becomes a final invoice (credit sale), the same records the
+     * Add Sale screen makes when a sales order is invoiced: sales order (made first if still waiting), sell lines in
+     * the units ordered with so_line_id, stock down, purchase mapping, payment status, sales order completed.
+     */
+    public function invoiceOrder(int $id, int $user_id): Transaction
+    {
+        $row = DB::table('mobile_inbox')->where('id', $id)->where('kind', 'order')->first();
+        if (empty($row)) {
+            throw new \Exception('Not found');
+        }
+        if ($row->status === 'waiting') {
+            $this->approveOrder($id, $user_id);
+        }
+
+        $sell = DB::transaction(function () use ($id, $user_id) {
+            $row = DB::table('mobile_inbox')->where('id', $id)->lockForUpdate()->first();
+            if ($row->status !== 'approved' || empty($row->transaction_id)) {
+                throw new \Exception('Already '.$row->status);
+            }
+            $so = Transaction::with('sell_lines')->where('business_id', $this->business_id)->where('type', 'sales_order')->findOrFail($row->transaction_id);
+            $products = DB::table('products')->whereIn('id', $so->sell_lines->pluck('product_id'))->get()->keyBy('id');
+            $multipliers = DB::table('units')->pluck('base_unit_multiplier', 'id');
+
+            // The sales order lines as Add Sale posts them: quantity and prices per unit ordered.
+            $lines = [];
+            foreach ($so->sell_lines as $sl) {
+                $remaining = $sl->quantity - $sl->so_quantity_invoiced;
+                $product = $products->get($sl->product_id);
+                if ($remaining <= 0 || empty($product)) {
+                    continue;
+                }
+                $m = ! empty($sl->sub_unit_id) ? ((float) ($multipliers[$sl->sub_unit_id] ?? 1) ?: 1) : 1;
+                $lines[] = [
+                    'product_id' => $sl->product_id,
+                    'variation_id' => $sl->variation_id,
+                    'quantity' => $remaining / $m,
+                    'unit_price' => $sl->unit_price_before_discount * $m,
+                    'unit_price_inc_tax' => $sl->unit_price_inc_tax * $m,
+                    'item_tax' => $sl->item_tax * $m,
+                    'tax_id' => $sl->tax_id,
+                    'line_discount_type' => $sl->line_discount_type ?: 'fixed',
+                    'line_discount_amount' => ($sl->line_discount_type ?: 'fixed') === 'fixed' ? $sl->line_discount_amount * $m : $sl->line_discount_amount,
+                    'sub_unit_id' => $sl->sub_unit_id,
+                    'product_unit_id' => $product->unit_id,
+                    'base_unit_multiplier' => $m,
+                    'enable_stock' => $product->enable_stock,
+                    'product_type' => $product->type,
+                    'so_line_id' => $sl->id,
+                    'sell_line_note' => $sl->sell_line_note,
+                ];
+            }
+            if (empty($lines)) {
+                throw new \Exception('Nothing left to invoice on sales order '.$so->invoice_no);
+            }
+
+            $discount = ['discount_type' => $so->discount_type ?: 'fixed', 'discount_amount' => $so->discount_amount ?: 0];
+            $invoice_total = (new ProductUtil())->calculateInvoiceTotal($lines, $so->tax_id, $discount, false);
+
+            $sell = $this->transactionUtil->createSellTransaction($this->business_id, [
+                'type' => 'sell',
+                'status' => 'final',
+                'location_id' => $so->location_id,
+                'contact_id' => $so->contact_id,
+                'transaction_date' => now(),
+                'final_total' => $invoice_total['final_total'],
+                'tax_rate_id' => $so->tax_id,
+                'discount_type' => $discount['discount_type'],
+                'discount_amount' => $discount['discount_amount'],
+                'is_direct_sale' => 1,
+                'sale_note' => $so->additional_notes,
+                'staff_note' => $so->staff_note,
+                'commission_agent' => $so->commission_agent,
+                'selling_price_group_id' => $so->selling_price_group_id,
+                'sales_order_ids' => [$so->id],
+                'source' => 'mobile',
+            ], $invoice_total, $user_id, false);
+
+            $this->transactionUtil->createOrUpdateSellLines($sell, $lines, $so->location_id, false, null, [], false);
+
+            foreach ($lines as $l) {
+                if ($l['enable_stock']) {
+                    (new ProductUtil())->decreaseProductQuantity($l['product_id'], $l['variation_id'], $so->location_id, $l['quantity'] * $l['base_unit_multiplier']);
+                }
+            }
+
+            $sell->payment_status = $this->transactionUtil->updatePaymentStatus($sell->id, $sell->final_total);
+
+            $business = DB::table('business')->find($this->business_id);
+            $this->transactionUtil->mapPurchaseSell([
+                'id' => $this->business_id,
+                'accounting_method' => $business->accounting_method,
+                'location_id' => $so->location_id,
+                'pos_settings' => empty($business->pos_settings) ? (new \App\Utils\BusinessUtil())->defaultPosSettings() : json_decode($business->pos_settings, true),
+            ], $sell->sell_lines, 'purchase');
+
+            $this->transactionUtil->updateSalesOrderStatus([$so->id]);
+            $this->transactionUtil->activityLog($sell, 'added');
+
+            DB::table('mobile_inbox')->where('id', $row->id)->update([
+                'status' => 'invoiced', 'invoice_no' => $sell->invoice_no, 'updated_at' => now(),
+            ]);
+
+            return $sell;
+        });
+
+        \App\Events\SellCreatedOrModified::dispatch($sell);
+        try {
+            // Same "new sale" notification the POS sends (if a template has auto send on).
+            (new \App\Utils\NotificationUtil())->autoSendNotification($this->business_id, 'new_sale', $sell, $sell->contact);
+        } catch (\Throwable $e) {
+            \Log::warning('Mobile invoice notification: '.$e->getMessage());
+        }
+
+        return $sell;
+    }
+
+    /**
      * Approve a collection: one customer payment into the booker's own "Cash with <booker>" account, paid
      * against the invoices the booker chose first, the rest against the oldest dues (as Pay due does).
      */

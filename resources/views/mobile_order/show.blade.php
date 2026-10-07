@@ -103,13 +103,22 @@
     @endif
 
     @if ($row->status == 'waiting')
-        <div class="no-print" style="display: flex; gap: 12px; align-items: flex-start;">
-            <form method="POST" action="{{ action([\App\Http\Controllers\MobileOrderController::class, 'approve'], [$row->id]) }}"
-                  onsubmit="return confirm('{{ $row->kind == 'order' ? 'Create the sales order?' : 'Post this payment to the customer?' }}');">
+        <div class="no-print" style="display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap;">
+            {{-- One click, no confirmation: order -> final invoice, payment -> posted. --}}
+            <form method="POST" action="{{ action([\App\Http\Controllers\MobileOrderController::class, $row->kind == 'order' ? 'invoice' : 'approve'], [$row->id]) }}"
+                  onsubmit="this.querySelector('button').disabled = true;">
                 @csrf
                 <button type="submit" class="tw-dw-btn tw-dw-btn-success tw-text-white" @if (empty($row->contact_id)) disabled title="Customer not arrived yet" @endif>
-                    <i class="fa fa-check"></i> {{ $row->kind == 'order' ? 'Approve → Sales order' : 'Approve → Post payment' }}</button>
+                    <i class="fa fa-file-invoice"></i> {{ $row->kind == 'order' ? 'Make invoice' : 'Approve payment' }}</button>
             </form>
+            @if ($row->kind == 'order')
+                {{-- Only when the order must be changed before invoicing. --}}
+                <form method="POST" action="{{ action([\App\Http\Controllers\MobileOrderController::class, 'approve'], [$row->id]) }}">
+                    @csrf
+                    <button type="submit" class="tw-dw-btn tw-dw-btn-outline tw-dw-btn-primary" title="Make a sales order you can edit, invoice it later">
+                        <i class="fa fa-edit"></i> Edit first</button>
+                </form>
+            @endif
             <form method="POST" action="{{ action([\App\Http\Controllers\MobileOrderController::class, 'reject'], [$row->id]) }}" style="display: flex; gap: 6px;">
                 @csrf
                 <input type="text" name="reason" class="form-control" placeholder="Reason for the booker" required maxlength="191" style="width: 260px;">
@@ -118,8 +127,10 @@
         </div>
     @elseif ($row->kind == 'order' && $row->status == 'approved')
         <div class="no-print" style="display: flex; gap: 12px;">
-            <a href="{{ action([\App\Http\Controllers\SellController::class, 'create']) }}?mobile_so={{ $row->transaction_id }}" class="tw-dw-btn tw-dw-btn-success tw-text-white">
-                <i class="fa fa-file-invoice"></i> Make invoice</a>
+            <form method="POST" action="{{ action([\App\Http\Controllers\MobileOrderController::class, 'invoice'], [$row->id]) }}" onsubmit="this.querySelector('button').disabled = true;">
+                @csrf
+                <button type="submit" class="tw-dw-btn tw-dw-btn-success tw-text-white"><i class="fa fa-file-invoice"></i> Make invoice</button>
+            </form>
             <a href="{{ action([\App\Http\Controllers\SellController::class, 'edit'], [$row->transaction_id]) }}" class="tw-dw-btn tw-dw-btn-outline tw-dw-btn-primary">
                 <i class="fa fa-edit"></i> Edit sales order</a>
         </div>

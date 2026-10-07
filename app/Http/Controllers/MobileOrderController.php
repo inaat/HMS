@@ -119,6 +119,22 @@ class MobileOrderController extends Controller
         return redirect()->back()->with('status', $output);
     }
 
+    /** One click: booker order -> final invoice (credit sale). */
+    public function invoice($id)
+    {
+        $this->authorizeAccess();
+
+        try {
+            $sell = $this->inbox()->invoiceOrder($id, auth()->id());
+            $output = ['success' => 1, 'msg' => 'Invoice '.$sell->invoice_no.' created'];
+        } catch (\Exception $e) {
+            \Log::emergency('Mobile invoice: File:'.$e->getFile().' Line:'.$e->getLine().' Message:'.$e->getMessage());
+            $output = ['success' => 0, 'msg' => $e->getMessage()];
+        }
+
+        return redirect()->back()->with('status', $output);
+    }
+
     /** Cloud sync panel / progress bar (polled). */
     public function syncStatus()
     {
