@@ -87,6 +87,7 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xx
 }));
 /** The POS stores "0" or "-" when a customer has no mobile: show nothing instead. */
 const cleanCust = (c) => ({ ...c, mobile: ['0', '-'].includes(String(c.mobile ?? '').trim()) ? '' : c.mobile });
+const OUTLET_TYPES = ['Kiryana', 'General store', 'Wholesale', 'Medical store', 'Bakery', 'Super store', 'Hotel / Restaurant', 'Other'];
 const DAYS = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun' };
 const routeName = (id) => ((S.routes || []).find((r) => r.id === num(id)) || {}).name || '';
 /** Booker photos live on the cloud copy next to the app (public/uploads/booker/...). */
@@ -193,14 +194,16 @@ async function sync(manual) {
     await download();
     S.lastSync = nowStr();
     await db.set('lastSync', S.lastSync);
+    S.syncError = null;
     if (manual) toast('Synced');
   } catch (e) {
     if (e.status === 401) {
       S.token = null;
       await db.set('token', null);
       toast(e.message, 4000);
-    } else if (manual) {
-      toast('Sync failed: ' + e.message, 4000);
+    } else {
+      S.syncError = e.message;
+      if (manual) toast('Sync failed: ' + e.message, 4000);
     }
   } finally {
     S.syncing = false;
@@ -388,7 +391,8 @@ function renderBar() {
     <span>Stock from ${h(ago(S.stockAt))}</span>
     ${S.outbox.size ? `<span class="pill warn">${S.outbox.size} not sent</span>` : ''}
     ${errors ? `<span class="pill bad">${errors} need attention</span>` : ''}
-    ${S.syncing ? '<span class="pill">syncing…</span>' : ''}`;
+    ${S.syncing ? '<span class="pill">syncing…</span>' : ''}
+    ${S.syncError && !S.syncing ? `<span class="pill bad" title="${h(S.syncError)}">Sync failed: ${h(String(S.syncError).slice(0, 60))}</span>` : ''}`;
 }
 
 function loginView() {
@@ -800,8 +804,8 @@ async function saveShopLocation() {
 /** Route, shop type / class, GPS and photo: on the new-customer form and on Edit shop. */
 function shopFields(c) {
   return `
-    <label>Route</label><select name="route_id"><option value="">—</option>${(S.routes || []).map((r) => `<option value="${r.id}" ${num(c.route_id) === r.id ? 'selected' : ''}>${h(r.name)}${(r.days || []).length ? ' · ' + r.days.map((d) => DAYS[d]).join(' ') : ''}</option>`).join('')}</select>
-    <div class="row"><div class="grow"><label>Shop type</label><select name="outlet_type"><option value="">—</option>${(S.outletTypes || []).map((t) => `<option ${c.outlet_type === t ? 'selected' : ''}>${h(t)}</option>`).join('')}</select></div>
+    <label>Route</label><select name="route_id"><option value="">${(S.routes || []).length ? '—' : 'No routes yet (office: Sell → Booker routes)'}</option>${(S.routes || []).map((r) => `<option value="${r.id}" ${num(c.route_id) === r.id ? 'selected' : ''}>${h(r.name)}${(r.days || []).length ? ' · ' + r.days.map((d) => DAYS[d]).join(' ') : ''}</option>`).join('')}</select>
+    <div class="row"><div class="grow"><label>Shop type</label><select name="outlet_type"><option value="">—</option>${((S.outletTypes || []).length ? S.outletTypes : OUTLET_TYPES).map((t) => `<option ${c.outlet_type === t ? 'selected' : ''}>${h(t)}</option>`).join('')}</select></div>
       <div style="width:90px"><label>Class</label><select name="outlet_class"><option value="">—</option>${['A', 'B', 'C'].map((x) => `<option ${c.outlet_class === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div></div>
     <label>Shop location</label>
     <div class="card" style="margin:0"><div id="gps-text" class="muted">${c.position ? '📍 Saved: ' + h(c.position) : 'Not set yet'}</div>

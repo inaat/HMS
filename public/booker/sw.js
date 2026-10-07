@@ -1,7 +1,7 @@
 // Keeps the booker app itself on the phone so it opens with no internet. Data lives in IndexedDB (app.js);
 // API calls always go to the network.
-const CACHE = 'booker-v13';
-const SHELL = ['./', 'index.html', 'app.js?v=13', 'manifest.json', 'icon.svg'];
+const CACHE = 'booker-v14';
+const SHELL = ['./', 'index.html', 'app.js?v=14', 'manifest.json', 'icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
