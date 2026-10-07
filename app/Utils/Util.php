@@ -1930,7 +1930,7 @@ class Util
     }
     public function isInternetAvailable() {
         // Try to open a socket connection to a reliable server like Google
-        $connected = @fsockopen("www.google.com", 80); // Try connecting to google on port 80
+        $connected = @fsockopen("www.google.com", 80, $errno, $errstr, 3); // give up after 3 s, never hang a save
 
         if ($connected) {
             fclose($connected); // Close the connection if successful

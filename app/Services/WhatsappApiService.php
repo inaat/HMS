@@ -65,7 +65,8 @@ class WhatsappApiService
             ]
         ];
 
-        return $this->makeApiCall($apiURL, 'post', $postInput);
+        // A text message is small: fail fast instead of holding the caller for a minute.
+        return $this->makeApiCall($apiURL, 'post', $postInput, 20);
     }
 
     // groups don't have phone numbers, so the caller can't address one directly;
@@ -169,7 +170,7 @@ class WhatsappApiService
      return $response->json();
  }
 
-    private function makeApiCall($url, $method, $data = [])
+    private function makeApiCall($url, $method, $data = [], $timeout = 60)
     {
         $headers = [
             'Content-Type' => 'application/json',
@@ -181,7 +182,7 @@ class WhatsappApiService
         // call waiting indefinitely — on Windows nothing rescues it either, since
         // Laravel's own job $timeout relies on pcntl_alarm(), which doesn't exist
         // on Windows at all
-        $http = $this->http()->withHeaders($headers);
+        $http = $this->http()->connectTimeout(10)->timeout($timeout)->withHeaders($headers);
 
         if ($method === 'post') {
             return $http->post($url, $data)->json();

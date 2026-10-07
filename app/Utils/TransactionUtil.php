@@ -6990,24 +6990,7 @@ class TransactionUtil extends Util
         if (! empty($excess_amount)) {
             $this->updateContactBalance($contact, $excess_amount);
         }
-       // dd($parent_payment);
-       if (strlen($contact->mobile) > 10) {
-        if ($this->isInternetAvailable()) {
-                                 // Instantiate the WhatsApp API service
-    $whatsappApiService = new WhatsappApiService();
-
-    // Call the sendTestMsg method
-    $response = $whatsappApiService->sendTestMsg(\App\WhatsappDevice::instanceFor($contact->business_id), $contact->mobile, "
-    Dear {$contact->name},
-    
-    We have received a payment of: {$parent_payment->amount}.
-    Remaining Balance: {$this->getContactDue($contact->id)}
-    Business Name : {$contact->business->name}
-    Developed By Skyline WebSolution
-
-    ");
-       }
-    }
+        $this->sendPaymentReceivedWhatsapp($contact, $parent_payment->amount);
         return $parent_payment;
     }
 
@@ -7744,6 +7727,36 @@ class TransactionUtil extends Util
     }
 
     /**
+     * WhatsApp "payment received" to the customer. Runs after the response (the payment is saved and committed first)
+     * and never throws: a slow or broken WhatsApp gateway must not stop a payment from saving.
+     */
+    public function sendPaymentReceivedWhatsapp($contact, $amount): void
+    {
+        if (strlen((string) $contact->mobile) <= 10) {
+            return;
+        }
+        app()->terminating(function () use ($contact, $amount) {
+            try {
+                if (! $this->isInternetAvailable()) {
+                    return;
+                }
+                $message = "
+    Dear {$contact->name},
+    
+    We have received a payment of: {$amount}.
+    Remaining Balance: {$this->getContactDue($contact->id)}
+    Business Name : {$contact->business->name}
+    Developed By Skyline WebSolution
+
+    ";
+                (new WhatsappApiService())->sendTestMsg(\App\WhatsappDevice::instanceFor($contact->business_id), $contact->mobile, $message);
+            } catch (\Throwable $e) {
+                \Log::warning('Payment WhatsApp to contact '.$contact->id.' not sent: '.$e->getMessage());
+            }
+        });
+    }
+
+    /**
      * Sends a document on WhatsApp as images (pages of the HTML, rendered by Edge / Chrome), as a PDF, or both.
      * When the images can't be made (no browser, very long document) the PDF is sent instead.
      *
@@ -7987,21 +8000,7 @@ class TransactionUtil extends Util
         $this->updateContactBalance($contact, $excess_amount);
     }
 
-    // Send WhatsApp notification if mobile number is valid
-    if (strlen($contact->mobile) > 10 && $this->isInternetAvailable()) {
-        $whatsappApiService = new WhatsappApiService();
-        $message = "
-        Dear {$contact->name},
-        
-        We have received a payment of: {$parent_payment->amount}.
-        Remaining Balance: {$this->getContactDue($contact->id)}
-        Business Name: {$contact->business->name}
-        Developed By Skyline WebSolution
-        ";
-
-        // Send WhatsApp message
-        $response = $whatsappApiService->sendTestMsg(\App\WhatsappDevice::instanceFor($contact->business_id), $contact->mobile, $message);
-    }
+    $this->sendPaymentReceivedWhatsapp($contact, $parent_payment->amount);
 
     return $parent_payment;
 }
