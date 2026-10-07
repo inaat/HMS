@@ -182,6 +182,50 @@ This uses the business's own WhatsApp number on the server — **do not open Wha
 - `history(uuid PK, type, number, payload_json, status, local_so_no, invoice_no, local_ref, reject_reason,
   short_stock, wa_sent, created_at)`.
 
+## 4.1 No internet: everything runs from SQLite (mandatory)
+
+The booker must be able to work a **whole day with no internet**. The phone's SQLite database is the app's only
+data source; the server is only used to sync. Never block a screen waiting for the network.
+
+**Works offline (from SQLite):**
+- Log in again on the same phone if the token is still stored (no network needed to open the app). First-ever login
+  on a phone needs internet once.
+- Dashboard, all totals, highest dues, recent work.
+- Search products and customers, see prices (per location), units, free stock, customer dues, unpaid invoices.
+- **Book orders**, **collect payments**, **add new customers** — saved instantly to SQLite (`outbox`) with a uuid and
+  a slip/receipt number; the slip can be **printed (Bluetooth)** and **shared** at once.
+- My work: all orders/payments with their last known status; unsent items marked "not sent".
+- The draft order being typed survives the app being closed or the phone restarting.
+
+**Needs internet (show a clear message, never crash):**
+- First login on a new phone, and Log out (log out offline = keep the session; offer it again when online).
+- "Send on WhatsApp" (`/whatsapp`): offline → "No internet. The customer gets the slip on WhatsApp automatically when
+  this order is sent."
+- Fresh stock/prices/statuses: show the age ("Stock from 3 hours ago") so the booker knows the data is old.
+
+**How data is kept safe offline:**
+1. Every save is one SQLite transaction (outbox row + next number + clearing the draft). Write to SQLite **before**
+   any network call.
+2. Each outbox item has a **uuid**; uploading the same item again is harmless (server answers `duplicate`), so the
+   app can retry as often as needed — after a crash, a timeout, or half-sent uploads.
+3. Free stock on the phone = last downloaded free stock **minus this phone's unsent orders**, so two orders made
+   offline do not both use the same stock.
+4. Slip numbers come from the local counter (`seq_order` / `seq_receipt`) — no server needed; never reused.
+5. Logging out, a 401, or an app update must **never delete the outbox**. Only an explicit "Delete" on an item the
+   server rejected removes it.
+6. When the internet returns (connectivity change, app start, Sync button, every 2 min while open, workmanager every
+   15 min) the app uploads the outbox, then downloads changes — automatically, without the booker doing anything.
+
+**What can differ after a long offline period (handled by the office, just show it):**
+- Price or stock changed meanwhile → the order keeps the booker's price/quantity; the office sees the difference and
+  may edit or reject; the phone then shows the new status and reason.
+- A product or customer was deleted on the POS meanwhile → upload returns `error` with a message; show it under the
+  item with **Try again** / **Delete**.
+
+Acceptance: with airplane mode ON for the whole test, a booker can open the app, book 10 orders (one for a new
+customer), collect 3 payments, print and share every slip, close/reopen the app and restart the phone — nothing is
+lost; turning airplane mode OFF uploads all 14 items once and the statuses update.
+
 ## 5. Business rules (must match exactly)
 
 1. **Units:** a product sells in `units`; `multiplier` = how many base units (Pc) in that unit. Price of a unit =
