@@ -57,8 +57,19 @@ class MobileController extends Controller
             // so a reinstall or a second phone does not reuse numbers.
             'next_order_seq' => (int) DB::table('mb_orders')->where('user_id', $user->id)->max('seq') + 1,
             'next_receipt_seq' => (int) DB::table('mb_payments')->where('user_id', $user->id)->max('seq') + 1,
+            'business' => $this->businessName(),
             'server_time' => now()->toDateTimeString(),
         ]);
+    }
+
+    /** Shop name for slip headers; the cloud has the business table from the full copy (mobile-sync:mirror). */
+    private function businessName(): ?string
+    {
+        try {
+            return DB::table('business')->orderBy('id')->value('name');
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public function logout(Request $request)
@@ -113,6 +124,7 @@ class MobileController extends Controller
 
         return response()->json([
             'server_time' => $server_time,
+            'business' => $this->businessName(),
             'stock_updated_at' => DB::table('mb_meta')->where('key', 'last_push_at')->value('value'),
             'stock' => $this->availableStock(),
             'products' => $products,

@@ -52,7 +52,7 @@ const S = {
 };
 
 async function loadState() {
-  for (const k of ['token', 'user', 'since', 'stock', 'stockAt', 'lastSync', 'seq', 'draft']) {
+  for (const k of ['business', 'token', 'user', 'since', 'stock', 'stockAt', 'lastSync', 'seq', 'draft']) {
     const v = await db.get(k);
     if (v !== undefined && v !== null) S[k] = v;
   }
@@ -246,6 +246,7 @@ async function download() {
   });
   await db.put('history', [...S.history.values()]);
 
+  if (data.business) { S.business = data.business; await db.set('business', data.business); }
   S.stock = data.stock || {};
   S.stockAt = data.stock_updated_at;
   S.since = data.server_time;
@@ -620,6 +621,7 @@ function paymentForm(key) {
 function slipText(o) {
   const line = '-'.repeat(32);
   const out = [];
+  if (S.business) out.push(S.business.toUpperCase(), line);
   if (o.type === 'order') {
     out.push('ORDER SLIP ' + o.number, 'Date: ' + (o.order_date || o.created || ''), 'Customer: ' + (o.customer_name || ''), line);
     (o.lines || []).forEach((l) => {
@@ -643,17 +645,30 @@ function openSlip(uuid) {
   if (!o) return;
   const text = slipText({ ...o, status: S.outbox.has(uuid) ? (o.state === 'error' ? 'not accepted: ' + o.error : 'not sent yet') : o.status });
   sheet(o.type === 'order' ? 'Order slip' : 'Receipt', `<div class="slip">${h(text)}</div>
-    <div class="row noprint" style="margin-top:10px"><button class="btn grow" data-act="share" data-uuid="${uuid}">Share / WhatsApp</button><button class="btn light grow" data-act="print">Print</button></div>
+    <div class="row noprint" style="margin-top:10px"><button class="btn grow" data-act="whatsapp" data-uuid="${uuid}" style="background:#25d366">WhatsApp${waNumber(o) ? ' customer' : ''}</button>${navigator.share ? `<button class="btn light grow" data-act="share" data-uuid="${uuid}">Share…</button>` : ''}<button class="btn light grow" data-act="print">Print</button></div>
     ${o.state === 'error' ? `<div class="row noprint" style="margin-top:8px"><button class="btn light grow" data-act="retry" data-uuid="${uuid}">Try again</button><button class="btn bad grow" data-act="discard" data-uuid="${uuid}">Delete</button></div>` : ''}`);
+}
+
+/** Customer mobile as WhatsApp wants it (country code, digits only): 03448292937 -> 923448292937. */
+function waNumber(o) {
+  const c = o.contact_id ? findCustomer('c' + o.contact_id) : (o.customer_uuid ? findCustomer('u' + o.customer_uuid) : null);
+  let d = String((c && c.mobile) || '').replace(/\D/g, '');
+  if (d.startsWith('00')) d = d.slice(2);
+  else if (d.length === 11 && d.startsWith('0')) d = '92' + d.slice(1);
+  else if (d.length === 10 && d.startsWith('3')) d = '92' + d;
+  return d.length >= 11 ? d : '';
+}
+
+/** Open WhatsApp (app on a phone, WhatsApp Web on a computer) with the slip typed in, to the customer when known. */
+function whatsapp(uuid) {
+  const o = S.outbox.get(uuid) || S.history.get(uuid);
+  const url = 'https://wa.me/' + waNumber(o) + '?text=' + encodeURIComponent(slipText(o));
+  if (!window.open(url, '_blank')) location.href = url;
 }
 
 async function share(uuid) {
   const o = S.outbox.get(uuid) || S.history.get(uuid);
-  const text = slipText(o);
-  if (navigator.share) {
-    try { await navigator.share({ text }); return; } catch (e) { if (e.name === 'AbortError') return; }
-  }
-  location.href = 'https://wa.me/?text=' + encodeURIComponent(text);
+  try { await navigator.share({ text: slipText(o) }); } catch (e) { if (e.name !== 'AbortError') whatsapp(uuid); }
 }
 
 // ---------- actions ----------
@@ -742,6 +757,7 @@ async function login(form) {
       S.since = null; S.seq = { order: 1, receipt: 1 };
     }
     S.token = res.token;
+    if (res.business) { S.business = res.business; await db.set('business', res.business); }
     S.user = res.user;
     // Never reuse a slip number already sent (reinstall, second phone).
     S.seq = { order: Math.max(S.seq.order || 1, res.next_order_seq), receipt: Math.max(S.seq.receipt || 1, res.next_receipt_seq) };
@@ -805,6 +821,7 @@ document.addEventListener('click', async (e) => {
     case 'clear-order': if (confirm('Clear this order?')) { S.draft = { customer: null, lines: [], note: '' }; S.cartOpen = false; closeSheet(); await saveDraft(); render(); } break;
     case 'save-order': saveOrder(); break;
     case 'open-slip': openSlip(el.dataset.uuid); break;
+    case 'whatsapp': whatsapp(el.dataset.uuid); break;
     case 'share': share(el.dataset.uuid); break;
     case 'print': window.print(); break;
     case 'retry': {

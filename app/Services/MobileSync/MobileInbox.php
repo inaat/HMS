@@ -10,7 +10,9 @@ use App\Transaction;
 use App\TransactionPayment;
 use App\Utils\ContactUtil;
 use App\Utils\ProductUtil;
+use App\Services\WhatsappApiService;
 use App\Utils\TransactionUtil;
+use App\WhatsappDevice;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -79,6 +81,7 @@ class MobileInbox
             if (DB::table('mobile_inbox')->where('uuid', $o['uuid'])->exists()) {
                 continue;
             }
+            $order_contact = $o['contact_id'] ?: $this->contactForUuid($o['customer_uuid'] ?? null);
             DB::table('mobile_inbox')->insert([
                 'kind' => 'order',
                 'uuid' => $o['uuid'],
@@ -95,6 +98,9 @@ class MobileInbox
                 'updated_at' => now(),
             ]);
             $added['orders']++;
+            if (! empty($order_contact)) {
+                $this->whatsapp((int) $order_contact, $this->orderSlipText($o));
+            }
         }
 
         foreach ($inbox['payments'] ?? [] as $p) {
@@ -348,6 +354,12 @@ class MobileInbox
                 }
             }
 
+            $business = DB::table('business')->where('id', $this->business_id)->value('name');
+            $this->whatsapp($contact->id, "Dear {$contact->name},\n\nWe have received a payment of: ".number_format((float) $row->total, 2)
+                ."\nReceipt: {$row->number} ({$parent->payment_ref_no})\nCollected by: {$booker}"
+                ."\nRemaining Balance: ".number_format((float) $this->transactionUtil->getContactDue($contact->id), 2)
+                ."\nBusiness Name : {$business}");
+
             DB::table('mobile_inbox')->where('id', $row->id)->update([
                 'status' => 'approved',
                 'payment_id' => $parent->id,
@@ -373,6 +385,53 @@ class MobileInbox
                 'updated_at' => now(),
             ]);
         });
+    }
+
+    /**
+     * WhatsApp to the customer through the business's connected device (Settings > WhatsApp), the same way the POS
+     * sends payment messages. Skipped when nothing is connected, the customer has no mobile, or
+     * MOBILE_SYNC_WHATSAPP=false; a failure is only logged, never stops the sync or the approval.
+     */
+    private function whatsapp(int $contact_id, string $text): void
+    {
+        try {
+            if (! config('mobile_sync.whatsapp')) {
+                return;
+            }
+            $contact = Contact::find($contact_id);
+            if (empty($contact) || strlen(preg_replace('/\D/', '', (string) $contact->mobile)) < 10) {
+                return;
+            }
+            if (! WhatsappDevice::where('business_id', $this->business_id)->where('status', 'connected')->exists()) {
+                return;
+            }
+            (new WhatsappApiService())->sendTestMsg(WhatsappDevice::instanceFor($this->business_id), $contact->mobile, $text);
+        } catch (\Throwable $e) {
+            \Log::warning('Mobile booker WhatsApp to contact '.$contact_id.' failed: '.$e->getMessage());
+        }
+    }
+
+    /** The order slip as the customer gets it on WhatsApp. */
+    private function orderSlipText(array $o): string
+    {
+        $contact = Contact::find($o['contact_id'] ?: $this->contactForUuid($o['customer_uuid'] ?? null));
+        $names = DB::table('products')->whereIn('id', array_column($o['lines'] ?? [], 'product_id'))->pluck('name', 'id');
+        $units = DB::table('units')->pluck('actual_name', 'id');
+        $business = DB::table('business')->where('id', $this->business_id)->value('name');
+
+        $text = 'Dear '.($contact->name ?? 'customer').",\n\nYour order has been booked.\nOrder: {$o['number']}\nDate: {$o['order_date']}\nBooked by: "
+            .$this->bookerName($o['user_id'])."\n--------------------\n";
+        foreach ($o['lines'] ?? [] as $l) {
+            $unit = $l['sub_unit_id'] ? ($units[$l['sub_unit_id']] ?? '') : '';
+            $text .= ($names[$l['product_id']] ?? 'Item')."\n  ".(float) $l['sub_unit_qty'].' '.$unit.' x '.number_format((float) $l['sub_unit_price'], 2)
+                .' = '.number_format((float) $l['line_total'], 2)."\n";
+        }
+        $text .= "--------------------\nTotal: ".number_format((float) $o['total'], 2)."\n";
+        if (! empty($o['note'])) {
+            $text .= 'Note: '.$o['note']."\n";
+        }
+
+        return $text."\nThank you,\n{$business}";
     }
 
     private function lockWaiting(int $id, ?string $kind)
