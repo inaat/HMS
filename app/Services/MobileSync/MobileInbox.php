@@ -255,6 +255,7 @@ class MobileInbox
                 'is_direct_sale' => 1,
                 'sale_note' => $data['note'] ?? null,
                 'staff_note' => 'Mobile order '.$row->number.' by '.$booker,
+                'commission_agent' => $this->commissionAgentFor($row->booker_id),
                 'source' => 'mobile',
             ], $invoice_total, $this->bookerOrAdmin($row->booker_id), false);
 
@@ -559,6 +560,20 @@ class MobileInbox
         $u = DB::table('users')->where('id', $booker_id)->first(['first_name', 'last_name', 'username']);
 
         return empty($u) ? 'booker #'.$booker_id : (trim($u->first_name.' '.$u->last_name) ?: $u->username);
+    }
+
+    /**
+     * Commission agent for a booker's orders: the one set on the booker (User Management > Edit user > "Commission
+     * agent for mobile orders"), else the booker when they are a commission agent themselves.
+     */
+    private function commissionAgentFor($booker_id): ?int
+    {
+        $u = DB::table('users')->where('id', $booker_id)->first(['id', 'is_cmmsn_agnt', 'mobile_commission_agent_id']);
+        if (empty($u)) {
+            return null;
+        }
+
+        return $u->mobile_commission_agent_id ? (int) $u->mobile_commission_agent_id : ($u->is_cmmsn_agnt ? (int) $u->id : null);
     }
 
     /** The booker as "added by" when they still exist locally, otherwise the first admin of the business. */

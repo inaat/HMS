@@ -168,6 +168,13 @@
                     {!! Form::text('max_sales_discount_percent', !is_null($user->max_sales_discount_percent) ? @num_format($user->max_sales_discount_percent) : null, ['class' => 'form-control input_number', 'placeholder' => __( 'lang_v1.max_sales_discount_percent' ) ]); !!}
                 </div>
             </div>
+            {{-- Order booker: invoices made from their mobile orders get this commission agent (App\Services\MobileSync\MobileInbox). --}}
+            <div class="col-md-4">
+                <div class="form-group">
+                  {!! Form::label('mobile_commission_agent_id', 'Commission agent for mobile orders:') !!} @show_tooltip('For an Order Booker: invoices made from their mobile orders get this commission agent.')
+                    {!! Form::select('mobile_commission_agent_id', \App\User::where('business_id', session('user.business_id'))->where('is_cmmsn_agnt', 1)->whereNull('deleted_at')->get()->mapWithKeys(fn ($a) => [$a->id => trim($a->first_name.' '.$a->last_name)])->all(), $user->mobile_commission_agent_id, ['class' => 'form-control select2', 'style' => 'width: 100%;', 'placeholder' => 'None']); !!}
+                </div>
+            </div>
             <div class="clearfix"></div>
             <div class="col-md-4">
                 <div class="form-group">
