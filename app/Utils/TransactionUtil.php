@@ -1234,12 +1234,10 @@ class TransactionUtil extends Util
         }
 
         //commission agent info
-        $output['commission_agent'] = '';
-        $output['commission_agent_label'] = '';
-        if ($il->show_commission_agent == 1) {
-            $output['commission_agent_label'] = ! empty($il->commission_agent_label) ? $il->commission_agent_label : '';
-            $output['commission_agent'] = ! empty($transaction->sale_commission_agent->user_full_name) ? $transaction->sale_commission_agent->user_full_name : '';
-        }
+        // Printed on every invoice that has one (owner's choice), not only when the layout's checkbox is on.
+        $output['commission_agent'] = ! empty($transaction->sale_commission_agent->user_full_name) ? $transaction->sale_commission_agent->user_full_name : '';
+        $output['commission_agent_label'] = $output['commission_agent'] === '' ? ''
+            : (! empty($il->commission_agent_label) ? $il->commission_agent_label : 'Order Book By');
         $output['book_by'] = !empty($transaction->sales_booker->user_full_name) ? $transaction->sales_booker->user_full_name : '';
         
         //Invoice info

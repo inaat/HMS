@@ -15,6 +15,13 @@
         @if(!empty($receipt_details->logo))
         <img src="{{$receipt_details->logo}}" style=" width: 100%; " class="img center-block">
         <!-- <br/> -->
+        @else
+            {{-- No logo: the shop's own name, address and phone from Settings > Business Locations. --}}
+            <h2 style="text-align:center; margin:0 0 4px;">{{ $receipt_details->display_name }}</h2>
+            <p style="text-align:center; margin:0 0 6px;">
+                @if(!empty($receipt_details->address)){!! $receipt_details->address !!}<br>@endif
+                @if(!empty($receipt_details->contact)){!! $receipt_details->contact !!}@endif
+            </p>
         @endif
 
 
@@ -50,6 +57,13 @@
                 <th>{{$receipt_details->sales_person_label}}</th>
 
                 <td>{{$receipt_details->sales_person}}</td>
+            </tr>
+            @endif
+
+            @if(!empty($receipt_details->commission_agent))
+            <tr>
+                <th>{{$receipt_details->commission_agent_label}}</th>
+                <td>{{$receipt_details->commission_agent}}</td>
             </tr>
             @endif
 

@@ -155,10 +155,17 @@
 		max-width: 100%;">
         
   <!-- Logo -->
-        {{-- @if(!empty($transactions[0]['transactions']->logo))
-        <img src="{{$transactions[0]['transactions']->logo}}" style=" width: 100%; " class="img center-block">
-        <!-- <br/> -->
-        @endif --}}
+        @php $head = $transactions[0]['transactions']; @endphp
+        @if(!empty($head->logo))
+            <img src="{{$head->logo}}" style=" width: 100%; " class="img center-block">
+        @else
+            {{-- No logo: the shop's own name, address and phone from Settings > Business Locations. --}}
+            <h2 style="text-align:center; margin:0 0 4px;">{{ $head->display_name }}</h2>
+            <p style="text-align:center; margin:0 0 6px;">
+                @if(!empty($head->address)){!! $head->address !!}<br>@endif
+                @if(!empty($head->contact)){!! $head->contact !!}@endif
+            </p>
+        @endif
 
 
    <table class="table-info border-top">
@@ -282,7 +289,11 @@
                     {{$receipt_details['transactions']->invoice_no}}
                 </td>
             </tr>
-           
+            <tr>
+                <th>{!! $receipt_details['transactions']->date_label !!}</th>
+                <td>{{ $receipt_details['transactions']->invoice_date }}</td>
+            </tr>
+
             @if(!empty($receipt_details['transactions']->due_date_label))
             <tr>
                 <th>{{$receipt_details['transactions']->due_date_label}}</th>
@@ -302,7 +313,8 @@
             
                 <th>Order Book By</th>
 
-                <td>{{ $receipt_details['transactions']->book_by }}</td>
+                {{-- One row: the order booker, else the commission agent. --}}
+                <td>{{ $receipt_details['transactions']->book_by ?: $receipt_details['transactions']->commission_agent }}</td>
             </tr>
           
 

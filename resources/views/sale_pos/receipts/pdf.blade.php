@@ -107,6 +107,13 @@
 			@if(!empty($data->logo))
 			<img src="{{$data->logo}}"  style=" width: 100%; " class="img center-block">
 			<!-- <br/> -->
+		@else
+			{{-- No logo: the shop's own name, address and phone from Settings > Business Locations. --}}
+			<h2 style="text-align:center; margin:0 0 4px;">{{ $data->display_name }}</h2>
+			<p style="text-align:center; margin:0 0 6px;">
+				@if(!empty($data->address)){!! $data->address !!}<br>@endif
+				@if(!empty($data->contact)){!! $data->contact !!}@endif
+			</p>
 		@endif
 
 			
@@ -141,6 +148,13 @@
 						<th>{{$data->sales_person_label}}</th>
 					
 						<td>{{$data->sales_person}}</td>
+					</tr>
+				@endif
+
+				@if(!empty($data->commission_agent))
+					<tr>
+						<th>{{$data->commission_agent_label}}</th>
+						<td>{{$data->commission_agent}}</td>
 					</tr>
 				@endif
 
