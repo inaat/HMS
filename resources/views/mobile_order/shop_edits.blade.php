@@ -30,7 +30,7 @@
             @if (! empty($counts['shop_edit'])) <span class="label label-warning">{{ $counts['shop_edit'] }}</span> @endif
         </a>
         <form method="GET" style="margin-left: 12px;">
-            <select name="status" class="form-control input-sm" onchange="this.form.submit()">
+            <select name="status" class="form-control select2" style="width:200px;" onchange="this.form.submit()">
                 @foreach (['all' => 'All', 'waiting' => 'Waiting for approval', 'applied' => 'Applied', 'rejected' => 'Rejected'] as $k => $v)
                     <option value="{{ $k }}" @if ($status == $k) selected @endif>{{ $v }}</option>
                 @endforeach

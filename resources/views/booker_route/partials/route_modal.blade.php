@@ -1,5 +1,5 @@
 {{-- Add / edit a booker route: name, weekdays, booker, location. --}}
-<div class="modal fade" id="route_modal" tabindex="-1" role="dialog">
+<div class="modal fade contains_select2" id="route_modal" tabindex="-1" role="dialog">
     <div class="modal-dialog" role="document">
         <form method="POST" class="modal-content" action="{{ $route ? action([\App\Http\Controllers\BookerRouteController::class, 'update'], [$route->id]) : action([\App\Http\Controllers\BookerRouteController::class, 'store']) }}">
             @csrf
@@ -23,7 +23,7 @@
                 </div>
                 <div class="form-group">
                     <label>Order booker</label>
-                    <select name="booker_id" class="form-control">
+                    <select name="booker_id" class="form-control select2" style="width:100%;">
                         <option value="">— none —</option>
                         @foreach ($bookers as $id => $name)
                             <option value="{{ $id }}" @if(($route->booker_id ?? null) == $id) selected @endif>{{ $name }}</option>
@@ -33,7 +33,7 @@
                 </div>
                 <div class="form-group">
                     <label>Location</label>
-                    <select name="location_id" class="form-control">
+                    <select name="location_id" class="form-control select2" style="width:100%;">
                         <option value="">— any —</option>
                         @foreach ($locations as $id => $name)
                             <option value="{{ $id }}" @if(($route->location_id ?? null) == $id) selected @endif>{{ $name }}</option>

@@ -65,14 +65,34 @@ class MobileOrderController extends Controller
         if ($status !== 'all') {
             $query->where('m.status', $status);
         }
+
+        // Booker and date (booked on the phone) filters.
+        $booker = (int) $request->input('booker_id');
+        if ($booker) {
+            $query->where('m.booker_id', $booker);
+        }
+        $start_date = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $request->input('start_date')) ? $request->input('start_date') : null;
+        $end_date = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $request->input('end_date')) ? $request->input('end_date') : null;
+        if ($start_date && $end_date) {
+            $query->whereDate('m.booked_at', '>=', $start_date)->whereDate('m.booked_at', '<=', $end_date);
+        }
         $rows = $query->paginate(50)->withQueryString();
+
+        // Everyone who ever sent something from the app (also bookers who left).
+        $bookers = DB::table('mobile_inbox as m')->join('users as u', 'u.id', '=', 'm.booker_id')
+            ->where('u.business_id', request()->session()->get('user.business_id'))
+            ->selectRaw("u.id, TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as name")
+            ->distinct()->orderBy('name')->pluck('name', 'u.id');
+        $filters = array_filter(['status' => $status, 'location_id' => $location ?: null, 'booker_id' => $booker ?: null,
+            'start_date' => $start_date, 'end_date' => $end_date]);
 
         $counts = DB::table('mobile_inbox')->where('status', 'waiting')->groupBy('kind')->selectRaw('kind, COUNT(*) as c')->pluck('c', 'kind');
         $last_run = json_decode((string) DB::table('system')->where('key', 'mobile_sync_last_run')->value('value'), true);
 
         $shop_edits = DB::table('booker_customer_updates')->where('business_id', request()->session()->get('user.business_id'))->where('status', 'waiting')->count();
 
-        return view('mobile_order.index', compact('rows', 'kind', 'status', 'counts', 'last_run', 'locations', 'location', 'shop_edits'));
+        return view('mobile_order.index', compact('rows', 'kind', 'status', 'counts', 'last_run', 'locations', 'location', 'shop_edits',
+            'bookers', 'booker', 'start_date', 'end_date', 'filters'));
     }
 
     public function show($id)

@@ -43,14 +43,14 @@
             @component('components.widget', ['title' => 'Shops on this route ('.$shops->count().')'])
                 <form method="POST" action="{{ action([\App\Http\Controllers\BookerRouteController::class, 'addShops'], [$route->id]) }}" style="display:flex; gap:8px; margin-bottom:12px;">
                     @csrf
-                    <div style="flex:1;"><select name="contact_ids[]" id="add_shops" class="form-control" multiple style="width:100%;"></select></div>
+                    <div style="flex:1;"><select name="contact_ids[]" id="add_shops" class="form-control select2" multiple style="width:100%;"></select></div>
                     <button type="submit" class="tw-dw-btn tw-dw-btn-primary tw-text-white"><i class="fa fa-plus"></i> Add shops</button>
                 </form>
 
                 <form method="POST" id="shops_form" action="{{ action([\App\Http\Controllers\BookerRouteController::class, 'saveOrder'], [$route->id]) }}">
                     @csrf
                     <table class="table table-condensed table-bordered" id="shops_table">
-                        <thead><tr style="background:#f5f5f5;"><th style="width:60px;">#</th><th>Shop</th><th>Type</th><th>Class</th><th>GPS</th><th></th></tr></thead>
+                        <thead><tr style="background:#f5f5f5;"><th style="width:60px;">#</th><th>Shop</th><th style="min-width:160px;">Type</th><th style="min-width:80px;">Class</th><th>GPS</th><th></th></tr></thead>
                         <tbody>
                             @forelse ($shops as $s)
                                 <tr>
@@ -66,8 +66,8 @@
                                             @if ($phone($s->mobile)) <i class="fa fa-phone" style="margin-left:6px;"></i> {{ $phone($s->mobile) }} @else <span class="text-muted" style="margin-left:6px;">no mobile</span> @endif
                                         </div>
                                         @if (trim($s->address_line_1.' '.$s->city)) <div class="text-muted small"><i class="fa fa-map-marker-alt"></i> {{ trim($s->address_line_1.' '.$s->city) }}</div> @endif</td>
-                                    <td><select name="outlet_type[{{ $s->id }}]" class="form-control input-sm"><option value="">—</option>@foreach ($outlet_types as $t)<option @if($s->outlet_type == $t) selected @endif>{{ $t }}</option>@endforeach</select></td>
-                                    <td><select name="outlet_class[{{ $s->id }}]" class="form-control input-sm" style="width:60px;"><option value="">—</option>@foreach (['A','B','C'] as $c)<option @if($s->outlet_class == $c) selected @endif>{{ $c }}</option>@endforeach</select></td>
+                                    <td><select name="outlet_type[{{ $s->id }}]" class="form-control select2" style="width:100%;"><option value="">—</option>@foreach ($outlet_types as $t)<option @if($s->outlet_type == $t) selected @endif>{{ $t }}</option>@endforeach</select></td>
+                                    <td><select name="outlet_class[{{ $s->id }}]" class="form-control select2" style="width:100%;"><option value="">—</option>@foreach (['A','B','C'] as $c)<option @if($s->outlet_class == $c) selected @endif>{{ $c }}</option>@endforeach</select></td>
                                     <td>{!! $s->position ? '<span class="label label-success">✓</span>' : '<span class="label label-default" title="The booker sets it at the shop, or edit the customer">none</span>' !!}</td>
                                     <td><a href="#" class="text-danger remove-shop" data-href="{{ action([\App\Http\Controllers\BookerRouteController::class, 'removeShop'], [$route->id, $s->id]) }}" title="Remove from route">✕</a></td>
                                 </tr>
@@ -139,7 +139,12 @@
             var pos = {lat: p.lat, lng: p.lng};
             var esc = function (t) { return $('<div>').text(t || '').html(); };
             var m = new google.maps.Marker({position: pos, map: map, label: String(p.seq), title: p.seq + '. ' + p.name + ' (ID ' + p.contact_id + ')' + (p.mobile ? ' · ' + p.mobile : '')});
-            var info = new google.maps.InfoWindow({content: '<div style="min-width:200px;">'
+            // Small card always shown at the pin (name, ID, mobile); click the pin for the full card.
+            var small = '<div style="font-size:12px;line-height:1.35;">'
+                + '<b>' + p.seq + '. ' + esc(p.name) + '</b>'
+                + '<div>ID: <b>' + esc(p.contact_id) + '</b></div>'
+                + '<div>📞 ' + (p.mobile ? esc(p.mobile) : '<span style="color:#999">no mobile</span>') + '</div></div>';
+            var full = '<div style="min-width:200px;">'
                 + (p.photo ? '<img src="' + esc(p.photo) + '" style="width:100%;max-height:120px;object-fit:cover;border-radius:6px;margin-bottom:6px;">' : '')
                 + '<b>' + p.seq + '. <a href="' + esc(p.url) + '" target="_blank">' + esc(p.name) + '</a></b>'
                 + (p.business ? '<div>' + esc(p.business) + '</div>' : '')
@@ -147,12 +152,19 @@
                 + '<div>📞 ' + (p.mobile ? '<a href="tel:' + esc(p.mobile) + '">' + esc(p.mobile) + '</a>' : '<span style="color:#999">no mobile</span>') + '</div>'
                 + (p.address ? '<div>📍 ' + esc(p.address) + '</div>' : '')
                 + (p.type ? '<div style="color:#666">' + esc(p.type) + '</div>' : '')
-                + '<div><a href="https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lng + '" target="_blank">Directions</a></div></div>'});
-            m.addListener('click', function () { info.open(map, m); });
+                + '<div><a href="https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lng + '" target="_blank">Directions</a></div></div>';
+            var info = new google.maps.InfoWindow({content: small, disableAutoPan: true});
+            var big = false;
+            info.open({map: map, anchor: m, shouldFocus: false});
+            m.addListener('click', function () {
+                big = ! big;
+                info.setContent(big ? full : small);
+                info.open({map: map, anchor: m, shouldFocus: false});
+            });
             bounds.extend(pos);
         });
         if (routePins.length > 1) {
-            map.fitBounds(bounds);
+            map.fitBounds(bounds, {top: 100, right: 60, bottom: 30, left: 60});
             new google.maps.Polyline({path: routePins.map(function (p) { return {lat: p.lat, lng: p.lng}; }), map: map, strokeColor: '#2e9e6a', strokeOpacity: 0.7, strokeWeight: 3});
         }
     }

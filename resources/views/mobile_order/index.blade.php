@@ -13,11 +13,11 @@
 
 <section class="content">
     <div class="no-print" style="margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-        <a href="?kind=order&status={{ $status }}&location_id={{ $location ?: '' }}" class="tw-dw-btn tw-dw-btn-sm {{ $kind == 'order' ? 'tw-dw-btn-primary tw-text-white' : 'tw-dw-btn-outline tw-dw-btn-primary' }}">
+        <a href="?{{ http_build_query(['kind' => 'order'] + $filters) }}" class="tw-dw-btn tw-dw-btn-sm {{ $kind == 'order' ? 'tw-dw-btn-primary tw-text-white' : 'tw-dw-btn-outline tw-dw-btn-primary' }}">
             <i class="fa fa-shopping-cart"></i> Orders
             @if (! empty($counts['order'])) <span class="label label-warning">{{ $counts['order'] }}</span> @endif
         </a>
-        <a href="?kind=payment&status={{ $status }}&location_id={{ $location ?: '' }}" class="tw-dw-btn tw-dw-btn-sm {{ $kind == 'payment' ? 'tw-dw-btn-primary tw-text-white' : 'tw-dw-btn-outline tw-dw-btn-primary' }}">
+        <a href="?{{ http_build_query(['kind' => 'payment'] + $filters) }}" class="tw-dw-btn tw-dw-btn-sm {{ $kind == 'payment' ? 'tw-dw-btn-primary tw-text-white' : 'tw-dw-btn-outline tw-dw-btn-primary' }}">
             <i class="fa fa-money-bill-wave"></i> Payments
             @if (! empty($counts['payment'])) <span class="label label-warning">{{ $counts['payment'] }}</span> @endif
         </a>
@@ -27,24 +27,41 @@
             @if (! empty($shop_edits)) <span class="label label-warning">{{ $shop_edits }}</span> @endif
         </a>
         @endcan
-        <form method="GET" style="display: flex; gap: 8px; align-items: center; margin-left: 12px;">
-            <input type="hidden" name="kind" value="{{ $kind }}">
-            @if ($locations->count() > 1)
-                <select name="location_id" class="form-control input-sm" onchange="this.form.submit()">
-                    <option value="">All my locations</option>
-                    @foreach ($locations as $id => $name)
-                        <option value="{{ $id }}" @if ($location == $id) selected @endif>{{ $name }}</option>
-                    @endforeach
-                </select>
-            @endif
-            <select name="status" class="form-control input-sm" onchange="this.form.submit()">
-                @foreach (['waiting' => 'Waiting approval', 'approved' => 'Approved', 'invoiced' => 'Invoiced', 'rejected' => 'Rejected', 'all' => 'All'] as $k => $label)
-                    @if ($kind == 'payment' && $k == 'invoiced') @continue @endif
-                    <option value="{{ $k }}" @if ($status == $k) selected @endif>{{ $label }}</option>
-                @endforeach
-            </select>
-        </form>
     </div>
+
+    @component('components.filters', ['title' => __('report.filters')])
+        {!! Form::open(['url' => action([\App\Http\Controllers\MobileOrderController::class, 'index']), 'method' => 'get', 'id' => 'mobile_orders_filter_form']) !!}
+        <input type="hidden" name="kind" value="{{ $kind }}">
+        <input type="hidden" name="start_date" id="mo_start_date" value="{{ $start_date }}">
+        <input type="hidden" name="end_date" id="mo_end_date" value="{{ $end_date }}">
+        <div class="col-md-3">
+            <div class="form-group">
+                {!! Form::label('mo_date_range', __('report.date_range') . ':') !!}
+                {!! Form::text('mo_date_range', null, ['placeholder' => __('lang_v1.select_a_date_range'), 'class' => 'form-control', 'id' => 'mo_date_range', 'readonly']) !!}
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="form-group">
+                {!! Form::label('mo_booker_id', 'Order booker:') !!}
+                {!! Form::select('booker_id', $bookers, $booker ?: null, ['class' => 'form-control select2 mo-filter', 'style' => 'width:100%', 'placeholder' => __('lang_v1.all'), 'id' => 'mo_booker_id']) !!}
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="form-group">
+                {!! Form::label('mo_status', __('sale.status') . ':') !!}
+                {!! Form::select('status', array_filter(['waiting' => 'Waiting approval', 'approved' => 'Approved', 'invoiced' => $kind == 'payment' ? null : 'Invoiced', 'rejected' => 'Rejected', 'all' => __('lang_v1.all')]), $status, ['class' => 'form-control select2 mo-filter', 'style' => 'width:100%', 'id' => 'mo_status']) !!}
+            </div>
+        </div>
+        @if ($locations->count() > 1)
+            <div class="col-md-3">
+                <div class="form-group">
+                    {!! Form::label('mo_location_id', __('purchase.business_location') . ':') !!}
+                    {!! Form::select('location_id', $locations, $location ?: null, ['class' => 'form-control select2 mo-filter', 'style' => 'width:100%', 'placeholder' => 'All my locations', 'id' => 'mo_location_id']) !!}
+                </div>
+            </div>
+        @endif
+        {!! Form::close() !!}
+    @endcomponent
 
     {{-- Cloud sync: status, Sync now and progress bar; layouts/partials/mobile_autosync also syncs every 2 minutes. --}}
     <div id="cloud-sync" class="no-print" style="background: #fff; border: 1px solid #e3e7ed; border-radius: 12px; padding: 12px 16px; margin-bottom: 12px;">
@@ -134,7 +151,7 @@
                                     <form method="POST" action="{{ action([\App\Http\Controllers\MobileOrderController::class, 'reject'], [$r->id]) }}" style="display:inline" class="reject-form">
                                         @csrf
                                         <input type="hidden" name="reason" value="">
-                                        <button type="submit" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-error"><i class="fa fa-times"></i> Reject</button>
+                                        <button type="submit" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-error">Reject</button>
                                     </form>
                                 @endif
                                 <a href="{{ action([\App\Http\Controllers\MobileOrderController::class, 'show'], [$r->id]) }}" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-ghost" title="Details">
@@ -155,6 +172,27 @@
 @section('javascript')
 <script>
     $(document).ready(function () {
+        // Filters: POS date range picker + select2; any change reloads the list.
+        $('#mo_date_range').daterangepicker(dateRangeSettings, function (start, end) {
+            $('#mo_date_range').val(start.format(moment_date_format) + ' ~ ' + end.format(moment_date_format));
+            $('#mo_start_date').val(start.format('YYYY-MM-DD'));
+            $('#mo_end_date').val(end.format('YYYY-MM-DD'));
+            $('#mobile_orders_filter_form').submit();
+        });
+        $('#mo_date_range').on('cancel.daterangepicker', function () {
+            $('#mo_date_range').val('');
+            $('#mo_start_date, #mo_end_date').val('');
+            $('#mobile_orders_filter_form').submit();
+        });
+        @if ($start_date && $end_date)
+            $('#mo_date_range').data('daterangepicker').setStartDate(moment('{{ $start_date }}'));
+            $('#mo_date_range').data('daterangepicker').setEndDate(moment('{{ $end_date }}'));
+            $('#mo_date_range').val(moment('{{ $start_date }}').format(moment_date_format) + ' ~ ' + moment('{{ $end_date }}').format(moment_date_format));
+        @endif
+        $('.mo-filter').on('change', function () { $('#mobile_orders_filter_form').submit(); });
+        @if ($booker || $start_date)
+            $('#collapseFilter').collapse('show'); // show which filters are on
+        @endif
         __currency_convert_recursively($('.content'));
 
         var statusUrl = '{{ action([\App\Http\Controllers\MobileOrderController::class, 'syncStatus']) }}';

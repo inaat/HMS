@@ -12,12 +12,17 @@
     <div class="no-print" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; align-items:center;">
         <button type="button" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-primary tw-text-white" data-toggle="modal" data-target="#route_modal"><i class="fa fa-plus"></i> Add route</button>
         <a href="{{ action([\App\Http\Controllers\BookerRouteController::class, 'exportSheet']) }}" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-primary"><i class="fa fa-download"></i> Download route sheet (Excel)</a>
-        <form method="POST" action="{{ action([\App\Http\Controllers\BookerRouteController::class, 'importSheet']) }}" enctype="multipart/form-data" style="display:inline-flex; gap:6px; align-items:center;">
+        {{-- One button: pick the filled sheet and it uploads at once. --}}
+        <form method="POST" id="sheet_form" action="{{ action([\App\Http\Controllers\BookerRouteController::class, 'importSheet']) }}" enctype="multipart/form-data" style="display:inline;">
             @csrf
-            <input type="file" name="sheet" accept=".csv" required class="form-control input-sm" style="width:230px;">
-            <button type="submit" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-primary"><i class="fa fa-upload"></i> Upload route sheet</button>
+            <label class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-primary" style="margin:0;">
+                <i class="fa fa-upload"></i> Upload route sheet
+                <input type="file" name="sheet" accept=".csv" style="display:none;" onchange="if (this.files.length) { this.form.submit(); }">
+            </label>
         </form>
-        <span class="text-muted" style="margin-left:auto;">{{ $unassigned }} customer(s) not on any route</span>
+        <span class="label {{ $unassigned ? 'label-warning' : 'label-success' }}" style="margin-left:auto; font-size:13px; padding:6px 10px;">
+            <i class="fa fa-users"></i> {{ number_format($unassigned) }} customer(s) not on any route
+        </span>
     </div>
 
     @component('components.widget')

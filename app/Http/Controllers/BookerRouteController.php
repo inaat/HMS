@@ -273,7 +273,17 @@ class BookerRouteController extends Controller
     {
         $this->authorizeAccess();
         $business_id = $this->businessId();
-        $date = $request->input('date') && strtotime($request->input('date')) ? date('Y-m-d', strtotime($request->input('date'))) : date('Y-m-d');
+        $date = date('Y-m-d');
+        $in = (string) $request->input('date');
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $in)) {
+            $date = $in;
+        } elseif ($in !== '') {
+            try {
+                $date = (new \App\Utils\Util())->uf_date($in);
+            } catch (\Exception $e) {
+                // unreadable date: today
+            }
+        }
         $booker = (int) $request->input('booker_id');
         $bookers = $this->bookers();
 
@@ -329,7 +339,9 @@ class BookerRouteController extends Controller
                 'visits' => $rows->count(),
                 'orders' => $rows->where('outcome', 'order')->count(),
                 'sale' => $rows->sum('order_total'),
-                'far' => $rows->where('within_range', 0)->count(),
+                'far' => $rows->filter(function ($v) {
+                    return $v->within_range !== null && ! $v->within_range; // unknown (shop had no location) is not "far"
+                })->count(),
                 'no_gps' => $rows->whereNull('lat')->count(),
                 'first' => $rows->min('started_at'),
                 'last' => $rows->max('ended_at'),

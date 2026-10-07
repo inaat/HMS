@@ -18,17 +18,37 @@
 </section>
 
 <section class="content">
-    <form method="GET" class="no-print" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px;">
-        <input type="date" name="date" value="{{ $date }}" class="form-control input-sm" style="width:auto;" onchange="this.form.submit()">
-        <select name="booker_id" class="form-control input-sm" style="width:auto;" onchange="this.form.submit()">
-            <option value="">All bookers</option>
-            @foreach ($bookers as $id => $name)
-                <option value="{{ $id }}" @if ($booker == $id) selected @endif>{{ $name }}</option>
-            @endforeach
-        </select>
-        <a href="?date={{ date('Y-m-d', strtotime($date.' -1 day')) }}&booker_id={{ $booker ?: '' }}" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline">‹ Previous day</a>
-        <a href="?date={{ date('Y-m-d', strtotime($date.' +1 day')) }}&booker_id={{ $booker ?: '' }}" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline">Next day ›</a>
-    </form>
+    <div class="row no-print">
+        <div class="col-md-12">
+            @component('components.filters', ['title' => __('report.filters')])
+                {!! Form::open(['url' => action([\App\Http\Controllers\BookerRouteController::class, 'visits']), 'method' => 'get', 'id' => 'visits_filter_form']) !!}
+                <div class="col-md-3">
+                    <div class="form-group">
+                        {!! Form::label('visit_date', __('lang_v1.date') . ':') !!}
+                        <div class="input-group">
+                            <span class="input-group-addon"><i class="fa fa-calendar"></i></span>
+                            {!! Form::text('date', @format_date($date), ['class' => 'form-control', 'id' => 'visit_date', 'readonly']) !!}
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-group">
+                        {!! Form::label('booker_id', 'Order booker:') !!}
+                        {!! Form::select('booker_id', $bookers, $booker ?: null, ['class' => 'form-control select2', 'style' => 'width:100%', 'placeholder' => __('lang_v1.all'), 'id' => 'booker_id']) !!}
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="form-group">
+                        <label>&nbsp;</label><br>
+                        <a href="{{ action([\App\Http\Controllers\BookerRouteController::class, 'visits']) }}?date={{ date('Y-m-d', strtotime($date.' -1 day')) }}&booker_id={{ $booker ?: '' }}" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-primary">‹ Previous day</a>
+                        <a href="{{ action([\App\Http\Controllers\BookerRouteController::class, 'visits']) }}?date={{ date('Y-m-d') }}&booker_id={{ $booker ?: '' }}" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-primary">Today</a>
+                        <a href="{{ action([\App\Http\Controllers\BookerRouteController::class, 'visits']) }}?date={{ date('Y-m-d', strtotime($date.' +1 day')) }}&booker_id={{ $booker ?: '' }}" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-primary">Next day ›</a>
+                    </div>
+                </div>
+                {!! Form::close() !!}
+            @endcomponent
+        </div>
+    </div>
 
     @component('components.widget', ['title' => 'Summary — '.\Carbon\Carbon::parse($date)->format('l d M Y')])
         <div class="table-responsive">
@@ -118,6 +138,13 @@
 @endsection
 
 @section('javascript')
+<script>
+    $(function () {
+        // POS date picker (business date format); any change reloads the report.
+        $('#visit_date').datepicker({autoclose: true, endDate: 'today'}).on('changeDate', function () { $('#visits_filter_form').submit(); });
+        $('#booker_id').on('change', function () { $('#visits_filter_form').submit(); });
+    });
+</script>
 @if ($api_key && $points->count())
 <script>
     var visitPoints = {!! json_encode($points) !!};
