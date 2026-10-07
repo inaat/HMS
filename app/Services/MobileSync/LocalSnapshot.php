@@ -26,6 +26,7 @@ class LocalSnapshot
     public function all(): array
     {
         return [
+            'locations' => $this->locations(),
             'users' => $this->users(),
             'products' => $this->products(),
             'customers' => $this->customers(),
@@ -33,8 +34,20 @@ class LocalSnapshot
         ];
     }
 
+    /** Active business locations bookers can book for. */
+    public function locations(): array
+    {
+        return DB::table('business_locations')->where('business_id', $this->business_id)->where('is_active', 1)
+            ->whereNull('deleted_at')->orderBy('id')->get(['id', 'name'])
+            ->map(function ($l) {
+                return ['id' => (int) $l->id, 'name' => $l->name];
+            })->all();
+    }
+
     public function users(): array
     {
+        $active = array_column($this->locations(), 'id');
+
         return DB::table('users as u')
             ->join('model_has_roles as mr', function ($join) {
                 $join->on('mr.model_id', '=', 'u.id')->where('mr.model_type', 'App\User');
@@ -45,8 +58,15 @@ class LocalSnapshot
             ->whereNull('u.deleted_at')
             ->select('u.id', 'u.username', 'u.password', 'u.first_name', 'u.last_name', 'u.allow_login', 'u.status')
             ->get()
-            ->map(function ($u) {
+            ->map(function ($u) use ($active) {
                 $prefix = strtoupper(substr(preg_replace('/[^A-Za-z]/', '', $u->username), 0, 3)) ?: 'B';
+
+                // Locations as the POS user has them (User Management > Access locations); none set = the default one.
+                $permitted = \App\User::find($u->id)->permitted_locations($this->business_id);
+                $locations = $permitted === 'all' ? $active : array_values(array_intersect($active, array_map('intval', (array) $permitted)));
+                if (empty($locations)) {
+                    $locations = [$this->location_id];
+                }
 
                 return [
                     'id' => $u->id,
@@ -55,62 +75,85 @@ class LocalSnapshot
                     'name' => trim($u->first_name.' '.$u->last_name),
                     'code' => $prefix.$u->id,
                     'allow_login' => ($u->allow_login && $u->status === 'active') ? 1 : 0,
+                    'locations' => json_encode($locations),
                 ];
             })
             ->all();
     }
 
+    /**
+     * Every product with its stock and price per location. price / stock_qty / reserved_qty are those of the default
+     * location (MOBILE_SYNC_LOCATION_ID) for older app versions; loc_stock / loc_price hold every location that
+     * sells the product.
+     */
     public function products(): array
     {
-        $location = DB::table('business_locations')->find($this->location_id);
-        $price_group_id = $location->selling_price_group_id ?? null;
+        $locations = DB::table('business_locations')->whereIn('id', array_column($this->locations(), 'id'))->get()->keyBy('id');
 
-        $group_prices = empty($price_group_id) ? collect() : DB::table('variation_group_prices')
-            ->where('price_group_id', $price_group_id)->get()->keyBy('variation_id');
+        $group_prices = [];
+        foreach ($locations as $loc) {
+            if (! empty($loc->selling_price_group_id)) {
+                $group_prices[$loc->id] = DB::table('variation_group_prices')->where('price_group_id', $loc->selling_price_group_id)
+                    ->get()->keyBy('variation_id');
+            }
+        }
 
-        // Sales orders at this location not yet fully invoiced still hold stock.
-        $reserved = DB::table('transaction_sell_lines as sl')
+        // Sales orders not yet fully invoiced still hold stock, per location.
+        $reserved = [];
+        DB::table('transaction_sell_lines as sl')
             ->join('transactions as t', 't.id', '=', 'sl.transaction_id')
             ->where('t.business_id', $this->business_id)
-            ->where('t.location_id', $this->location_id)
             ->where('t.type', 'sales_order')
             ->where('t.status', '!=', 'completed')
-            ->groupBy('sl.variation_id')
-            ->selectRaw('sl.variation_id, SUM(GREATEST(sl.quantity - sl.so_quantity_invoiced, 0)) as qty')
-            ->pluck('qty', 'variation_id');
+            ->groupBy('t.location_id', 'sl.variation_id')
+            ->selectRaw('t.location_id, sl.variation_id, SUM(GREATEST(sl.quantity - sl.so_quantity_invoiced, 0)) as qty')
+            ->get()->each(function ($r) use (&$reserved) {
+                $reserved[$r->variation_id][$r->location_id] = (float) $r->qty;
+            });
+
+        $stock = [];
+        DB::table('variation_location_details')->whereIn('location_id', $locations->keys())->get(['variation_id', 'location_id', 'qty_available'])
+            ->each(function ($r) use (&$stock) {
+                $stock[$r->variation_id][$r->location_id] = (float) $r->qty_available;
+            });
+
+        $sold_at = DB::table('product_locations')->whereIn('location_id', $locations->keys())->get()->groupBy('product_id')
+            ->map(function ($rows) {
+                return $rows->pluck('location_id')->map('intval')->all();
+            });
 
         $rows = DB::table('variations as v')
             ->join('products as p', 'p.id', '=', 'v.product_id')
             ->join('product_variations as pv', 'pv.id', '=', 'v.product_variation_id')
-            ->join('product_locations as pl', function ($join) {
-                $join->on('pl.product_id', '=', 'p.id')->where('pl.location_id', $this->location_id);
-            })
             ->leftJoin('units as un', 'un.id', '=', 'p.unit_id')
             ->leftJoin('categories as c', 'c.id', '=', 'p.category_id')
             ->leftJoin('brands as b', 'b.id', '=', 'p.brand_id')
-            ->leftJoin('variation_location_details as vld', function ($join) {
-                $join->on('vld.variation_id', '=', 'v.id')->where('vld.location_id', $this->location_id);
-            })
             ->where('p.business_id', $this->business_id)
             ->whereIn('p.type', ['single', 'variable'])
             ->whereNull('v.deleted_at')
             ->select(
                 'v.id as variation_id', 'p.id as product_id', 'p.name', 'p.type', 'pv.name as product_variation_name',
                 'v.name as variation_name', 'v.sub_sku', 'un.short_name as unit', 'c.name as category', 'b.name as brand',
-                'v.sell_price_inc_tax', 'p.enable_stock', 'p.is_inactive', 'p.not_for_selling', 'vld.qty_available',
-                'p.unit_id', 'p.sub_unit_ids'
+                'v.sell_price_inc_tax', 'p.enable_stock', 'p.is_inactive', 'p.not_for_selling', 'p.unit_id', 'p.sub_unit_ids'
             )
             ->orderBy('v.id')
             ->get();
 
         $all_units = DB::table('units')->where('business_id', $this->business_id)->whereNull('deleted_at')->orderBy('id')->get();
 
-        return $rows->map(function ($r) use ($group_prices, $reserved, $all_units) {
-            $price = (float) $r->sell_price_inc_tax;
-            $group = $group_prices->get($r->variation_id);
-            if (! empty($group)) {
-                $price = $group->price_type === 'percentage' ? $price * (float) $group->price_inc_tax / 100 : (float) $group->price_inc_tax;
+        return $rows->map(function ($r) use ($group_prices, $reserved, $stock, $sold_at, $all_units) {
+            $loc_stock = [];
+            $loc_price = [];
+            foreach ($sold_at->get($r->product_id, []) as $loc) {
+                $price = (float) $r->sell_price_inc_tax;
+                $group = isset($group_prices[$loc]) ? $group_prices[$loc]->get($r->variation_id) : null;
+                if (! empty($group)) {
+                    $price = $group->price_type === 'percentage' ? $price * (float) $group->price_inc_tax / 100 : (float) $group->price_inc_tax;
+                }
+                $loc_price[$loc] = round($price, 4);
+                $loc_stock[$loc] = [round($stock[$r->variation_id][$loc] ?? 0, 4), round($reserved[$r->variation_id][$loc] ?? 0, 4)];
             }
+            $default = $this->location_id;
 
             $name = $r->name;
             if ($r->type === 'variable') {
@@ -126,12 +169,14 @@ class LocalSnapshot
                 'units' => json_encode($this->productUnits($all_units, $r->unit_id, $r->sub_unit_ids)),
                 'category' => $r->category,
                 'brand' => $r->brand,
-                'price' => round($price, 4),
+                'price' => $loc_price[$default] ?? (empty($loc_price) ? round((float) $r->sell_price_inc_tax, 4) : reset($loc_price)),
                 'enable_stock' => (int) $r->enable_stock,
-                'stock_qty' => round((float) $r->qty_available, 4),
-                'reserved_qty' => round((float) ($reserved[$r->variation_id] ?? 0), 4),
+                'stock_qty' => $loc_stock[$default][0] ?? 0,
+                'reserved_qty' => $loc_stock[$default][1] ?? 0,
+                'loc_stock' => json_encode((object) $loc_stock),
+                'loc_price' => json_encode((object) $loc_price),
                 'image' => null,
-                'active' => ($r->is_inactive || $r->not_for_selling) ? 0 : 1,
+                'active' => ($r->is_inactive || $r->not_for_selling || empty($loc_price)) ? 0 : 1,
             ];
         })->all();
     }

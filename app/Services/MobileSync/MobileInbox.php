@@ -87,6 +87,7 @@ class MobileInbox
                 'booker_id' => $o['user_id'],
                 'number' => $o['number'],
                 'contact_id' => $o['contact_id'] ?: $this->contactForUuid($o['customer_uuid'] ?? null),
+                'location_id' => $o['location_id'] ?? $this->location_id,
                 'customer_uuid' => $o['customer_uuid'] ?? null,
                 'total' => $o['total'],
                 'short_stock' => $o['short_stock'] ? 1 : 0,
@@ -245,7 +246,7 @@ class MobileInbox
             $transaction = $this->transactionUtil->createSellTransaction($this->business_id, [
                 'type' => 'sales_order',
                 'status' => 'ordered',
-                'location_id' => $this->location_id,
+                'location_id' => $row->location_id ?: $this->location_id,
                 'contact_id' => $this->contactOf($row),
                 'transaction_date' => $row->booked_at ?: now(),
                 'final_total' => $invoice_total['final_total'],
@@ -257,7 +258,7 @@ class MobileInbox
                 'source' => 'mobile',
             ], $invoice_total, $this->bookerOrAdmin($row->booker_id), false);
 
-            $this->transactionUtil->createOrUpdateSellLines($transaction, $lines, $this->location_id, false, null, [], false);
+            $this->transactionUtil->createOrUpdateSellLines($transaction, $lines, $transaction->location_id, false, null, [], false);
             $this->transactionUtil->activityLog($transaction, 'added');
 
             DB::table('mobile_inbox')->where('id', $row->id)->update([

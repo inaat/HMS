@@ -53,6 +53,7 @@ class MobileController extends Controller
         return response()->json([
             'token' => $token,
             'user' => ['id' => $user->id, 'name' => $user->name, 'username' => $user->username, 'code' => $user->code],
+            'locations' => $this->bookerLocations($user),
             // The phone numbers its slips itself (works offline); continue after the highest number already sent,
             // so a reinstall or a second phone does not reuse numbers.
             'next_order_seq' => (int) DB::table('mb_orders')->where('user_id', $user->id)->max('seq') + 1,
@@ -96,10 +97,11 @@ class MobileController extends Controller
 
         // price and stock are per base unit (unit); units lists what the booker can sell in, price x multiplier each.
         $products = $changed(DB::table('mb_products'))
-            ->select('variation_id', 'product_id', 'name', 'sku', 'unit', 'units', 'category', 'brand', 'price', 'enable_stock', 'image', 'active')
+            ->select('variation_id', 'product_id', 'name', 'sku', 'unit', 'units', 'category', 'brand', 'price', 'loc_price', 'enable_stock', 'image', 'active')
             ->get()
             ->each(function ($p) {
                 $p->units = json_decode($p->units ?? '[]', true) ?: [];
+                $p->loc_price = json_decode($p->loc_price ?? '', true);
             });
 
         $customers = $changed(DB::table('mb_customers'))
@@ -115,7 +117,7 @@ class MobileController extends Controller
         };
 
         $orders = $changed(DB::table('mb_orders')->where('user_id', $user->id))
-            ->select('uuid', 'number', 'status', 'local_so_no', 'invoice_no', 'reject_reason', 'short_stock', 'total', 'order_date as created', $customer_name('mb_orders'))
+            ->select('uuid', 'number', 'status', 'local_so_no', 'invoice_no', 'reject_reason', 'short_stock', 'total', 'location_id', 'order_date as created', $customer_name('mb_orders'))
             ->get();
 
         $payments = $changed(DB::table('mb_payments')->where('user_id', $user->id))
@@ -127,6 +129,10 @@ class MobileController extends Controller
             'business' => $this->businessName(),
             'stock_updated_at' => DB::table('mb_meta')->where('key', 'last_push_at')->value('value'),
             'stock' => $this->availableStock(),
+            'locations' => $locations = $this->bookerLocations($user),
+            'stock_by_location' => collect($locations)->mapWithKeys(function ($l) {
+                return [$l['id'] => (object) $this->availableStock($l['id'])];
+            }),
             'products' => $products,
             'customers' => $customers,
             'invoices' => $invoices,
@@ -208,8 +214,15 @@ class MobileController extends Controller
             return ['uuid' => $uuid, 'result' => 'error', 'message' => 'Order has no items'];
         }
 
+        // The location the order is for: one of the booker's locations (their first one when the app sends none).
+        $allowed = array_column($this->bookerLocations($user), 'id');
+        $location = (int) ($row['location_id'] ?? 0) ?: $allowed[0];
+        if (! in_array($location, $allowed, true)) {
+            return ['uuid' => $uuid, 'result' => 'error', 'message' => 'You may not book for this location'];
+        }
+
         $products = DB::table('mb_products')->whereIn('variation_id', array_column($lines, 'variation_id'))->get()->keyBy('variation_id');
-        $available = $this->availableStock();
+        $available = $this->availableStock($location);
 
         $total = 0;
         $short = false;
@@ -234,7 +247,7 @@ class MobileController extends Controller
                 return ['uuid' => $uuid, 'result' => 'error', 'message' => $product->name.': '.$unit['name'].' quantity must be a whole number'];
             }
             // Fixed prices: the app sends the price it showed per chosen unit; staff check it at approval.
-            $sub_price = isset($l['unit_price']) && is_numeric($l['unit_price']) ? round((float) $l['unit_price'], 4) : round($product->price * $multiplier, 4);
+            $sub_price = isset($l['unit_price']) && is_numeric($l['unit_price']) ? round((float) $l['unit_price'], 4) : round((json_decode($product->loc_price ?? '', true)[$location] ?? $product->price) * $multiplier, 4);
             $qty = round($sub_qty * $multiplier, 4);
 
             $insert_lines[] = [
@@ -253,17 +266,19 @@ class MobileController extends Controller
         }
         foreach ($qty_by_variation as $variation_id => $qty) {
             if ($products[$variation_id]->enable_stock && $qty > ($available[$variation_id] ?? 0)) {
+                // includes products not stocked at this location
                 $short = true;
             }
         }
 
-        DB::transaction(function () use ($user, $row, $uuid, $customer, $total, $short, $insert_lines) {
+        DB::transaction(function () use ($user, $row, $uuid, $customer, $total, $short, $insert_lines, $location) {
             $order_id = DB::table('mb_orders')->insertGetId([
                 'uuid' => $uuid,
                 'user_id' => $user->id,
                 'number' => $this->str($row, 'number') ?? $user->code.'-'.(int) ($row['seq'] ?? 0),
                 'seq' => max(0, (int) ($row['seq'] ?? 0)),
                 'contact_id' => $customer['contact_id'],
+                'location_id' => $location,
                 'customer_uuid' => $customer['customer_uuid'],
                 'order_date' => $this->dateTime($row, 'order_date'),
                 'note' => $this->str($row, 'note', 5000),
@@ -357,23 +372,46 @@ class MobileController extends Controller
      * Free stock per variation: what the local PC last reported, less local sales orders not yet invoiced, less
      * booker orders the local PC has not turned into sales orders yet.
      */
-    private function availableStock(): array
+    private function availableStock(?int $location = null): array
     {
+        $default = (int) config('mobile_sync.location_id');
+        $location = $location ?: $default;
         $waiting = DB::table('mb_order_lines as l')
             ->join('mb_orders as o', 'o.id', '=', 'l.order_id')
             ->whereIn('o.status', ['pending', 'received'])
+            ->whereRaw('COALESCE(o.location_id, ?) = ?', [$default, $location])
             ->groupBy('l.variation_id')
             ->selectRaw('l.variation_id, SUM(l.quantity) as qty')
             ->pluck('qty', 'variation_id');
 
         $stock = [];
-        foreach (DB::table('mb_products')->where('active', 1)->get(['variation_id', 'enable_stock', 'stock_qty', 'reserved_qty']) as $p) {
-            $stock[$p->variation_id] = $p->enable_stock
-                ? round($p->stock_qty - $p->reserved_qty - (float) ($waiting[$p->variation_id] ?? 0), 4)
-                : null;
+        foreach (DB::table('mb_products')->where('active', 1)->get(['variation_id', 'enable_stock', 'stock_qty', 'reserved_qty', 'loc_stock']) as $p) {
+            $per = json_decode($p->loc_stock ?? '', true);
+            if (is_array($per)) {
+                if (! isset($per[$location])) {
+                    continue; // not sold at this location
+                }
+                [$qty, $reserved] = $per[$location];
+            } elseif ($location === $default) {
+                [$qty, $reserved] = [$p->stock_qty, $p->reserved_qty];
+            } else {
+                continue;
+            }
+            $stock[$p->variation_id] = $p->enable_stock ? round($qty - $reserved - (float) ($waiting[$p->variation_id] ?? 0), 4) : null;
         }
 
         return $stock;
+    }
+
+    /** Locations this booker may book for, [{id, name}], as their POS user has them (default location if none). */
+    private function bookerLocations($user): array
+    {
+        $ids = json_decode((string) DB::table('mb_users')->where('id', $user->id)->value('locations'), true) ?: [(int) config('mobile_sync.location_id')];
+        $names = collect(json_decode((string) DB::table('mb_meta')->where('key', 'locations')->value('value'), true) ?: [])->pluck('name', 'id');
+
+        return array_map(function ($id) use ($names) {
+            return ['id' => (int) $id, 'name' => $names[$id] ?? 'Location '.$id];
+        }, $ids);
     }
 
     /** ['contact_id' => .., 'customer_uuid' => ..] or an error message. */

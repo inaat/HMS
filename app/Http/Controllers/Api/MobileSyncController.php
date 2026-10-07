@@ -30,7 +30,7 @@ class MobileSyncController extends Controller
         DB::transaction(function () use ($request, &$result) {
             if (is_array($request->input('users'))) {
                 $result['users'] = $this->syncSet('mb_users', 'id', $request->input('users'),
-                    ['username', 'password', 'name', 'code', 'allow_login'], ['allow_login' => 0]);
+                    ['username', 'password', 'name', 'code', 'allow_login', 'locations'], ['allow_login' => 0]);
 
                 // A booker who is blocked or removed locally loses every phone login at once.
                 $blocked = DB::table('mb_users')->where('allow_login', 0)->pluck('id');
@@ -39,7 +39,7 @@ class MobileSyncController extends Controller
 
             if (is_array($request->input('products'))) {
                 $result['products'] = $this->syncSet('mb_products', 'variation_id', $request->input('products'),
-                    ['product_id', 'name', 'sku', 'unit', 'units', 'category', 'brand', 'price', 'enable_stock', 'stock_qty', 'reserved_qty', 'image', 'active'],
+                    ['product_id', 'name', 'sku', 'unit', 'units', 'category', 'brand', 'price', 'enable_stock', 'stock_qty', 'reserved_qty', 'loc_stock', 'loc_price', 'image', 'active'],
                     ['active' => 0]);
             }
 
@@ -63,6 +63,10 @@ class MobileSyncController extends Controller
                 $result['invoices'] = $this->syncSet('mb_invoices', 'id', $request->input('invoices'),
                     ['contact_id', 'invoice_no', 'transaction_date', 'final_total', 'paid', 'due', 'active'],
                     ['active' => 0]);
+            }
+
+            if (is_array($request->input('locations'))) {
+                DB::table('mb_meta')->updateOrInsert(['key' => 'locations'], ['value' => json_encode($request->input('locations')), 'updated_at' => now()]);
             }
 
             DB::table('mb_meta')->updateOrInsert(['key' => 'last_push_at'], ['value' => now()->toDateTimeString(), 'updated_at' => now()]);

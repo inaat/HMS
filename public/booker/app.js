@@ -52,7 +52,7 @@ const S = {
 };
 
 async function loadState() {
-  for (const k of ['business', 'token', 'user', 'since', 'stock', 'stockAt', 'lastSync', 'seq', 'draft']) {
+  for (const k of ['locations', 'location', 'stockByLoc', 'business', 'token', 'user', 'since', 'stock', 'stockAt', 'lastSync', 'seq', 'draft']) {
     const v = await db.get(k);
     if (v !== undefined && v !== null) S[k] = v;
   }
@@ -125,16 +125,31 @@ async function api(method, path, body) {
 }
 
 // ---------- customers / stock ----------
+/** Location the booker is booking for (several locations: their choice; one: that one). */
+function curLocation() {
+  const ids = (S.locations || []).map((l) => l.id);
+  return ids.includes(S.location) ? S.location : (ids[0] || null);
+}
+const locName = (id) => ((S.locations || []).find((l) => l.id === id) || {}).name || '';
+/** Price of a product at the current location (base unit). */
+function priceOf(p) {
+  const loc = curLocation();
+  return p.loc_price && loc && p.loc_price[loc] !== undefined ? num(p.loc_price[loc]) : num(p.price);
+}
+/** Sold at the current location? (Older data without per-location prices: yes.) */
+const soldHere = (p) => !p.loc_price || !curLocation() || p.loc_price[curLocation()] !== undefined;
+
 const custKey = (row) => (row.local_id ? 'c' + row.local_id : 'u' + row.uuid);
 const custName = (c) => (c ? c.name + (c.business_name ? ' (' + c.business_name + ')' : '') : '');
 
 /** Free stock in base units for a variation: what the server says, less this phone's unsent orders. */
 function freeStock(variation_id) {
-  const s = S.stock[variation_id];
+  const map = (S.stockByLoc && S.stockByLoc[curLocation()]) || S.stock || {};
+  const s = map[variation_id];
   if (s === null || s === undefined) return null;
   let held = 0;
   S.outbox.forEach((o) => {
-    if (o.type === 'order') o.lines.forEach((l) => { if (l.variation_id === variation_id) held += num(l.quantity) * num(l.multiplier || 1); });
+    if (o.type === 'order' && (o.location_id || curLocation()) === curLocation()) o.lines.forEach((l) => { if (l.variation_id === variation_id) held += num(l.quantity) * num(l.multiplier || 1); });
   });
   return num(s) - held;
 }
@@ -248,6 +263,8 @@ async function download() {
 
   if (data.business) { S.business = data.business; await db.set('business', data.business); }
   S.stock = data.stock || {};
+  if (data.locations) { S.locations = data.locations; await db.set('locations', S.locations); }
+  if (data.stock_by_location) { S.stockByLoc = data.stock_by_location; await db.set('stockByLoc', S.stockByLoc); }
   S.stockAt = data.stock_updated_at;
   S.since = data.server_time;
   await Promise.all([db.set('stock', S.stock), db.set('stockAt', S.stockAt), db.set('since', S.since)]);
@@ -312,7 +329,7 @@ function homeView() {
   const customers = [...S.customers.values()];
   const totalDue = customers.reduce((s, c) => s + Math.max(0, num(c.balance_due)), 0);
   const customersWithDue = customers.filter((c) => num(c.balance_due) > 0).length;
-  const inStock = [...S.products.values()].filter((p) => !p.enable_stock || (freeStock(p.variation_id) || 0) > 0).length;
+  const inStock = [...S.products.values()].filter(soldHere).filter((p) => !p.enable_stock || (freeStock(p.variation_id) || 0) > 0).length;
 
   return `
     <div class="card" style="display:flex;align-items:center;gap:12px">
@@ -377,6 +394,7 @@ function orderView() {
   const c = S.draft.customer ? findCustomer(S.draft.customer) : null;
   return `<div class="pos-wrap">
     <div class="pos-box">
+      ${(S.locations || []).length > 1 ? `<div class="loc-pick">📍 Booking for <select data-act="pos-location">${S.locations.map((l) => `<option value="${l.id}" ${l.id === curLocation() ? 'selected' : ''}>${h(l.name)}</option>`).join('')}</select></div>` : ''}
       <div class="pos-top">
         <div class="ig-wrap">
           <div class="ig">
@@ -407,7 +425,7 @@ function lineInfo(l) {
   if (!p) return null;
   const unit = (p.units || []).find((u) => u.id === l.unit_id) || { id: null, name: p.unit, multiplier: 1 };
   // The booker may change the price of a line (l.price, per chosen unit); otherwise the list price.
-  const list = num(p.price) * num(unit.multiplier);
+  const list = priceOf(p) * num(unit.multiplier);
   const price = l.price !== undefined && l.price !== null && l.price !== '' ? num(l.price) : list;
   const free = freeStock(p.variation_id);
   return { p, unit, price, list, total: price * num(l.qty), short: p.enable_stock && free !== null && num(l.qty) * num(unit.multiplier) > free };
@@ -453,14 +471,14 @@ function cartTotal() {
 function productDropdown() {
   const q = (S.posQuery || '').trim();
   if (!q) return '';
-  const list = [...S.products.values()].filter((p) => match([p.name, p.sku, p.brand].join(' '), q))
+  const list = [...S.products.values()].filter((p) => soldHere(p) && match([p.name, p.sku, p.brand].join(' '), q))
     .sort((a, b) => a.name.localeCompare(b.name)).slice(0, 15);
   if (!list.length) return '<div class="dd-item muted">No product found</div>';
   return list.map((p, n) => {
     const unit = (p.units || [])[0] || { name: p.unit, multiplier: 1 };
     return `<div class="dd-item ${n === 0 ? 'first' : ''}" data-act="add" data-v="${p.variation_id}">
       <div class="grow"><b>${h(p.name)}</b><div class="muted">${h(p.sku || '')}${p.brand ? ' · ' + h(p.brand) : ''} · ${stockText(p, unit) || ''}</div></div>
-      <b>${money(num(p.price) * num(unit.multiplier))}<span class="muted"> / ${h(unit.name)}</span></b></div>`;
+      <b>${money(priceOf(p) * num(unit.multiplier))}<span class="muted"> / ${h(unit.name)}</span></b></div>`;
   }).join('');
 }
 
@@ -562,7 +580,7 @@ function productRows(q) {
       const unit = (p.units || [])[0] || { name: p.unit, multiplier: 1 };
       return `<div class="item tap" data-act="choose-product" data-v="${p.variation_id}"><div class="row"><div class="grow"><b>${h(p.name)}</b>
         <div class="muted">${h(p.sku || '')} ${h(p.brand || '')}</div></div>
-        <div class="right">${money(num(p.price) * num(unit.multiplier))}<div class="muted">${h(unit.name)} · ${stockText(p, unit) || '—'}</div></div></div></div>`;
+        <div class="right">${money(priceOf(p) * num(unit.multiplier))}<div class="muted">${h(unit.name)} · ${stockText(p, unit) || '—'}</div></div></div></div>`;
     }).join('') || '<div class="empty">No products. Sync to download them.</div>';
 }
 
@@ -623,7 +641,9 @@ function slipText(o) {
   const out = [];
   if (S.business) out.push(S.business.toUpperCase(), line);
   if (o.type === 'order') {
-    out.push('ORDER SLIP ' + o.number, 'Date: ' + (o.order_date || o.created || ''), 'Customer: ' + (o.customer_name || ''), line);
+    out.push('ORDER SLIP ' + o.number, 'Date: ' + (o.order_date || o.created || ''), 'Customer: ' + (o.customer_name || ''));
+    if ((S.locations || []).length > 1 && (o.location_name || locName(o.location_id))) out.push('Location: ' + (o.location_name || locName(o.location_id)));
+    out.push(line);
     (o.lines || []).forEach((l) => {
       out.push(l.name || ('Item ' + l.variation_id));
       out.push(`  ${qtyFmt(l.quantity)} ${l.unit_name || ''} x ${money(l.unit_price)} = ${money(num(l.quantity) * num(l.unit_price))}`);
@@ -700,6 +720,7 @@ async function saveOrder() {
   const order = {
     uuid: uuid(), type: 'order', number: `${S.user.code}-${pad(seq, 4)}`, seq,
     contact_id: c.local_id || null, customer_uuid: c.local_id ? null : c.uuid, customer_name: custName(c),
+    location_id: curLocation(), location_name: locName(curLocation()),
     order_date: nowStr(), note: d.note, lines, total, short_stock: short, created: nowStr(),
   };
   await addToOutbox(order);
@@ -764,6 +785,7 @@ async function login(form) {
     S.user = res.user;
     // Never reuse a slip number already sent (reinstall, second phone).
     S.seq = { order: Math.max(S.seq.order || 1, res.next_order_seq), receipt: Math.max(S.seq.receipt || 1, res.next_receipt_seq) };
+    if (res.locations) { S.locations = res.locations; await db.set('locations', S.locations); }
     await Promise.all([db.set('token', S.token), db.set('user', S.user), db.set('seq', S.seq)]);
     render();
     await sync(true);
@@ -841,6 +863,7 @@ document.addEventListener('click', async (e) => {
 document.addEventListener('change', async (e) => {
   const el = e.target;
   const i = Number(el.dataset.i);
+  if (el.dataset.act === 'pos-location') { S.location = Number(el.value); await db.set('location', S.location); render(); toast('Booking for ' + locName(S.location)); }
   if (el.dataset.act === 'line-unit') { S.draft.lines[i].unit_id = Number(el.value); delete S.draft.lines[i].price; await saveDraft(); refreshPos(); }
   if (el.dataset.act === 'price-in') {
     const v = String(el.value).replace(/,/g, '').trim();

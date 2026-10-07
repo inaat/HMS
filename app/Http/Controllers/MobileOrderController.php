@@ -21,6 +21,16 @@ class MobileOrderController extends Controller
         }
     }
 
+    /** Staff may only act on orders of the locations they can access in the POS. */
+    private function authorizeRow($id): void
+    {
+        $location = DB::table('mobile_inbox')->where('id', $id)->value('location_id') ?: (int) config('mobile_sync.location_id');
+        $permitted = auth()->user()->permitted_locations();
+        if ($permitted !== 'all' && ! in_array($location, (array) $permitted)) {
+            abort(403, 'Unauthorized action.');
+        }
+    }
+
     private function inbox(): MobileInbox
     {
         return new MobileInbox(request()->session()->get('user.business_id'), config('mobile_sync.location_id'));
@@ -33,12 +43,22 @@ class MobileOrderController extends Controller
         $kind = $request->input('kind') === 'payment' ? 'payment' : 'order';
         $status = $request->input('status', 'waiting');
 
+        // Several locations: staff see the orders of the locations they may access in the POS.
+        $default = (int) config('mobile_sync.location_id');
+        $locations = \App\BusinessLocation::forDropdown(request()->session()->get('user.business_id'));
+        $location = (int) $request->input('location_id');
+        if (! $locations->has($location)) {
+            $location = 0;
+        }
+
         $query = DB::table('mobile_inbox as m')
             ->leftJoin('contacts as c', 'c.id', '=', 'm.contact_id')
             ->leftJoin('users as u', 'u.id', '=', 'm.booker_id')
             ->leftJoin('users as d', 'd.id', '=', 'm.decided_by')
+            ->leftJoin('business_locations as bl', 'bl.id', '=', DB::raw("COALESCE(m.location_id, {$default})"))
             ->where('m.kind', $kind)
-            ->select('m.*', 'c.name as customer', 'c.supplier_business_name', 'c.mobile as customer_mobile',
+            ->whereIn(DB::raw("COALESCE(m.location_id, {$default})"), $location ? [$location] : array_keys($locations->toArray()))
+            ->select('m.*', 'bl.name as location_name', 'c.name as customer', 'c.supplier_business_name', 'c.mobile as customer_mobile',
                 DB::raw("TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as booker"),
                 DB::raw("TRIM(CONCAT(COALESCE(d.first_name, ''), ' ', COALESCE(d.last_name, ''))) as decided_by_name"))
             ->orderByDesc('m.id');
@@ -50,12 +70,13 @@ class MobileOrderController extends Controller
         $counts = DB::table('mobile_inbox')->where('status', 'waiting')->groupBy('kind')->selectRaw('kind, COUNT(*) as c')->pluck('c', 'kind');
         $last_run = json_decode((string) DB::table('system')->where('key', 'mobile_sync_last_run')->value('value'), true);
 
-        return view('mobile_order.index', compact('rows', 'kind', 'status', 'counts', 'last_run'));
+        return view('mobile_order.index', compact('rows', 'kind', 'status', 'counts', 'last_run', 'locations', 'location'));
     }
 
     public function show($id)
     {
         $this->authorizeAccess();
+        $this->authorizeRow($id);
 
         $row = DB::table('mobile_inbox as m')
             ->leftJoin('contacts as c', 'c.id', '=', 'm.contact_id')
@@ -71,7 +92,7 @@ class MobileOrderController extends Controller
         $lines = [];
         $invoices = collect();
         if ($row->kind === 'order') {
-            $location_id = config('mobile_sync.location_id');
+            $location_id = $row->location_id ?: config('mobile_sync.location_id');
             foreach ($data['lines'] ?? [] as $l) {
                 $v = DB::table('variations as v')
                     ->join('products as p', 'p.id', '=', 'v.product_id')
@@ -100,6 +121,7 @@ class MobileOrderController extends Controller
     public function approve($id)
     {
         $this->authorizeAccess();
+        $this->authorizeRow($id);
 
         try {
             $row = DB::table('mobile_inbox')->find($id);
@@ -123,6 +145,7 @@ class MobileOrderController extends Controller
     public function invoice($id)
     {
         $this->authorizeAccess();
+        $this->authorizeRow($id);
 
         try {
             $sell = $this->inbox()->invoiceOrder($id, auth()->id());
@@ -155,6 +178,7 @@ class MobileOrderController extends Controller
     public function reject(Request $request, $id)
     {
         $this->authorizeAccess();
+        $this->authorizeRow($id);
         $request->validate(['reason' => 'required|string|max:191']);
 
         try {

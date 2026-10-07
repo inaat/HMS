@@ -13,16 +13,24 @@
 
 <section class="content">
     <div class="no-print" style="margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-        <a href="?kind=order&status={{ $status }}" class="tw-dw-btn tw-dw-btn-sm {{ $kind == 'order' ? 'tw-dw-btn-primary tw-text-white' : 'tw-dw-btn-outline tw-dw-btn-primary' }}">
+        <a href="?kind=order&status={{ $status }}&location_id={{ $location ?: '' }}" class="tw-dw-btn tw-dw-btn-sm {{ $kind == 'order' ? 'tw-dw-btn-primary tw-text-white' : 'tw-dw-btn-outline tw-dw-btn-primary' }}">
             <i class="fa fa-shopping-cart"></i> Orders
             @if (! empty($counts['order'])) <span class="label label-warning">{{ $counts['order'] }}</span> @endif
         </a>
-        <a href="?kind=payment&status={{ $status }}" class="tw-dw-btn tw-dw-btn-sm {{ $kind == 'payment' ? 'tw-dw-btn-primary tw-text-white' : 'tw-dw-btn-outline tw-dw-btn-primary' }}">
+        <a href="?kind=payment&status={{ $status }}&location_id={{ $location ?: '' }}" class="tw-dw-btn tw-dw-btn-sm {{ $kind == 'payment' ? 'tw-dw-btn-primary tw-text-white' : 'tw-dw-btn-outline tw-dw-btn-primary' }}">
             <i class="fa fa-money-bill-wave"></i> Payments
             @if (! empty($counts['payment'])) <span class="label label-warning">{{ $counts['payment'] }}</span> @endif
         </a>
         <form method="GET" style="display: flex; gap: 8px; align-items: center; margin-left: 12px;">
             <input type="hidden" name="kind" value="{{ $kind }}">
+            @if ($locations->count() > 1)
+                <select name="location_id" class="form-control input-sm" onchange="this.form.submit()">
+                    <option value="">All my locations</option>
+                    @foreach ($locations as $id => $name)
+                        <option value="{{ $id }}" @if ($location == $id) selected @endif>{{ $name }}</option>
+                    @endforeach
+                </select>
+            @endif
             <select name="status" class="form-control input-sm" onchange="this.form.submit()">
                 @foreach (['waiting' => 'Waiting approval', 'approved' => 'Approved', 'invoiced' => 'Invoiced', 'rejected' => 'Rejected', 'all' => 'All'] as $k => $label)
                     @if ($kind == 'payment' && $k == 'invoiced') @continue @endif
@@ -55,6 +63,7 @@
                         <th>{{ $kind == 'order' ? 'Slip no' : 'Receipt no' }}</th>
                         <th>Date</th>
                         <th>Booker</th>
+                        @if ($locations->count() > 1)<th>Location</th>@endif
                         <th>Customer</th>
                         <th class="text-right">{{ $kind == 'order' ? 'Total' : 'Amount' }}</th>
                         <th>Status</th>
@@ -71,6 +80,7 @@
                             </td>
                             <td>{{ @format_datetime($r->booked_at) }}</td>
                             <td>{{ $r->booker ?: '#'.$r->booker_id }}</td>
+                            @if ($locations->count() > 1)<td>{{ $r->location_name }}</td>@endif
                             <td>
                                 {{ $r->customer ?? '—' }}
                                 @if ($r->supplier_business_name) <br><small class="text-muted">{{ $r->supplier_business_name }}</small> @endif
@@ -111,7 +121,7 @@
                             </td>
                         </tr>
                     @empty
-                        <tr><td colspan="8" class="text-center text-muted">Nothing here.</td></tr>
+                        <tr><td colspan="9" class="text-center text-muted">Nothing here.</td></tr>
                     @endforelse
                 </tbody>
             </table>
