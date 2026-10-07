@@ -56,7 +56,7 @@ class MobileSyncRun extends Command
             $response = $this->cloud()->get('/api/sync/inbox');
             if ($response->successful()) {
                 $added = $inbox->store((array) $response->json());
-                $this->line(sprintf('collected  customers %d  orders %d  payments %d  shop edits %d', $added['customers'], $added['orders'], $added['payments'], $added['shop_edits']));
+                $this->line(sprintf('collected  customers %d  orders %d  payments %d  shop edits %d  visits %d', $added['customers'], $added['orders'], $added['payments'], $added['shop_edits'], $added['visits']));
                 $this->downloadPhotos($inbox->missingPhotos());
             } else {
                 $this->failed('Collect', $response);
@@ -69,7 +69,10 @@ class MobileSyncRun extends Command
             if ($inbox->customerUpdateAcks) {
                 $ack['customer_updates'] = $inbox->customerUpdateAcks;
             }
-            if (! empty($ack['ids']) || ! empty($ack['customer_updates'])) {
+            if ($inbox->visitAcks) {
+                $ack['visits'] = $inbox->visitAcks;
+            }
+            if (! empty($ack['ids']) || ! empty($ack['customer_updates']) || ! empty($ack['visits'])) {
                 $ids = $ack['ids'];
                 unset($ack['ids']);
                 $response = $this->cloud()->post('/api/sync/ack', $ack);

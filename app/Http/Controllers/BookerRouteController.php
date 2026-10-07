@@ -261,6 +261,88 @@ class BookerRouteController extends Controller
         return redirect()->back()->with('status', ['success' => empty($errors) ? 1 : (int) ($updated > 0), 'msg' => $msg]);
     }
 
+    /**
+     * Sell > Booker visits: who visited which shop and when, how far from the shop's saved location, with photo and
+     * result; per booker the day's route coverage (planned shops visited) and strike rate (visits with an order).
+     */
+    public function visits(Request $request)
+    {
+        $this->authorizeAccess();
+        $business_id = $this->businessId();
+        $date = $request->input('date') && strtotime($request->input('date')) ? date('Y-m-d', strtotime($request->input('date'))) : date('Y-m-d');
+        $booker = (int) $request->input('booker_id');
+        $bookers = $this->bookers();
+
+        $visits = DB::table('booker_visits as v')
+            ->leftJoin('contacts as c', 'c.id', '=', 'v.contact_id')
+            ->leftJoin('booker_routes as r', 'r.id', '=', 'v.route_id')
+            ->where('v.business_id', $business_id)
+            ->whereDate('v.started_at', $date)
+            ->when($booker, function ($q) use ($booker) {
+                $q->where('v.booker_id', $booker);
+            })
+            ->select('v.*', 'c.name as shop', 'c.supplier_business_name', 'c.position as shop_position', 'r.name as route_name')
+            ->orderBy('v.booker_id')->orderBy('v.started_at')
+            ->get();
+
+        // Order value of each visit (orders the booker made during it).
+        $uuids = $visits->flatMap(function ($v) {
+            return (json_decode($v->order_uuids ?? '', true) ?: [])['orders'] ?? [];
+        })->all();
+        $totals = $uuids ? DB::table('mobile_inbox')->whereIn('uuid', $uuids)->pluck('total', 'uuid') : collect();
+        foreach ($visits as $v) {
+            $ids = (json_decode($v->order_uuids ?? '', true) ?: [])['orders'] ?? [];
+            $v->order_total = collect($ids)->sum(function ($u) use ($totals) {
+                return (float) ($totals[$u] ?? 0);
+            });
+            $v->minutes = $v->ended_at ? max(0, round((strtotime($v->ended_at) - strtotime($v->started_at)) / 60)) : null;
+        }
+
+        // Per booker: planned shops = shops on their routes for this weekday.
+        $weekday = (int) date('N', strtotime($date));
+        $summary = [];
+        foreach ($visits->groupBy('booker_id') as $id => $rows) {
+            $summary[$id] = ['visits' => $rows->count()];
+        }
+        foreach (array_keys($bookers) as $id) {
+            if ($booker && $booker != $id) {
+                continue;
+            }
+            $route_ids = DB::table('booker_routes')->where('business_id', $business_id)->where('booker_id', $id)->where('is_active', 1)->get(['id', 'days'])
+                ->filter(function ($r) use ($weekday) {
+                    return in_array($weekday, json_decode($r->days ?? '[]', true) ?: []);
+                })->pluck('id');
+            $planned = $route_ids->isEmpty() ? collect() : DB::table('contacts')->whereIn('route_id', $route_ids)->whereNull('deleted_at')->pluck('id');
+            if ($planned->isEmpty() && empty($summary[$id])) {
+                continue;
+            }
+            $rows = $visits->where('booker_id', $id);
+            $visited = $rows->pluck('contact_id')->filter()->unique();
+            $summary[$id] = [
+                'name' => $bookers[$id],
+                'planned' => $planned->count(),
+                'planned_visited' => $visited->intersect($planned)->count(),
+                'visits' => $rows->count(),
+                'orders' => $rows->where('outcome', 'order')->count(),
+                'sale' => $rows->sum('order_total'),
+                'far' => $rows->where('within_range', 0)->count(),
+                'no_gps' => $rows->whereNull('lat')->count(),
+                'first' => $rows->min('started_at'),
+                'last' => $rows->max('ended_at'),
+            ];
+        }
+        foreach ($summary as $id => $s) {
+            if (! isset($s['name'])) {
+                unset($summary[$id]);
+            }
+        }
+
+        return view('booker_route.visits', [
+            'visits' => $visits, 'summary' => $summary, 'bookers' => $bookers, 'date' => $date, 'booker' => $booker,
+            'radius' => (int) config('mobile_sync.visit_radius_m', 100),
+        ]);
+    }
+
     /** Customers search for "Add shops" (select2 ajax): not on this route yet. */
     public function searchCustomers(Request $request, $id)
     {

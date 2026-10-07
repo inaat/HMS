@@ -298,6 +298,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::get('/commission-payouts/{id}', [\App\Http\Controllers\CommissionPayoutController::class, 'show']);
     Route::post('/commission-payouts/{id}/unlock', [\App\Http\Controllers\CommissionPayoutController::class, 'unlock']);
     Route::get('/mobile-orders', [\App\Http\Controllers\MobileOrderController::class, 'index']);
+    Route::get('/booker-visits', [\App\Http\Controllers\BookerRouteController::class, 'visits']);
     Route::get('/booker-routes/sheet', [\App\Http\Controllers\BookerRouteController::class, 'exportSheet']);
     Route::post('/booker-routes/sheet', [\App\Http\Controllers\BookerRouteController::class, 'importSheet']);
     Route::get('/booker-routes/{id}/customers', [\App\Http\Controllers\BookerRouteController::class, 'searchCustomers']);

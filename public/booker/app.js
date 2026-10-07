@@ -48,11 +48,11 @@ const db = {
 const S = {
   token: null, user: null, since: null, stock: {}, stockAt: null, lastSync: null, seq: { order: 1, receipt: 1 },
   products: new Map(), customers: new Map(), invoices: new Map(), outbox: new Map(), history: new Map(),
-  draft: { customer: null, lines: [], note: '' }, routes: [], outletTypes: [], editsSent: {}, tab: 'home', cartOpen: false, syncing: false, online: navigator.onLine,
+  draft: { customer: null, lines: [], note: '' }, routes: [], outletTypes: [], editsSent: {}, visit: null, visits: [], radius: 100, tab: 'home', cartOpen: false, syncing: false, online: navigator.onLine,
 };
 
 async function loadState() {
-  for (const k of ['locations', 'location', 'stockByLoc', 'business', 'token', 'user', 'since', 'stock', 'stockAt', 'lastSync', 'seq', 'draft', 'routes', 'outletTypes', 'editsSent']) {
+  for (const k of ['locations', 'location', 'stockByLoc', 'business', 'token', 'user', 'since', 'stock', 'stockAt', 'lastSync', 'seq', 'draft', 'routes', 'outletTypes', 'editsSent', 'visit', 'visits', 'radius']) {
     const v = await db.get(k);
     if (v !== undefined && v !== null) S[k] = v;
   }
@@ -211,8 +211,8 @@ async function sync(manual) {
 async function upload() {
   const items = [...S.outbox.values()].filter((o) => o.state !== 'error').sort((a, b) => a.created.localeCompare(b.created));
   if (!items.length) return;
-  const sets = { customer: 'customers', order: 'orders', payment: 'payments', customer_update: 'customer_updates' };
-  const body = { customers: [], orders: [], payments: [], customer_updates: [] };
+  const sets = { customer: 'customers', order: 'orders', payment: 'payments', customer_update: 'customer_updates', visit: 'visits' };
+  const body = { customers: [], orders: [], payments: [], customer_updates: [], visits: [] };
   items.forEach((o) => body[sets[o.type]].push(o));
   const res = await api('POST', '/upload', body);
 
@@ -273,6 +273,7 @@ async function download() {
 
   if (data.business) { S.business = data.business; await db.set('business', data.business); }
   if (data.routes) { S.routes = data.routes; await db.set('routes', S.routes); }
+  if (data.visit_radius_m) { S.radius = num(data.visit_radius_m); await db.set('radius', S.radius); }
   if (data.outlet_types) { S.outletTypes = data.outlet_types; await db.set('outletTypes', S.outletTypes); }
   S.stock = data.stock || {};
   if (data.locations) { S.locations = data.locations; await db.set('locations', S.locations); }
@@ -306,6 +307,7 @@ function render() {
   app.innerHTML = `
     <header><h1>${h(title)}</h1><span class="hdr-user">${h(S.user.name)}</span><button data-act="sync">${S.syncing ? 'Syncing…' : '⟳ Sync'}</button></header>
     <div class="bar" id="bar"></div>
+    ${visitBanner()}
     <main class="${S.tab === 'order' ? 'pos' : ''}">${views[S.tab]()}</main>
     <nav>
       ${[['home', '🏠', 'Home'], ['order', '🛒', 'New order'], ['customers', '👥', 'Customers'], ['activity', '📋', 'My work' + (waiting ? ' (' + waiting + ')' : '')], ['more', '⚙️', 'Account']]
@@ -325,7 +327,7 @@ function refreshPos() {
 // ---------- dashboard ----------
 function homeView() {
   const today = nowStr().slice(0, 10);
-  const all = [...S.outbox.values()].filter((o) => o.type !== 'customer').map((o) => ({ ...o, status: 'not sent' })).concat([...S.history.values()]);
+  const all = [...S.outbox.values()].filter((o) => o.type === 'order' || o.type === 'payment').map((o) => ({ ...o, status: 'not sent' })).concat([...S.history.values()]);
   const todays = all.filter((o) => String(o.created || '').startsWith(today) && o.status !== 'rejected');
   const booked = todays.filter((o) => o.type === 'order');
   const collected = todays.filter((o) => o.type === 'payment');
@@ -349,6 +351,7 @@ function homeView() {
         <div class="muted">${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</div></div>
       <button class="btn" data-act="tab" data-tab="order">🛒 New order</button>
     </div>
+    ${todayCard()}
     <div class="tiles">
       <div class="tile"><div class="l">Booked today</div><div class="v">${money(booked.reduce((s, o) => s + num(o.total), 0))}</div><div class="l">${booked.length} order(s)</div></div>
       <div class="tile"><div class="l">Collected today (cash in hand)</div><div class="v">${money(collected.reduce((s, o) => s + num(o.amount), 0))}</div><div class="l">${collected.length} receipt(s)</div></div>
@@ -545,11 +548,11 @@ function activityView() {
   const items = [...S.outbox.values()].filter((o) => o.type === 'order' || o.type === 'payment').map((o) => ({ ...o, status: o.state === 'error' ? 'error' : 'not sent' }))
     .concat([...S.history.values()])
     .sort((a, b) => String(b.created).localeCompare(String(a.created))).slice(0, 150);
-  const errorsC = [...S.outbox.values()].filter((o) => (o.type === 'customer' || o.type === 'customer_update') && o.state === 'error');
+  const errorsC = [...S.outbox.values()].filter((o) => ['customer', 'customer_update', 'visit'].includes(o.type) && o.state === 'error');
   const pill = (s) => ({ 'not sent': 'warn', error: 'bad', pending: '', received: '', approved: 'ok', invoiced: 'ok', rejected: 'bad' }[s] ?? '');
   const label = (s) => ({ pending: 'sent', received: 'at office', approved: 'approved', invoiced: 'invoiced' }[s] || s);
   return `
-    ${errorsC.map((o) => `<div class="card"><b>${o.type === 'customer' ? 'New customer ' + h(o.name) : 'Shop edit ' + h(o.customer_name)}</b> <span class="pill bad">not accepted</span><div class="muted">${h(o.error)}</div>
+    ${errorsC.map((o) => `<div class="card"><b>${o.type === 'customer' ? 'New customer ' + h(o.name) : (o.type === 'visit' ? 'Visit ' : 'Shop edit ') + h(o.customer_name)}</b> <span class="pill bad">not accepted</span><div class="muted">${h(o.error)}</div>
       <div class="row" style="margin-top:8px"><button class="btn small light" data-act="retry" data-uuid="${o.uuid}">Try again</button><button class="btn small bad" data-act="discard" data-uuid="${o.uuid}">Delete</button></div></div>`).join('')}
     <div class="card list">${items.map((o) => `
       <div class="item tap" data-act="open-slip" data-uuid="${o.uuid}">
@@ -621,6 +624,7 @@ function openCustomer(key) {
   const { due, pending } = customerDue(c);
   const invoices = c.local_id ? [...S.invoices.values()].filter((i) => i.contact_id === c.local_id).sort((a, b) => a.transaction_date.localeCompare(b.transaction_date)) : [];
   sheet(custName(c), `
+    ${visitBlock(c, key)}
     ${c.photo_url ? `<img src="${h(photoUrl(c.photo_url))}" class="shop-photo" alt="">` : ''}
     <div class="card"><div class="muted">${h(c.mobile || '')} ${h(c.address || '')} ${h(c.city || '')}</div>
       <div class="muted">${h([routeName(c.route_id) && 'Route ' + routeName(c.route_id), c.outlet_type, c.outlet_class && 'Class ' + c.outlet_class].filter(Boolean).join(' · '))}</div>
@@ -635,6 +639,162 @@ function openCustomer(key) {
     </div>
     ${c.local_id ? `<button class="btn light block" style="margin-top:8px" data-act="edit-shop" data-key="${h(key)}">✎ Edit shop (location, photo, phone…)</button>` : ''}
     ${c.mobile ? `<a class="btn light block" style="margin-top:8px;text-decoration:none" href="tel:${h(c.mobile)}">Call ${h(c.mobile)}</a>` : ''}`);
+}
+
+// ---------- visits (check in at a shop, leave it with a result) ----------
+const NO_ORDER_REASONS = ['Shop closed', 'Owner not there', 'Has enough stock', 'No money / credit problem', 'Price problem', 'Other'];
+const hhmm = (t) => String(t || '').slice(11, 16);
+
+/** Metres between two GPS points. */
+function distanceM(lat1, lng1, lat2, lng2) {
+  const r = 6371000, rad = Math.PI / 180;
+  const a = Math.sin((lat2 - lat1) * rad / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin((lng2 - lng1) * rad / 2) ** 2;
+  return Math.round(2 * r * Math.asin(Math.min(1, Math.sqrt(a))));
+}
+const posOf = (c) => { const p = String(c.position || '').split(',').map(Number); return p.length === 2 && !isNaN(p[0]) && !isNaN(p[1]) ? p : null; };
+
+/** Today's routes for this booker (their own; when none, the routes nobody is assigned to). */
+function todayRoutes() {
+  const wd = ((new Date().getDay() + 6) % 7) + 1;
+  const today = (S.routes || []).filter((r) => (r.days || []).includes(wd));
+  const own = today.filter((r) => r.booker_id === S.user.id);
+  return own.length ? own : today.filter((r) => !r.booker_id);
+}
+
+/** Visits of today by shop key (finished ones and the open one). */
+function visitedToday() {
+  const today = nowStr().slice(0, 10);
+  const map = new Map();
+  (S.visits || []).filter((v) => String(v.started_at).startsWith(today)).forEach((v) => map.set(v.key, v));
+  return map;
+}
+const outcomeLabel = (v) => (v.outcome === 'order' ? 'order' : v.outcome === 'payment' ? 'payment' : (v.reason || 'no order'));
+
+function todayCard() {
+  const routes = todayRoutes();
+  if (!routes.length) return '';
+  const ids = routes.map((r) => r.id);
+  const shops = [...S.customers.values()].filter((c) => ids.includes(num(c.route_id)))
+    .sort((a, b) => ids.indexOf(num(a.route_id)) - ids.indexOf(num(b.route_id)) || num(a.visit_sequence) - num(b.visit_sequence) || a.name.localeCompare(b.name));
+  const done = visitedToday();
+  const visited = shops.filter((c) => done.has(c.key)).length;
+  const orders = shops.filter((c) => (done.get(c.key) || {}).outcome === 'order').length;
+  return `<div class="card list">
+    <div class="row"><div class="grow"><b>📍 Today's route: ${routes.map((r) => h(r.name)).join(', ')}</b>
+      <div class="muted">${visited} of ${shops.length} shops visited · ${orders} with orders</div></div>
+      <span class="pill ${shops.length && visited === shops.length ? 'ok' : 'warn'}">${shops.length ? Math.round(visited * 100 / shops.length) : 0}%</span></div>
+    ${shops.map((c, i) => {
+      const v = done.get(c.key);
+      const now = S.visit && S.visit.key === c.key;
+      return `<div class="item tap row" data-act="open-customer" data-key="${h(c.key)}"><div class="muted" style="width:24px">${i + 1}</div>
+        <div class="grow"><b>${h(custName(c))}</b><div class="muted">${h([c.city, c.address].filter(Boolean).join(' · '))}${c.position ? '' : ' · no location yet'}</div></div>
+        ${now ? '<span class="pill warn">in shop now</span>' : v ? `<span class="pill ${v.outcome === 'order' ? 'ok' : ''}">✓ ${h(hhmm(v.started_at))} · ${h(outcomeLabel(v))}</span>`
+          : (c.position ? `<a class="btn small light" style="text-decoration:none" href="${h(mapLink(c.position))}" target="_blank" rel="noopener">Go ➜</a>` : '')}</div>`;
+    }).join('') || '<div class="empty">No shops on this route yet. The office adds them in Sell → Booker routes.</div>'}</div>`;
+}
+
+function visitBanner() {
+  if (!S.visit) return '';
+  return `<div class="visit-bar tap" data-act="open-customer" data-key="${h(S.visit.key)}">🏪 In <b>${h(S.visit.customer_name)}</b> since ${h(hhmm(S.visit.started_at))} — tap to leave the shop</div>`;
+}
+
+function visitBlock(c, key) {
+  const v = S.visit;
+  if (v && v.key !== key) {
+    return `<div class="card" style="border:2px solid var(--warn)">You are still checked in at <b>${h(v.customer_name)}</b>.
+      <button class="btn block" style="margin-top:8px" data-act="leave-shop">🚪 Leave ${h(v.customer_name)} first</button></div>`;
+  }
+  if (!v) {
+    return `<button class="btn ok block big-btn" data-act="check-in" data-key="${h(key)}">📍 Check in — I am at this shop</button>`;
+  }
+  const far = v.distance_m !== null && v.distance_m > S.radius;
+  const where = v.lat === null ? '<span style="color:var(--bad)">No GPS at check-in</span>'
+    : v.distance_m === null ? '<span class="muted">This shop has no saved location yet</span>'
+    : far ? `<span style="color:var(--bad)">⚠ ${v.distance_m} m from the shop's saved location — the office will see this</span>`
+    : `<span style="color:var(--ok)">✓ At the shop (${v.distance_m} m)</span>`;
+  return `<div class="card" style="border:2px solid ${far ? 'var(--bad)' : 'var(--ok)'}">
+    <div class="row"><b class="grow">🟢 In this shop since ${h(hhmm(v.started_at))}</b></div>
+    <div style="margin:4px 0">${where}</div>
+    ${!c.position && v.lat !== null && v.accuracy_m <= 50 && !v.locationSaved ? '<button class="btn light block" style="margin-top:6px" data-act="save-shop-location">📍 Save this as the shop location</button>' : ''}
+    ${v.locationSaved ? '<div class="muted">📍 Saved as the shop location</div>' : ''}
+    ${v.photo ? `<img src="${v.photo}" class="shop-photo" alt="">` : `<label class="btn light block" style="text-align:center;margin-top:6px">📷 Add photo (optional)<input type="file" accept="image/*" capture="environment" data-act="visit-photo-in" style="display:none"></label>`}
+    <div class="muted" style="margin-top:6px">${(v.orders || []).length} order(s) · ${(v.payments || []).length} payment(s) in this visit</div>
+    <button class="btn bad block" style="margin-top:8px" data-act="leave-shop">🚪 Leave shop</button></div>`;
+}
+
+async function checkIn(key) {
+  const c = findCustomer(key);
+  if (!c || S.visit) return;
+  toast('Finding your location…');
+  let g = null;
+  try { g = await getGps(); } catch (e) {
+    if (!confirm(e.message + '\n\nCheck in without location? The office will see "no GPS".')) return;
+  }
+  const p = posOf(c);
+  S.visit = {
+    uuid: uuid(), key, contact_id: c.local_id || null, customer_uuid: c.local_id ? null : c.uuid, customer_name: custName(c),
+    route_id: num(c.route_id) || null, started_at: nowStr(),
+    lat: g ? g.lat : null, lng: g ? g.lng : null, accuracy_m: g ? Math.round(g.accuracy) : null,
+    distance_m: g && p ? distanceM(g.lat, g.lng, p[0], p[1]) : null, photo: null, orders: [], payments: [],
+  };
+  await db.set('visit', S.visit);
+  render();
+  openCustomer(key);
+}
+
+async function visitAdd(key, list, id) {
+  if (!S.visit || S.visit.key !== key) return;
+  S.visit[list].push(id);
+  await db.set('visit', S.visit);
+}
+
+function leaveForm() {
+  const v = S.visit;
+  if (!v) return;
+  const result = v.orders.length ? `🛒 ${v.orders.length} order(s)` : v.payments.length ? `💵 ${v.payments.length} payment(s)` : '';
+  sheet('Leave ' + v.customer_name, `<form data-form="leave">
+    ${result ? `<div class="card"><b>Result:</b> ${result}</div>` : `<label>Why no order?</label>
+      <div class="card list" style="margin:0">${NO_ORDER_REASONS.map((r, i) => `<label class="item row" style="gap:10px"><input type="radio" name="reason" value="${h(r)}" ${i === 0 ? '' : ''} style="width:auto"> ${h(r)}</label>`).join('')}</div>`}
+    <label>Note (optional)</label><input name="note">
+    <button class="btn bad block" style="margin-top:14px">🚪 Leave shop</button></form>`);
+}
+
+async function leaveShop(form) {
+  const v = S.visit;
+  if (!v) return;
+  const f = new FormData(form);
+  const reason = f.get('reason') || null;
+  if (!v.orders.length && !v.payments.length && !reason) { toast('Choose why there is no order'); return; }
+  const outcome = v.orders.length ? 'order' : v.payments.length ? 'payment' : reason === 'Shop closed' ? 'closed' : 'no_order';
+  const item = {
+    uuid: v.uuid, type: 'visit', contact_id: v.contact_id, customer_uuid: v.customer_uuid, customer_name: v.customer_name, route_id: v.route_id,
+    started_at: v.started_at, ended_at: nowStr(), lat: v.lat, lng: v.lng, accuracy_m: v.accuracy_m, distance_m: v.distance_m,
+    photo: v.photo, outcome, reason, note: f.get('note') || null, order_uuids: v.orders, payment_uuids: v.payments, created: nowStr(),
+  };
+  await addToOutbox(item);
+  const since = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+  S.visits = (S.visits || []).filter((x) => String(x.started_at) >= since)
+    .concat([{ uuid: v.uuid, key: v.key, customer_name: v.customer_name, started_at: v.started_at, ended_at: item.ended_at, outcome, reason, distance_m: v.distance_m }]);
+  S.visit = null;
+  await Promise.all([db.set('visit', null), db.set('visits', S.visits)]);
+  closeSheet();
+  S.tab = 'home';
+  render();
+  toast('Visit saved');
+  sync();
+}
+
+/** First visit at a shop with no location: the booker's GPS becomes the shop location (filled at once on the PC). */
+async function saveShopLocation() {
+  const v = S.visit;
+  if (!v || !v.contact_id || v.lat === null) return;
+  await addToOutbox({ uuid: uuid(), type: 'customer_update', contact_id: v.contact_id, customer_name: v.customer_name,
+    fields: { position: v.lat.toFixed(7) + ',' + v.lng.toFixed(7), accuracy_m: v.accuracy_m }, photo: null, created: nowStr() });
+  v.locationSaved = true;
+  await db.set('visit', v);
+  openCustomer(v.key);
+  toast('Shop location saved');
+  sync();
 }
 
 /** Route, shop type / class, GPS and photo: on the new-customer form and on Edit shop. */
@@ -850,6 +1010,7 @@ async function saveOrder() {
     order_date: nowStr(), note: d.note, lines, total, short_stock: short, created: nowStr(),
   };
   await addToOutbox(order);
+  await visitAdd(d.customer, 'orders', order.uuid);
   S.draft = { customer: null, lines: [], note: '' };
   S.cartOpen = false;
   await saveDraft();
@@ -873,6 +1034,7 @@ async function savePayment(form) {
     note: f.get('note') || null, allocations, paid_on: nowStr(), created: nowStr(),
   };
   await addToOutbox(p);
+  await visitAdd(form.dataset.key, 'payments', p.uuid);
   render();
   openSlip(p.uuid);
   sync();
@@ -932,6 +1094,7 @@ async function logout() {
 }
 
 document.addEventListener('click', async (e) => {
+  if (e.target.closest('a[href]')) return;
   const el = e.target.closest('[data-act]');
   if (!el || el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') return;
   const act = el.dataset.act;
@@ -962,6 +1125,9 @@ document.addEventListener('click', async (e) => {
     case 'open-customer': openCustomer(el.dataset.key); break;
     case 'edit-shop': editShopForm(el.dataset.key); break;
     case 'gps-here': setGpsHere(el); break;
+    case 'check-in': checkIn(el.dataset.key); break;
+    case 'leave-shop': leaveForm(); break;
+    case 'save-shop-location': saveShopLocation(); break;
     case 'choose-customer': d.customer = el.dataset.key; await saveDraft(); closeSheet(); render(); if ($('#prod-q')) $('#prod-q').focus(); break;
     case 'order-for': d.customer = el.dataset.key; await saveDraft(); closeSheet(); S.tab = 'order'; render(); break;
     case 'collect': paymentForm(el.dataset.key); break;
@@ -1000,6 +1166,13 @@ document.addEventListener('change', async (e) => {
     if (v === '' || isNaN(Number(v)) || Number(v) < 0) delete S.draft.lines[i].price; else S.draft.lines[i].price = Number(v);
     await saveDraft(); refreshPos();
   }
+  if (el.dataset.act === 'visit-photo-in' && el.files && el.files[0] && S.visit) {
+    try {
+      S.visit.photo = await shrinkPhoto(el.files[0]);
+      await db.set('visit', S.visit);
+      openCustomer(S.visit.key);
+    } catch (err) { toast(err.message); }
+  }
   if (el.dataset.act === 'photo-in' && el.files && el.files[0]) {
     const form = el.closest('form');
     try {
@@ -1022,7 +1195,7 @@ document.addEventListener('input', (e) => {
 document.addEventListener('submit', (e) => {
   const form = e.target;
   e.preventDefault();
-  ({ login, customer: saveCustomer, payment: savePayment, 'shop-edit': saveShopEdit }[form.dataset.form] || (() => {}))(form);
+  ({ login, customer: saveCustomer, payment: savePayment, 'shop-edit': saveShopEdit, leave: leaveShop }[form.dataset.form] || (() => {}))(form);
 });
 
 document.addEventListener('keydown', (e) => {

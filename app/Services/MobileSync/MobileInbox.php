@@ -146,7 +146,68 @@ class MobileInbox
             $added['shop_edits']++;
         }
 
+        $added['visits'] = 0;
+        foreach ($inbox['visits'] ?? [] as $v) {
+            $this->visitAcks[] = $v['uuid'];
+            if (DB::table('booker_visits')->where('uuid', $v['uuid'])->exists()) {
+                continue;
+            }
+            $this->storeVisit($v);
+            $added['visits']++;
+        }
+
         return $added;
+    }
+
+    /** UUIDs of visits stored (or already stored) by store(); /api/sync/ack takes them as visits. */
+    public $visitAcks = [];
+
+    /**
+     * A booker's shop visit. The distance to the shop is worked out here from the shop's saved location (the
+     * phone's own figure is only used when the shop had no location on the PC).
+     */
+    private function storeVisit(array $v): void
+    {
+        $contact_id = ! empty($v['contact_id']) ? (int) $v['contact_id'] : $this->contactForUuid($v['customer_uuid'] ?? null);
+        $position = $contact_id ? DB::table('contacts')->where('id', $contact_id)->value('position') : null;
+        $distance = null;
+        if ($position && isset($v['lat'], $v['lng']) && preg_match('/^\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/', $position, $m)) {
+            $distance = self::distanceM((float) $v['lat'], (float) $v['lng'], (float) $m[1], (float) $m[2]);
+        }
+        $radius = (int) config('mobile_sync.visit_radius_m', 100);
+
+        DB::table('booker_visits')->insert([
+            'uuid' => $v['uuid'],
+            'business_id' => $this->business_id,
+            'booker_id' => (int) ($v['user_id'] ?? 0),
+            'contact_id' => $contact_id,
+            'route_id' => $v['route_id'] ?? null,
+            'started_at' => $v['started_at'],
+            'ended_at' => $v['ended_at'] ?? null,
+            'lat' => $v['lat'] ?? null,
+            'lng' => $v['lng'] ?? null,
+            'accuracy_m' => $v['accuracy_m'] ?? null,
+            'distance_m' => $distance,
+            'within_range' => $distance === null ? null : ($distance <= $radius ? 1 : 0),
+            'photo' => $v['photo'] ?? null,
+            'outcome' => $v['outcome'] ?? 'no_order',
+            'reason' => $v['reason'] ?? null,
+            'note' => $v['note'] ?? null,
+            'order_uuids' => json_encode(['orders' => $v['order_uuids'] ?? [], 'payments' => $v['payment_uuids'] ?? []]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    /** Metres between two GPS points (haversine). */
+    public static function distanceM(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $r = 6371000;
+        $dlat = deg2rad($lat2 - $lat1);
+        $dlng = deg2rad($lng2 - $lng1);
+        $a = sin($dlat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dlng / 2) ** 2;
+
+        return round(2 * $r * asin(min(1, sqrt($a))), 1);
     }
 
     /** UUIDs of shop edits stored (or already stored) by store(); /api/sync/ack takes them as customer_updates. */
@@ -268,6 +329,7 @@ class MobileInbox
     public function missingPhotos(): array
     {
         return DB::table('booker_customer_updates')->whereNotNull('photo')->pluck('photo')
+            ->merge(DB::table('booker_visits')->whereNotNull('photo')->pluck('photo'))
             ->merge(DB::table('contacts')->where('business_id', $this->business_id)->where('shop_photo', 'like', 'uploads/booker/%')->pluck('shop_photo'))
             ->unique()
             ->filter(function ($path) {

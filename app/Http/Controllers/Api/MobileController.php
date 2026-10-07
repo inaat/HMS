@@ -157,7 +157,7 @@ class MobileController extends Controller
     public function upload(Request $request)
     {
         $user = $request->attributes->get('mb_user');
-        $result = ['customers' => [], 'orders' => [], 'payments' => [], 'customer_updates' => []];
+        $result = ['customers' => [], 'orders' => [], 'payments' => [], 'customer_updates' => [], 'visits' => []];
 
         // Customers first: an order in the same upload may be for a customer the booker just added.
         foreach ((array) $request->input('customers', []) as $row) {
@@ -171,6 +171,9 @@ class MobileController extends Controller
         }
         foreach ((array) $request->input('customer_updates', []) as $row) {
             $result['customer_updates'][] = $this->saveCustomerUpdate($user, (array) $row);
+        }
+        foreach ((array) $request->input('visits', []) as $row) {
+            $result['visits'][] = $this->saveVisit($user, (array) $row);
         }
 
         return response()->json($result + ['server_time' => now()->toDateTimeString()]);
@@ -264,6 +267,52 @@ class MobileController extends Controller
                 'edited_at' => $this->dateTime($row, 'created'),
             ]),
             'photo' => $photo,
+            'status' => 'pending',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return ['uuid' => $uuid, 'result' => 'saved'];
+    }
+
+    /**
+     * A shop visit: check-in time and GPS (the phone's distance to the shop is re-checked on the PC), optional
+     * photo, check-out time and the result (order / payment / no order + reason).
+     */
+    private function saveVisit($user, array $row): array
+    {
+        $uuid = $this->uuid($row);
+        if (empty($uuid)) {
+            return ['uuid' => $row['uuid'] ?? null, 'result' => 'error', 'message' => 'Missing or bad uuid'];
+        }
+        if (DB::table('mb_visits')->where('uuid', $uuid)->exists()) {
+            return ['uuid' => $uuid, 'result' => 'duplicate'];
+        }
+        if (empty($row['contact_id']) && empty($row['customer_uuid'])) {
+            return ['uuid' => $uuid, 'result' => 'error', 'message' => 'Shop missing'];
+        }
+        $num = function ($key) use ($row) {
+            return isset($row[$key]) && is_numeric($row[$key]) ? (float) $row[$key] : null;
+        };
+        $data = [
+            'contact_id' => ! empty($row['contact_id']) ? (int) $row['contact_id'] : null,
+            'customer_uuid' => ! empty($row['customer_uuid']) ? (string) $row['customer_uuid'] : null,
+            'route_id' => ! empty($row['route_id']) ? (int) $row['route_id'] : null,
+            'started_at' => $this->dateTime($row, 'started_at'),
+            'ended_at' => ! empty($row['ended_at']) ? $this->dateTime($row, 'ended_at') : null,
+            'lat' => $num('lat'), 'lng' => $num('lng'), 'accuracy_m' => $num('accuracy_m'), 'distance_m' => $num('distance_m'),
+            'outcome' => in_array($row['outcome'] ?? '', ['order', 'payment', 'no_order', 'closed', 'other'], true) ? $row['outcome'] : 'no_order',
+            'reason' => $this->str($row, 'reason'),
+            'note' => $this->str($row, 'note', 1000),
+            'order_uuids' => array_values(array_filter((array) ($row['order_uuids'] ?? []), 'is_string')),
+            'payment_uuids' => array_values(array_filter((array) ($row['payment_uuids'] ?? []), 'is_string')),
+        ];
+
+        DB::table('mb_visits')->insert([
+            'uuid' => $uuid,
+            'user_id' => $user->id,
+            'data' => json_encode($data),
+            'photo' => $this->savePhoto($row['photo'] ?? null, $uuid),
             'status' => 'pending',
             'created_at' => now(),
             'updated_at' => now(),

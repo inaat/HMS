@@ -108,7 +108,14 @@ class MobileSyncController extends Controller
                 })
             : [];
 
-        return response()->json(compact('customers', 'orders', 'payments', 'customer_updates'));
+        $visits = Schema::hasTable('mb_visits')
+            ? DB::table('mb_visits')->where('status', 'pending')->orderBy('id')->limit($limit)->get()
+                ->map(function ($v) {
+                    return ['uuid' => $v->uuid, 'user_id' => $v->user_id, 'photo' => $v->photo] + (json_decode($v->data, true) ?: []);
+                })
+            : [];
+
+        return response()->json(compact('customers', 'orders', 'payments', 'customer_updates', 'visits'));
     }
 
     public function ack(Request $request)
@@ -128,6 +135,11 @@ class MobileSyncController extends Controller
             if ($updates && Schema::hasTable('mb_customer_updates')) {
                 $done['customer_updates'] = DB::table('mb_customer_updates')->whereIn('uuid', $updates)
                     ->update(['status' => 'received', 'updated_at' => $now]);
+            }
+
+            $visits = array_filter((array) $request->input('visits', []), 'is_string');
+            if ($visits && Schema::hasTable('mb_visits')) {
+                $done['visits'] = DB::table('mb_visits')->whereIn('uuid', $visits)->update(['status' => 'received', 'updated_at' => $now]);
             }
 
             foreach ((array) $request->input('orders', []) as $o) {

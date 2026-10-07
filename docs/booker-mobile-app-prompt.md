@@ -19,6 +19,13 @@ UltimatePOS (Laravel). The backend API already exists and is live; **do not chan
 5. **Adds new customers** (shops) in the field.
 6. Sees the **status** of every order/payment: not sent → sent → at office → approved / invoiced / rejected (with
    the office's reason).
+7. Follows **today's route**: the shops of the route(s) planned for this weekday, in visit order, with ✓ for shops
+   already visited today and a **Go** button (Google Maps directions).
+8. **Checks in** at a shop (GPS compared with the shop's saved location, optional photo), books / collects, then
+   **leaves the shop** with the result (order, payment, or a reason why there was no order).
+9. **Edits shops**: sets the shop's GPS location ("Set location here"), takes a shop photo, corrects mobile, address,
+   city, route, shop type and class. Empty details are filled at once; changes to existing details wait for the
+   office's approval.
 
 The booker never creates invoices or changes stock; the office approves orders and payments on the shop PC.
 
@@ -35,6 +42,8 @@ The booker never creates invoices or changes stock; the office approves orders a
 - Printing: Bluetooth thermal printers (ESC/POS, 58 mm and 80 mm) via `esc_pos_utils` + a Bluetooth plugin; also
   "Share as text" and "Share as PDF".
 - UUIDs: `uuid` package (v4).
+- GPS: `geolocator` (high accuracy, 20 s timeout; ask permission with a clear explanation). Camera: `image_picker`
+  (camera source) + resize to max 1280 px, JPEG quality ~70 (`flutter_image_compress`). Maps links: `url_launcher`.
 - Brand colour `#2E9E6A` (green), white cards, rounded 12 px. Clean, large touch targets; usable with one hand.
 
 ## 3. Server API
@@ -91,8 +100,13 @@ Omit `since` on the first sync (full download). Response 200:
   "customers": [{
     "id": 52, "local_id": 57, "uuid": null, "name": "SKY LINE TREDERS UPPER DIR", "business_name": null,
     "mobile": "03171414003", "address": null, "city": null, "credit_limit": null,
-    "balance_due": "678887.0000", "status": "active"
+    "balance_due": "678887.0000", "status": "active",
+    "route_id": 1, "position": "34.8123456,71.8234567", "photo_url": "uploads/booker/<uuid>.jpg",
+    "outlet_type": "Bakery", "outlet_class": "B", "visit_sequence": 1
   }],
+  "routes": [{"id": 1, "name": "Khwaza Khela Bazar", "location_id": 1, "days": [3], "booker_id": 11}],
+  "outlet_types": ["Kiryana", "General store", "Wholesale", "Medical store", "Bakery", "Super store", "Hotel / Restaurant", "Other"],
+  "visit_radius_m": 100,
   "invoices": [{
     "id": 15763, "contact_id": 57, "invoice_no": "15479", "transaction_date": "2025-12-20 08:49:00",
     "final_total": "826805.0000", "paid": "147918.0000", "due": "678887.0000", "active": 1
@@ -119,13 +133,37 @@ Rules for applying it (upsert into SQLite):
   if missing, e.g. after reinstall).
 - `stock` / `stock_by_location`: **always the full map; replace**. Values are **free quantity in the product's base
   unit** (already minus orders not yet invoiced). `null` = stock not tracked.
+- `routes`: **always the full list of active routes; replace**. `days` are weekdays 1 = Monday … 7 = Sunday.
+  `booker_id` null = not assigned to anyone.
+- Customer `position` is `"lat,lng"` (null = no location yet). `photo_url` is a path on the server: show it from
+  `https://pos.explainerkhan.com/<photo_url>` (cache the image for offline). `mobile` may be null.
+- `outlet_types` and `visit_radius_m` (metres; a check-in further than this from the shop is flagged): replace.
 - Save `server_time` and use it as the next `since`.
 
 ### 3.3 POST `/upload` — send the outbox
 ```json
 {
   "customers": [{"uuid": "…", "name": "NEW SHOP", "business_name": null, "mobile": "03001234567",
-                 "address": "Main bazar", "city": "Dir"}],
+                 "address": "Main bazar", "city": "Dir",
+                 "route_id": 1, "outlet_type": "Kiryana", "outlet_class": "C",      // optional
+                 "position": "34.8123456,71.8234567",                                 // optional
+                 "photo": "<base64 JPEG>"}],                                          // optional
+  "customer_updates": [{                         // edits of EXISTING shops (only changed fields)
+    "uuid": "…", "contact_id": 57, "created": "2026-10-07 13:22:00",
+    "fields": {"mobile": "03451234567", "city": "Shin", "route_id": 1, "outlet_type": "Bakery", "outlet_class": "B",
+               "position": "34.8123456,71.8234567", "accuracy_m": 12},
+    "photo": "<base64 JPEG or null>"
+  }],
+  "visits": [{                                   // one per finished visit (sent after "Leave shop")
+    "uuid": "…", "contact_id": 57,               // OR "customer_uuid"
+    "route_id": 1, "started_at": "2026-10-07 10:32:00", "ended_at": "2026-10-07 10:41:00",
+    "lat": 34.8124, "lng": 71.8235, "accuracy_m": 10, "distance_m": 7,  // lat/lng null = no GPS
+    "photo": "<base64 JPEG or null>",
+    "outcome": "order",                          // order | payment | no_order | closed
+    "reason": null,                              // e.g. "Owner not there" when there was no order
+    "note": null,
+    "order_uuids": ["…"], "payment_uuids": []    // orders / payments made during this visit
+  }],
   "orders": [{
     "uuid": "…", "number": "BOO11-0005", "seq": 5,
     "contact_id": 57,               // OR "customer_uuid": "…" for a customer created on this phone
@@ -146,6 +184,8 @@ Rules for applying it (upsert into SQLite):
 }
 ```
 - Line `quantity` and `unit_price` are **in the chosen unit** (`sub_unit_id`), e.g. 5 × CTN 24 at 2,520 per carton.
+- Photos: base64 JPEG (a `data:image/jpeg;base64,` prefix is fine), at most 4 MB — resize first (max 1280 px).
+- `customer_updates` / `visits` results come back in the same shape (`customer_updates: [...]`, `visits: [...]`).
 - Always send customers before orders/payments that reference them (same request is fine).
 - Response 200, one result per item:
 ```json
@@ -178,7 +218,13 @@ This uses the business's own WhatsApp number on the server — **do not open Wha
 - `stock(location_id, variation_id, qty NULL, PK(location_id, variation_id))`.
 - `customers(key PK, local_id, uuid, name, business_name, mobile, address, city, credit_limit, balance_due, status)`.
 - `invoices(id PK, contact_id, invoice_no, transaction_date, final_total, paid, due)`.
-- `outbox(uuid PK, type, payload_json, created_at, state NULL|'error', error)`.
+- `outbox(uuid PK, type, payload_json, created_at, state NULL|'error', error)` — type `customer | order | payment |
+  customer_update | visit`; photos are stored as files on the phone and base64-encoded only when uploading.
+- `routes(id PK, name, location_id, days_json, booker_id)`; customers also get `route_id, position, photo_url,
+  outlet_type, outlet_class, visit_sequence`.
+- `visits(uuid PK, customer_key, customer_name, route_id, started_at, ended_at, lat, lng, accuracy_m, distance_m,
+  photo_path, outcome, reason, note, order_uuids_json, payment_uuids_json)` — the open visit has `ended_at` NULL
+  (at most one open visit); keep finished ones 3 days for the ✓ marks on Today's route.
 - `history(uuid PK, type, number, payload_json, status, local_so_no, invoice_no, local_ref, reject_reason,
   short_stock, wa_sent, created_at)`.
 
@@ -195,6 +241,8 @@ data source; the server is only used to sync. Never block a screen waiting for t
 - **Book orders**, **collect payments**, **add new customers** — saved instantly to SQLite (`outbox`) with a uuid and
   a slip/receipt number; the slip can be **printed (Bluetooth)** and **shared** at once.
 - My work: all orders/payments with their last known status; unsent items marked "not sent".
+- Today's route, check in / leave shop (GPS works without internet), shop edits and photos — all saved to the
+  outbox and uploaded later.
 - The draft order being typed survives the app being closed or the phone restarting.
 
 **Needs internet (show a clear message, never crash):**
@@ -251,6 +299,26 @@ lost; turning airplane mode OFF uploads all 14 items once and the statuses updat
 8. **New customer:** name required; mobile, business name, address, city optional. Save to outbox with a uuid and make
    it immediately selectable (badge "new · not sent").
 9. Nothing in the outbox can be edited after saving except: error items → Try again / Delete.
+10. **Today's route:** weekday = 1 Monday … 7 Sunday. Routes for today = routes whose `days` contain today **and**
+    `booker_id` = this booker; if there are none, the routes for today with `booker_id` null. Shops = customers with
+    `route_id` in those routes, ordered by route, then `visit_sequence`, then name. A shop counts as visited when this
+    phone has a visit for it started today. Show "N of M visited · K with orders" and the %.
+11. **Check in:** only one open visit at a time (to check in elsewhere, leave the current shop first). Get GPS (high
+    accuracy, 20 s). No GPS → ask "Check in without location? The office will see 'no GPS'" (lat/lng null).
+    Distance = haversine metres from the shop's `position` (null if the shop has none). Inside `visit_radius_m` →
+    green "✓ At the shop (7 m)"; outside → red "⚠ 640 m from the shop's saved location — the office will see this"
+    (still allowed). The office recomputes the distance itself.
+12. **During a visit:** a banner on every screen "🏪 In SHOP since 10:32 — tap to leave". Orders and payments saved for
+    that shop while checked in are added to the visit (`order_uuids` / `payment_uuids`). Optional visit photo.
+    Shop with no `position` and GPS accuracy ≤ 50 m → button "📍 Save this as the shop location" (sends a
+    `customer_update` with that position).
+13. **Leave shop:** outcome = `order` if the visit has orders, else `payment` if it has payments, else the booker must
+    choose a reason: Shop closed (outcome `closed`), Owner not there, Has enough stock, No money / credit problem,
+    Price problem, Other (outcome `no_order`); optional note. Then the visit goes to the outbox.
+14. **Edit shop** (existing customers only): send only fields that differ from the phone's copy (blank = unchanged).
+    "Set location here" needs GPS accuracy ≤ 50 m (otherwise "GPS is weak (±80 m). Step outside and tap again").
+    After upload show "Your changes went to the office"; the new values arrive through the normal sync once the
+    office has them (empty fields at once, changes to existing values after approval).
 
 ## 6. Screens
 
@@ -260,7 +328,9 @@ A slim status bar on every screen: ● Online/Offline · "Synced 2 min ago" · "
 
 1. **Login** — username, password, Log in. Shows "N items saved on this phone will be sent after you log in" if the
    outbox is not empty.
-2. **Home (dashboard)** — greeting + date + big **New order** button; tiles: Booked today (amount, count), Collected
+2. **Home (dashboard)** — greeting + date + big **New order** button; **Today's route** card (route names, "3 of 12
+   visited · 1 with orders", %, numbered shop list with ✓ time · result, "in shop now", or **Go ➜** directions);
+   tiles: Booked today (amount, count), Collected
    today (cash in hand), Waiting at office (+ approved/invoiced counts), Not sent (+ rejected); Total customers (+ with
    dues), Total dues to collect (+ unpaid invoices), Products (in stock / out at current location), This month
    (orders amount/count, collected); quick buttons New order / Collect payment / New customer; lists: Highest dues
@@ -272,8 +342,12 @@ A slim status bar on every screen: ● Online/Offline · "Synced 2 min ago" · "
    selector · price (editable) · subtotal · ✕; items count and total; note; bottom bar **✖ Cancel**,
    **✔ Save order** (disabled until a customer and a line exist; label "Choose customer" if none), **Total
    Payable**. Keep the draft order in SQLite so it survives closing the app. On save → slip screen.
-4. **Customers** — search (name, mobile, city), "＋ New"; list with due and "−X collected"; customer screen: contact,
-   balance due, unpaid invoices, **New order**, **Collect payment**, **Call**.
+4. **Customers** — search (name, mobile, city), "＋ New"; list with 📍 (has location) 📷 (has photo), mobile · city ·
+   route, due and "−X collected", and an **✎ Edit** button on each shop; customer screen: **visit block** on top
+   (**📍 Check in — I am at this shop**, or the open visit: since, distance status, photo, orders/payments in this
+   visit, **🚪 Leave shop**), shop photo, contact, route · type · class, **Navigate to shop**, balance due, unpaid
+   invoices, **New order**, **Collect payment**, **✎ Edit shop**, **Call**.
+   New customer form also has route, shop type, class, **Set location here** and **Take photo**.
 5. **Collect payment** — amount, method (Cash/Cheque/Bank transfer; cheque no. / bank ref fields), optional invoice
    checkboxes with amounts, note, Save → receipt screen.
 6. **My work** — orders and payments, newest first: number, customer, date, amount, status chip
@@ -323,6 +397,13 @@ pull-to-refresh, Sync button.
 8. Bluetooth print of a slip on a 58 mm printer is readable and fits the width.
 9. Token revoked on the server → next sync shows login; after login the outbox uploads.
 10. Reinstall → login → slip numbers continue after the last number sent (no reuse).
+11. Route on today's weekday assigned to booker1 → Home shows its shops in order; check in at a shop's GPS → "✓ At
+    the shop", 2 km away → red warning; leave with "Owner not there"; the shop gets ✓ with the time and reason; the
+    visit reaches the office (Sell → Booker visits) with distance, photo and result.
+12. Check in at a shop with no location → "Save this as the shop location" → after sync the shop has that location.
+13. Edit shop: mobile empty on the POS → filled at once; city already set → waits in Mobile orders → Shop edits until
+    approved; the photo shows on the shop after sync.
+14. Airplane mode: a full visit with photo, an order inside it and a shop edit → all upload once when back online.
 
 ## 10. Deliverables
 
