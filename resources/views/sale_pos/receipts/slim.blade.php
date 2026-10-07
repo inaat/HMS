@@ -15,11 +15,15 @@
 			@if(!empty($receipt_details->logo))
 			<img src="{{$receipt_details->logo}}"  style="  width: 100%; " class="img center-block">
 			<!-- <br/> -->
-		@endif
-              <!-- <h2 style="text-align:center">USMANIA MALL</h2> -->
-			 <!-- <p style="text-align:center">BESHAM ROAD BABO K.KHELA NEAR PSO PUMP <br>
-			 <span style="text-align:center">0946-744577/03419140661/03464229566<span></p> -->
-
+			@else
+				{{-- No logo: the shop's own name, address and phone from Settings > Business Locations. --}}
+				<h2 style="text-align:center">{{ $receipt_details->display_name }}</h2>
+				<p style="text-align:center">
+					@if(!empty($receipt_details->address)){!! $receipt_details->address !!}<br>@endif
+					@if(!empty($receipt_details->contact)){!! $receipt_details->contact !!}@endif
+				</p>
+			@endif
+           
 			<table class="table-info border-top">
 				<tr>
 					<th>{!! $receipt_details->invoice_no_prefix !!}</th>

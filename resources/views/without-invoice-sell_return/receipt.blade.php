@@ -14,8 +14,11 @@
         <div class="ticket" style="">
 		
         	<div class="text-box">
-            <h3 class="text-center">Usmania  MAll </h6>
-			<h4 class="text-center">Contact:0346-4229566</h4>
+            {{-- The shop's own name and phone from Settings > Business Locations. --}}
+            <h3 class="text-center">{{ optional($receipt_details->business)->name }}@if(optional($receipt_details->location)->name && optional($receipt_details->location)->name != optional($receipt_details->business)->name), {{ $receipt_details->location->name }}@endif</h3>
+			@if(optional($receipt_details->location)->mobile)
+				<h4 class="text-center">Contact: {{ $receipt_details->location->mobile }}</h4>
+			@endif
              
 			</div>
 			
