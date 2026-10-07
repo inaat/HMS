@@ -24,6 +24,7 @@ Route::prefix('mobile')->group(function () {
         Route::post('logout', [\App\Http\Controllers\Api\MobileController::class, 'logout']);
         Route::get('sync', [\App\Http\Controllers\Api\MobileController::class, 'sync']);
         Route::post('upload', [\App\Http\Controllers\Api\MobileController::class, 'upload']);
+        Route::post('whatsapp', [\App\Http\Controllers\Api\MobileController::class, 'whatsapp']);
     });
 });
 

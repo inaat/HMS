@@ -200,7 +200,7 @@ async function upload() {
     if (r.result === 'saved' || r.result === 'duplicate') {
       done.push(item.uuid);
       if (item.type !== 'customer') {
-        const hist = { ...item, status: r.status || 'pending', short_stock: !!r.short_stock, sent: nowStr() };
+        const hist = { ...item, status: r.status || 'pending', short_stock: !!r.short_stock, wa_sent: !!r.whatsapp, sent: nowStr() };
         delete hist.state; delete hist.error;
         S.history.set(hist.uuid, hist);
       }
@@ -645,30 +645,33 @@ function openSlip(uuid) {
   if (!o) return;
   const text = slipText({ ...o, status: S.outbox.has(uuid) ? (o.state === 'error' ? 'not accepted: ' + o.error : 'not sent yet') : o.status });
   sheet(o.type === 'order' ? 'Order slip' : 'Receipt', `<div class="slip">${h(text)}</div>
-    <div class="row noprint" style="margin-top:10px"><button class="btn grow" data-act="whatsapp" data-uuid="${uuid}" style="background:#25d366">WhatsApp${waNumber(o) ? ' customer' : ''}</button>${navigator.share ? `<button class="btn light grow" data-act="share" data-uuid="${uuid}">Share…</button>` : ''}<button class="btn light grow" data-act="print">Print</button></div>
+    ${o.wa_sent ? '<div class="noprint" style="margin-top:8px"><span class="pill ok">✓ Sent to the customer on WhatsApp</span></div>' : ''}
+    <div class="row noprint" style="margin-top:10px"><button class="btn grow" data-act="whatsapp" data-uuid="${uuid}" style="background:#25d366">${o.wa_sent ? 'Send again on WhatsApp' : 'Send on WhatsApp'}</button>${navigator.share ? `<button class="btn light grow" data-act="share" data-uuid="${uuid}">Share…</button>` : ''}<button class="btn light grow" data-act="print">Print</button></div>
     ${o.state === 'error' ? `<div class="row noprint" style="margin-top:8px"><button class="btn light grow" data-act="retry" data-uuid="${uuid}">Try again</button><button class="btn bad grow" data-act="discard" data-uuid="${uuid}">Delete</button></div>` : ''}`);
 }
 
-/** Customer mobile as WhatsApp wants it (country code, digits only): 03448292937 -> 923448292937. */
-function waNumber(o) {
-  const c = o.contact_id ? findCustomer('c' + o.contact_id) : (o.customer_uuid ? findCustomer('u' + o.customer_uuid) : null);
-  let d = String((c && c.mobile) || '').replace(/\D/g, '');
-  if (d.startsWith('00')) d = d.slice(2);
-  else if (d.length === 11 && d.startsWith('0')) d = '92' + d.slice(1);
-  else if (d.length === 10 && d.startsWith('3')) d = '92' + d;
-  return d.length >= 11 ? d : '';
-}
-
-/** Open WhatsApp (app on a phone, WhatsApp Web on a computer) with the slip typed in, to the customer when known. */
-function whatsapp(uuid) {
-  const o = S.outbox.get(uuid) || S.history.get(uuid);
-  const url = 'https://wa.me/' + waNumber(o) + '?text=' + encodeURIComponent(slipText(o));
-  if (!window.open(url, '_blank')) location.href = url;
+/**
+ * "Send on WhatsApp": the cloud sends the slip to the customer through the shop's own WhatsApp service (the device
+ * connected in the POS). Orders are sent automatically when uploaded; this sends again.
+ */
+async function whatsapp(uuid) {
+  if (S.outbox.has(uuid)) {
+    await sync();
+    if (S.outbox.has(uuid)) { toast('No internet now. The customer gets it on WhatsApp automatically when this is sent.', 4000); return; }
+  }
+  try {
+    const res = await api('POST', '/whatsapp', { uuid });
+    const o = S.history.get(uuid);
+    if (o) { o.wa_sent = true; await db.put('history', o); }
+    toast('✓ ' + res.message);
+  } catch (e) {
+    toast(e.message || 'Could not send', 4000);
+  }
 }
 
 async function share(uuid) {
   const o = S.outbox.get(uuid) || S.history.get(uuid);
-  try { await navigator.share({ text: slipText(o) }); } catch (e) { if (e.name !== 'AbortError') whatsapp(uuid); }
+  try { await navigator.share({ text: slipText(o) }); } catch (e) { /* closed */ }
 }
 
 // ---------- actions ----------

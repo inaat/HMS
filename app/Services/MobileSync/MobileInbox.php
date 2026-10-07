@@ -81,7 +81,6 @@ class MobileInbox
             if (DB::table('mobile_inbox')->where('uuid', $o['uuid'])->exists()) {
                 continue;
             }
-            $order_contact = $o['contact_id'] ?: $this->contactForUuid($o['customer_uuid'] ?? null);
             DB::table('mobile_inbox')->insert([
                 'kind' => 'order',
                 'uuid' => $o['uuid'],
@@ -97,10 +96,8 @@ class MobileInbox
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
+            // The cloud already sent the customer the order slip on WhatsApp when the booker saved it.
             $added['orders']++;
-            if (! empty($order_contact)) {
-                $this->whatsapp((int) $order_contact, $this->orderSlipText($o));
-            }
         }
 
         foreach ($inbox['payments'] ?? [] as $p) {
@@ -409,29 +406,6 @@ class MobileInbox
         } catch (\Throwable $e) {
             \Log::warning('Mobile booker WhatsApp to contact '.$contact_id.' failed: '.$e->getMessage());
         }
-    }
-
-    /** The order slip as the customer gets it on WhatsApp. */
-    private function orderSlipText(array $o): string
-    {
-        $contact = Contact::find($o['contact_id'] ?: $this->contactForUuid($o['customer_uuid'] ?? null));
-        $names = DB::table('products')->whereIn('id', array_column($o['lines'] ?? [], 'product_id'))->pluck('name', 'id');
-        $units = DB::table('units')->pluck('actual_name', 'id');
-        $business = DB::table('business')->where('id', $this->business_id)->value('name');
-
-        $text = 'Dear '.($contact->name ?? 'customer').",\n\nYour order has been booked.\nOrder: {$o['number']}\nDate: {$o['order_date']}\nBooked by: "
-            .$this->bookerName($o['user_id'])."\n--------------------\n";
-        foreach ($o['lines'] ?? [] as $l) {
-            $unit = $l['sub_unit_id'] ? ($units[$l['sub_unit_id']] ?? '') : '';
-            $text .= ($names[$l['product_id']] ?? 'Item')."\n  ".(float) $l['sub_unit_qty'].' '.$unit.' x '.number_format((float) $l['sub_unit_price'], 2)
-                .' = '.number_format((float) $l['line_total'], 2)."\n";
-        }
-        $text .= "--------------------\nTotal: ".number_format((float) $o['total'], 2)."\n";
-        if (! empty($o['note'])) {
-            $text .= 'Note: '.$o['note']."\n";
-        }
-
-        return $text."\nThank you,\n{$business}";
     }
 
     private function lockWaiting(int $id, ?string $kind)

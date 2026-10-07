@@ -279,7 +279,10 @@ class MobileController extends Controller
             DB::table('mb_order_lines')->insert($insert_lines);
         });
 
-        return ['uuid' => $uuid, 'result' => 'saved', 'status' => 'pending', 'short_stock' => $short];
+        // The customer gets the order slip on WhatsApp right away, through the business's connected device.
+        $sent = $this->whatsappOrder(DB::table('mb_orders')->where('uuid', $uuid)->first());
+
+        return ['uuid' => $uuid, 'result' => 'saved', 'status' => 'pending', 'short_stock' => $short, 'whatsapp' => $sent === true];
     }
 
     private function savePayment($user, array $row): array
@@ -392,6 +395,107 @@ class MobileController extends Controller
         }
 
         return 'Customer is required';
+    }
+
+    /** "Send on WhatsApp" in the app: the slip / receipt again, to the customer, through the connected device. */
+    public function whatsapp(Request $request)
+    {
+        $user = $request->attributes->get('mb_user');
+        $uuid = $this->uuid(['uuid' => $request->input('uuid')]);
+        $order = DB::table('mb_orders')->where('uuid', $uuid)->where('user_id', $user->id)->first();
+        $payment = empty($order) ? DB::table('mb_payments')->where('uuid', $uuid)->where('user_id', $user->id)->first() : null;
+        if (empty($order) && empty($payment)) {
+            return response()->json(['message' => 'Not found. Sync first, then try again.'], 404);
+        }
+        $sent = $order ? $this->whatsappOrder($order) : $this->whatsappPayment($payment);
+
+        return $sent === true ? response()->json(['success' => true, 'message' => 'Sent to the customer on WhatsApp'])
+            : response()->json(['message' => $sent], 422);
+    }
+
+    private function whatsappOrder($order)
+    {
+        if (empty($order)) {
+            return 'Order not found';
+        }
+        $lines = DB::table('mb_order_lines as l')->leftJoin('mb_products as p', 'p.variation_id', '=', 'l.variation_id')
+            ->where('l.order_id', $order->id)->get(['l.*', 'p.name', 'p.units']);
+        $customer = $this->customerOf($order);
+        $text = 'Dear '.($customer->name ?? 'customer').",
+
+Your order has been booked.
+Order: {$order->number}
+Date: {$order->order_date}
+Booked by: "
+            .DB::table('mb_users')->where('id', $order->user_id)->value('name')."
+--------------------
+";
+        foreach ($lines as $l) {
+            $unit = collect(json_decode($l->units ?? '[]', true))->firstWhere('id', (int) $l->sub_unit_id)['name'] ?? '';
+            $text .= ($l->name ?? 'Item')."
+  ".(float) $l->sub_unit_qty.' '.$unit.' x '.number_format((float) $l->sub_unit_price, 2).' = '.number_format((float) $l->line_total, 2)."
+";
+        }
+        $text .= "--------------------
+Total: ".number_format((float) $order->total, 2)."
+".($order->note ? 'Note: '.$order->note."
+" : '');
+
+        return $this->sendWhatsapp($customer, $text."
+Thank you,
+".$this->businessName());
+    }
+
+    private function whatsappPayment($payment)
+    {
+        $customer = $this->customerOf($payment);
+        $text = 'Dear '.($customer->name ?? 'customer').",
+
+We have received a payment of: ".number_format((float) $payment->amount, 2)
+            ."
+Receipt: {$payment->number}
+Collected by: ".DB::table('mb_users')->where('id', $payment->user_id)->value('name')
+            ."
+Date: {$payment->paid_on}
+
+Thank you,
+".$this->businessName();
+
+        return $this->sendWhatsapp($customer, $text);
+    }
+
+    private function customerOf($row)
+    {
+        return DB::table('mb_customers')->where(function ($q) use ($row) {
+            $q->where('local_id', $row->contact_id ?: 0)->orWhere('uuid', $row->customer_uuid ?: '-');
+        })->first();
+    }
+
+    /**
+     * Through the business's connected WhatsApp device (whatsapp_devices, copied from the shop PC), as the POS sends
+     * its payment messages. Returns true, or why it was not sent.
+     */
+    private function sendWhatsapp($customer, string $text)
+    {
+        if (! config('mobile_sync.whatsapp')) {
+            return 'WhatsApp sending is switched off (MOBILE_SYNC_WHATSAPP=false)';
+        }
+        if (empty($customer) || strlen(preg_replace('/\D/', '', (string) $customer->mobile)) < 10) {
+            return 'The customer has no mobile number';
+        }
+        try {
+            $business_id = (int) config('mobile_sync.business_id');
+            if (! \App\WhatsappDevice::where('business_id', $business_id)->where('status', 'connected')->exists()) {
+                return 'WhatsApp is not connected in the POS (Settings > WhatsApp)';
+            }
+            (new \App\Services\WhatsappApiService())->sendTestMsg(\App\WhatsappDevice::instanceFor($business_id), $customer->mobile, $text);
+
+            return true;
+        } catch (\Throwable $e) {
+            \Log::warning('Booker WhatsApp failed: '.$e->getMessage());
+
+            return 'WhatsApp sending failed, try again';
+        }
     }
 
     private function uuid(array $row): ?string
