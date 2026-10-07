@@ -141,6 +141,41 @@ class MobileSyncController extends Controller
     }
 
     /**
+     * Local database -> cloud database (mobile-sync:mirror): SQL the local PC made, gzip + base64 in "sql",
+     * complete statements only. Either a piece of a mysqldump (whole tables) or the changed rows of one table
+     * (insert-or-update, and deletes run with foreign keys on so the cloud cascades like the local database did).
+     * Guarded by the sync key; the cloud's own tables (mb_*, migrations, sessions...) are refused.
+     */
+    public function mirrorSql(Request $request)
+    {
+        $sql = @gzdecode(base64_decode((string) $request->input('sql'), true) ?: '');
+        if ($sql === false || $sql === '') {
+            return response()->json(['message' => 'Empty or broken SQL piece'], 422);
+        }
+        if (preg_match('/^\s*(DROP TABLE IF EXISTS|CREATE TABLE|INSERT INTO|LOCK TABLES|ALTER TABLE|DELETE FROM|UPDATE)\s+`(mb_\w+|migrations|sessions|system|sync_changes)`/mi', $sql)) {
+            return response()->json(['message' => 'Refused: cloud-only table'], 422);
+        }
+
+        $this->mirrorSession();
+        try {
+            DB::unprepared($sql);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => mb_substr($e->getMessage(), 0, 1000)], 500);
+        }
+
+        return response()->json(['success' => true]);
+    }
+
+    private function mirrorSession(): void
+    {
+        @set_time_limit(300);
+        DB::statement('SET NAMES utf8mb4');
+        DB::statement("SET time_zone = '+00:00'");
+        DB::statement("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'");
+        DB::statement('SET FOREIGN_KEY_CHECKS = 0');
+    }
+
+    /**
      * Upsert a full snapshot into $table keyed on $key, touching updated_at only when a row really changed, and
      * apply $missing to rows the snapshot no longer contains.
      */

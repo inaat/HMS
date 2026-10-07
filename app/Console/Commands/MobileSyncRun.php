@@ -76,6 +76,11 @@ class MobileSyncRun extends Command
             $ok = $this->failed('Push', $response);
         }
 
+        // 4. Copy every other local change to the cloud database (MOBILE_SYNC_MIRROR=true).
+        if (config('mobile_sync.mirror')) {
+            $ok = $this->call('mobile-sync:mirror') === 0 && $ok;
+        }
+
         DB::table('system')->updateOrInsert(['key' => 'mobile_sync_last_run'], ['value' => json_encode([
             'at' => now()->toDateTimeString(), 'ok' => $ok,
         ])]);

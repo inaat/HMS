@@ -27,8 +27,10 @@ Route::prefix('mobile')->group(function () {
     });
 });
 
-Route::prefix('sync')->middleware('mobile.sync:sync')->group(function () {
+// Local PC -> cloud; the full database copy sends many requests in a row, so no per-minute limit (key-guarded).
+Route::prefix('sync')->middleware('mobile.sync:sync')->withoutMiddleware('throttle:api')->group(function () {
     Route::post('push', [\App\Http\Controllers\Api\MobileSyncController::class, 'push']);
     Route::get('inbox', [\App\Http\Controllers\Api\MobileSyncController::class, 'inbox']);
     Route::post('ack', [\App\Http\Controllers\Api\MobileSyncController::class, 'ack']);
+    Route::post('mirror/sql', [\App\Http\Controllers\Api\MobileSyncController::class, 'mirrorSql']);
 });

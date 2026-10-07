@@ -22,6 +22,12 @@ return [
     'business_id' => (int) env('MOBILE_SYNC_BUSINESS_ID', 1),
     'location_id' => (int) env('MOBILE_SYNC_LOCATION_ID', 1),
 
+    // Local only: also copy every local database change to the cloud database (`mobile-sync:mirror`), as SQL over
+    // HTTPS to /api/sync/mirror/sql. The cloud web screens are then read-only, because the copy overwrites them.
+    'mirror' => (bool) env('MOBILE_SYNC_MIRROR', false),
+    // Folder with mysqldump when it is not on PATH (empty = next to the running MySQL server).
+    'mysql_bin' => env('MOBILE_SYNC_MYSQL_BIN'),
+
     // Mobile login token lifetime in days (0 = never expires; blocking the booker locally still revokes it).
     'token_days' => (int) env('MOBILE_SYNC_TOKEN_DAYS', 90),
 ];
