@@ -141,6 +141,40 @@ class MobileOrderController extends Controller
         return redirect()->back()->with('status', $output);
     }
 
+    /**
+     * Ticked rows in the list: invoice every selected order, or approve every selected payment. Each one runs on its
+     * own, so one failure does not stop the rest; the message lists what failed and why.
+     */
+    public function bulk(Request $request)
+    {
+        $this->authorizeAccess();
+        $ids = array_filter(array_map('intval', (array) $request->input('ids', [])));
+        $done = [];
+        $failed = [];
+        foreach ($ids as $id) {
+            $row = DB::table('mobile_inbox')->find($id);
+            if (empty($row)) {
+                continue;
+            }
+            try {
+                $this->authorizeRow($id);
+                if ($row->kind === 'order') {
+                    $done[] = $this->inbox()->invoiceOrder($id, auth()->id())->invoice_no;
+                } elseif ($row->kind === 'payment') {
+                    $done[] = $this->inbox()->approvePayment($id, auth()->id())->payment_ref_no;
+                }
+            } catch (\Throwable $e) {
+                \Log::warning('Mobile bulk '.$row->number.': '.$e->getMessage());
+                $failed[] = $row->number.' ('.$e->getMessage().')';
+            }
+        }
+
+        $what = $request->input('kind') === 'payment' ? 'payment(s) approved' : 'invoice(s) created';
+        $msg = count($done).' '.$what.(empty($failed) ? '' : '. Not done: '.implode('; ', $failed));
+
+        return redirect()->back()->with('status', ['success' => empty($failed) ? 1 : (empty($done) ? 0 : 1), 'msg' => $msg]);
+    }
+
     /** One click: booker order -> final invoice (credit sale). */
     public function invoice($id)
     {

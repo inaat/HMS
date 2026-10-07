@@ -56,10 +56,20 @@
     </div>
 
     @component('components.widget')
+        {{-- Bulk: tick rows, then one button invoices every ticked order / approves every ticked payment. --}}
+        <form method="POST" id="bulk-form" action="{{ action([\App\Http\Controllers\MobileOrderController::class, 'bulk']) }}" class="no-print" style="margin-bottom: 10px; display: none;">
+            @csrf
+            <input type="hidden" name="kind" value="{{ $kind }}">
+            <button type="submit" class="tw-dw-btn tw-dw-btn-success tw-text-white" id="bulk-btn">
+                <i class="fa {{ $kind == 'order' ? 'fa-file-invoice' : 'fa-check' }}"></i>
+                {{ $kind == 'order' ? 'Make invoices for selected' : 'Approve selected payments' }} (<span id="bulk-count">0</span>)
+            </button>
+        </form>
         <div class="table-responsive">
             <table class="table table-bordered table-hover table-condensed">
                 <thead>
                     <tr style="background: #f5f5f5;">
+                        <th class="no-print" style="width: 34px;"><input type="checkbox" id="bulk-all" title="Select all"></th>
                         <th>{{ $kind == 'order' ? 'Slip no' : 'Receipt no' }}</th>
                         <th>Date</th>
                         <th>Booker</th>
@@ -74,6 +84,11 @@
                 <tbody>
                     @forelse ($rows as $r)
                         <tr>
+                            <td class="no-print">
+                                @if (($r->kind == 'order' && in_array($r->status, ['waiting', 'approved'])) || ($r->kind == 'payment' && $r->status == 'waiting'))
+                                    <input type="checkbox" class="bulk-row" value="{{ $r->id }}">
+                                @endif
+                            </td>
                             <td>
                                 <a href="{{ action([\App\Http\Controllers\MobileOrderController::class, 'show'], [$r->id]) }}">{{ $r->number }}</a>
                                 @if ($r->short_stock) <span class="label label-danger" title="Booked more than the free stock">Short stock</span> @endif
@@ -121,7 +136,7 @@
                             </td>
                         </tr>
                     @empty
-                        <tr><td colspan="9" class="text-center text-muted">Nothing here.</td></tr>
+                        <tr><td colspan="10" class="text-center text-muted">Nothing here.</td></tr>
                     @endforelse
                 </tbody>
             </table>
@@ -151,7 +166,7 @@
 
         function show(d) {
             var p = d.progress || {}, run = d.last_run || {};
-            var waiting = d.mirror_on && d.changes_waiting ? ' · ' + d.changes_waiting + ' shop changes waiting to go up' : '';
+            var waiting = d.mirror_on && d.changes_waiting ? ' · ' + d.changes_waiting + ' new shop changes go up with the next sync' : '';
             if (p.running) {
                 $('#cs-icon').text('🔄');
                 $('#cs-title').text('Syncing… ' + (p.step || ''));
@@ -175,7 +190,7 @@
                     $('#cs-icon').text('⚠️'); $('#cs-title').text('Last sync had a problem');
                     $('#cs-detail').text(ago(run.at) + ': ' + (run.error || p.message || '') + waiting);
                 }
-                if (wasRunning && d.waiting_approval != shownWaiting) {
+                if (wasRunning && d.waiting_approval != shownWaiting && !(window.__bulkBusy && window.__bulkBusy())) {
                     // A sync brought new orders or payments: show them.
                     location.reload();
                 }
@@ -193,6 +208,24 @@
         });
 
         poll();
+
+        // Bulk: show the button with the count of ticked rows; send the ticked ids.
+        function bulkRefresh() {
+            var n = $('.bulk-row:checked').length;
+            $('#bulk-count').text(n);
+            $('#bulk-form').toggle(n > 0);
+            $('#bulk-all').prop('checked', n > 0 && n === $('.bulk-row').length);
+        }
+        $(document).on('change', '#bulk-all', function () { $('.bulk-row').prop('checked', this.checked); bulkRefresh(); });
+        $(document).on('change', '.bulk-row', bulkRefresh);
+        $('#bulk-form').on('submit', function () {
+            var form = $(this);
+            form.find('input[name="ids[]"]').remove();
+            $('.bulk-row:checked').each(function () { form.append('<input type="hidden" name="ids[]" value="' + this.value + '">'); });
+            $('#bulk-btn').prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Working on ' + $('.bulk-row:checked').length + '…');
+        });
+        // A sync must not reload the page while rows are ticked.
+        window.__bulkBusy = function () { return $('.bulk-row:checked').length > 0; };
 
         // One click, but never twice: the button locks while the invoice is made.
         $(document).on('submit', 'form.one-click', function () {
