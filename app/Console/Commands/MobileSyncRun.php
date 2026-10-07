@@ -4,6 +4,8 @@ namespace App\Console\Commands;
 
 use App\Services\MobileSync\LocalSnapshot;
 use App\Services\MobileSync\MobileInbox;
+use App\Services\MobileSync\SyncStatus;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -35,64 +37,92 @@ class MobileSyncRun extends Command
             return 1;
         }
 
+        // One run at a time: the Task Scheduler, every open POS page and "Sync now" may all ask at once.
+        $lock = fopen(storage_path('app/mobile-sync-'.preg_replace('/\W/', '', DB::getDatabaseName()).'.lock'), 'c');
+        if (! flock($lock, LOCK_EX | LOCK_NB)) {
+            $this->line('A sync is already running.');
+
+            return 0;
+        }
+
         $business_id = config('mobile_sync.business_id');
         $location_id = config('mobile_sync.location_id');
         $inbox = new MobileInbox($business_id, $location_id);
-        $ok = true;
+        $this->errors = [];
 
-        // 1. Collect.
-        $response = $this->cloud()->get('/api/sync/inbox');
-        if ($response->successful()) {
-            $added = $inbox->store((array) $response->json());
-            $this->line(sprintf('collected  customers %d  orders %d  payments %d', $added['customers'], $added['orders'], $added['payments']));
-        } else {
-            $ok = $this->failed('Collect', $response);
-        }
-
-        // 2. Report statuses (also marks orders whose sales order has been invoiced).
-        $inbox->markInvoiced();
-        $ack = $inbox->pendingAcks();
-        if (! empty($ack['ids'])) {
-            $ids = $ack['ids'];
-            unset($ack['ids']);
-            $response = $this->cloud()->post('/api/sync/ack', $ack);
+        try {
+            // 1. Collect.
+            SyncStatus::progress('Collecting orders and payments from bookers', 5);
+            $response = $this->cloud()->get('/api/sync/inbox');
             if ($response->successful()) {
-                $inbox->ackDone($ids);
-                $this->line('reported   '.count($ids).' status change(s)');
+                $added = $inbox->store((array) $response->json());
+                $this->line(sprintf('collected  customers %d  orders %d  payments %d', $added['customers'], $added['orders'], $added['payments']));
             } else {
-                $ok = $this->failed('Report', $response);
+                $this->failed('Collect', $response);
             }
-        }
 
-        // 3. Push.
-        $snapshot = (new LocalSnapshot($business_id, $location_id))->all();
-        $response = $this->cloud()->post('/api/sync/push', $snapshot);
-        if ($response->successful()) {
-            foreach ((array) $response->json('result') as $set => $counts) {
-                $this->line(sprintf('%-10s sent %5d  new %4d  changed %4d  removed %4d', $set, count($snapshot[$set]),
-                    $counts['inserted'] ?? 0, $counts['updated'] ?? 0, $counts['switched_off'] ?? 0));
+            // 2. Report statuses (also marks orders whose sales order has been invoiced).
+            SyncStatus::progress('Sending order statuses to bookers', 15);
+            $inbox->markInvoiced();
+            $ack = $inbox->pendingAcks();
+            if (! empty($ack['ids'])) {
+                $ids = $ack['ids'];
+                unset($ack['ids']);
+                $response = $this->cloud()->post('/api/sync/ack', $ack);
+                if ($response->successful()) {
+                    $inbox->ackDone($ids);
+                    $this->line('reported   '.count($ids).' status change(s)');
+                } else {
+                    $this->failed('Report', $response);
+                }
             }
-        } else {
-            $ok = $this->failed('Push', $response);
+
+            // 3. Push.
+            SyncStatus::progress('Sending products, stock and customers to bookers', 25);
+            $snapshot = (new LocalSnapshot($business_id, $location_id))->all();
+            $response = $this->cloud()->post('/api/sync/push', $snapshot);
+            if ($response->successful()) {
+                foreach ((array) $response->json('result') as $set => $counts) {
+                    $this->line(sprintf('%-10s sent %5d  new %4d  changed %4d  removed %4d', $set, count($snapshot[$set]),
+                        $counts['inserted'] ?? 0, $counts['updated'] ?? 0, $counts['switched_off'] ?? 0));
+                }
+            } else {
+                $this->failed('Push', $response);
+            }
+
+            // 4. Copy every other local change to the cloud database (MOBILE_SYNC_MIRROR=true); it reports its own
+            // progress from 40% to 100%.
+            if (config('mobile_sync.mirror')) {
+                SyncStatus::progress('Copying shop data to the cloud', 40);
+                if ($this->call('mobile-sync:mirror') !== 0) {
+                    $this->errors[] = json_decode((string) DB::table('system')->where('key', 'mobile_sync_last_mirror')->value('value'), true)['what'] ?? 'Copy failed';
+                }
+            }
+            $offline = false;
+        } catch (ConnectionException $e) {
+            // No internet (or the cloud is down): stop here; everything waits and goes with the next sync.
+            $offline = true;
+            $this->errors[] = 'No internet or the cloud site is not reachable. Your work is safe and will be sent automatically when the internet is back.';
+            $this->error(end($this->errors));
         }
 
-        // 4. Copy every other local change to the cloud database (MOBILE_SYNC_MIRROR=true).
-        if (config('mobile_sync.mirror')) {
-            $ok = $this->call('mobile-sync:mirror') === 0 && $ok;
-        }
-
+        $ok = empty($this->errors);
         DB::table('system')->updateOrInsert(['key' => 'mobile_sync_last_run'], ['value' => json_encode([
-            'at' => now()->toDateTimeString(), 'ok' => $ok,
+            'at' => now()->toDateTimeString(), 'ok' => $ok, 'offline' => $offline, 'error' => $ok ? null : implode(' | ', $this->errors),
         ])]);
+        SyncStatus::done($ok, $ok ? 'Everything is up to date.' : implode(' | ', $this->errors), $offline);
+        flock($lock, LOCK_UN);
 
         return $ok ? 0 : 1;
     }
 
-    private function failed(string $step, $response): bool
-    {
-        $this->error($step.' failed: HTTP '.$response->status().' '.substr($response->body(), 0, 300));
+    private $errors = [];
 
-        return false;
+    private function failed(string $step, $response): void
+    {
+        $message = $step.' failed: HTTP '.$response->status().' '.mb_substr((string) ($response->json('message') ?? $response->body()), 0, 200);
+        $this->errors[] = $message;
+        $this->error($message);
     }
 
     private function cloud()
@@ -100,7 +130,11 @@ class MobileSyncRun extends Command
         return Http::baseUrl(config('mobile_sync.cloud_url'))
             ->withHeaders(['X-Sync-Key' => config('mobile_sync.sync_key')])
             ->acceptJson()
+            ->connectTimeout(15)
             ->timeout(120)
-            ->retry(2, 3000, null, false);
+            ->retry(2, 3000, function ($e) {
+                // Retry a busy server, but give up at once when there is no connection at all.
+                return ! $e instanceof ConnectionException;
+            }, false);
     }
 }

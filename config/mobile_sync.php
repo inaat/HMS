@@ -25,6 +25,8 @@ return [
     // Local only: also copy every local database change to the cloud database (`mobile-sync:mirror`), as SQL over
     // HTTPS to /api/sync/mirror/sql. The cloud web screens are then read-only, because the copy overwrites them.
     'mirror' => (bool) env('MOBILE_SYNC_MIRROR', false),
+    // Local only: php.exe that the browser-started sync runs (empty = next to the loaded php.ini, as in Laragon).
+    'php_bin' => env('MOBILE_SYNC_PHP_BIN'),
     // Folder with mysqldump when it is not on PATH (empty = next to the running MySQL server).
     'mysql_bin' => env('MOBILE_SYNC_MYSQL_BIN'),
 

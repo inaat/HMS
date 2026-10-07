@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\MobileSync\MobileInbox;
+use App\Services\MobileSync\SyncStatus;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -116,6 +117,23 @@ class MobileOrderController extends Controller
         }
 
         return redirect()->back()->with('status', $output);
+    }
+
+    /** Cloud sync panel / progress bar (polled). */
+    public function syncStatus()
+    {
+        return response()->json(SyncStatus::snapshot());
+    }
+
+    /**
+     * Start a sync in the background. "Sync now" sends manual=1; every open POS page also calls this every couple
+     * of minutes (layouts/partials/mobile_autosync), so it runs without any command or Task Scheduler.
+     */
+    public function syncNow(Request $request)
+    {
+        $started = SyncStatus::start();
+
+        return response()->json(['started' => $started] + SyncStatus::snapshot());
     }
 
     public function reject(Request $request, $id)

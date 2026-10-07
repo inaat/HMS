@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\MobileSync\SyncStatus;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -70,8 +71,31 @@ class MobileSyncMirror extends Command
             if ($this->option('full') || $checkpoint === null) {
                 // Changes made while the dump runs are sent again by the next run; sending a row twice is harmless.
                 $new_checkpoint = (int) DB::table('sync_changes')->max('id');
-                $pieces = $this->dump($this->tables(), function ($sql) {
+                // Progress = share of the table data already sent (tables are dumped in this order).
+                $sizes = collect(DB::select('SELECT TABLE_NAME AS t, DATA_LENGTH AS s FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?', [$this->from['database']]))
+                    ->pluck('s', 't');
+                $tables = $this->tables();
+                $total = max(1, array_sum(array_map(function ($t) use ($sizes) {
+                    return (int) ($sizes[$t] ?? 0) + 16384;
+                }, $tables)));
+                $before = [];
+                $sum = 0;
+                foreach ($tables as $t) {
+                    $before[$t] = $sum;
+                    $sum += (int) ($sizes[$t] ?? 0) + 16384;
+                }
+                $current = $tables[0] ?? '';
+                $report = function () use (&$current, $before, $total, $tables) {
+                    $n = array_search($current, $tables) + 1;
+                    SyncStatus::progress('First full copy of the shop data to the cloud', 40 + (int) (59 * ($before[$current] ?? 0) / $total),
+                        "table {$n} of ".count($tables).": {$current}");
+                };
+                $report();
+                $pieces = $this->dump($tables, function ($sql) use ($report) {
                     $this->send($sql);
+                    $report();
+                }, function ($table) use (&$current) {
+                    $current = $table;
                 });
                 $this->setCheckpoint($new_checkpoint);
 
@@ -94,7 +118,11 @@ class MobileSyncMirror extends Command
 
         $rows = 0;
         $whole = [];
-        foreach ($changes->groupBy('tbl') as $table => $list) {
+        $groups = $changes->groupBy('tbl');
+        $done = 0;
+        foreach ($groups as $table => $list) {
+            SyncStatus::progress('Copying shop changes to the cloud', 40 + (int) (59 * $done++ / max(1, $groups->count())),
+                $changes->count().' changes');
             $key = $this->singleKey($table);
             if (empty($key) || $list->contains('pk', null) || ! in_array($table, $this->tables())) {
                 if (in_array($table, $this->tables())) {
@@ -171,7 +199,7 @@ class MobileSyncMirror extends Command
      * mysqldump the given tables (structure + data), converted so MariaDB on shared hosting loads a MySQL 8 dump,
      * handed to $out in pieces of whole statements. Returns the number of pieces.
      */
-    private function dump(array $tables, callable $out): int
+    private function dump(array $tables, callable $out, ?callable $onTable = null): int
     {
         $cmd = array_merge([$this->mysqlBin().'mysqldump', '--host='.$this->from['host'], '--port='.$this->from['port'], '--user='.$this->from['username'],
             '--single-transaction', '--quick', '--skip-lock-tables', '--skip-add-locks', '--no-tablespaces', '--skip-triggers',
@@ -190,6 +218,9 @@ class MobileSyncMirror extends Command
             // in separate sessions, so those variables would be NULL there. The cloud sets each session itself.
             if (strpos($line, '@OLD_') !== false || strpos($line, '@saved_cs_client') !== false) {
                 continue;
+            }
+            if ($onTable && preg_match('/^-- Table structure for table `(\w+)`/', $line, $m)) {
+                $onTable($m[1]);
             }
             $piece .= $this->forMariaDb($line);
             // Every mysqldump statement ends a line with ";" — cut pieces only there.

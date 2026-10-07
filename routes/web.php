@@ -297,6 +297,8 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::get('/commission-payouts/{id}', [\App\Http\Controllers\CommissionPayoutController::class, 'show']);
     Route::post('/commission-payouts/{id}/unlock', [\App\Http\Controllers\CommissionPayoutController::class, 'unlock']);
     Route::get('/mobile-orders', [\App\Http\Controllers\MobileOrderController::class, 'index']);
+    Route::get('/mobile-sync/status', [\App\Http\Controllers\MobileOrderController::class, 'syncStatus']);
+    Route::post('/mobile-sync/start', [\App\Http\Controllers\MobileOrderController::class, 'syncNow']);
     Route::get('/mobile-orders/{id}', [\App\Http\Controllers\MobileOrderController::class, 'show']);
     Route::post('/mobile-orders/{id}/approve', [\App\Http\Controllers\MobileOrderController::class, 'approve']);
     Route::post('/mobile-orders/{id}/reject', [\App\Http\Controllers\MobileOrderController::class, 'reject']);

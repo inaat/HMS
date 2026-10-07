@@ -128,6 +128,7 @@
         @endif
 
         @include('layouts.partials.javascripts')
+        @include('layouts.partials.mobile_autosync')
 
         <div class="modal fade view_modal" tabindex="-1" role="dialog" aria-labelledby="gridSystemModalLabel"></div>
               
