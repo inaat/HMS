@@ -33,5 +33,6 @@ Route::prefix('sync')->middleware('mobile.sync:sync')->withoutMiddleware('thrott
     Route::post('push', [\App\Http\Controllers\Api\MobileSyncController::class, 'push']);
     Route::get('inbox', [\App\Http\Controllers\Api\MobileSyncController::class, 'inbox']);
     Route::post('ack', [\App\Http\Controllers\Api\MobileSyncController::class, 'ack']);
+    Route::get('file', [\App\Http\Controllers\Api\MobileSyncController::class, 'file']);
     Route::post('mirror/sql', [\App\Http\Controllers\Api\MobileSyncController::class, 'mirrorSql']);
 });

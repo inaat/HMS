@@ -35,4 +35,7 @@ return [
 
     // Mobile login token lifetime in days (0 = never expires; blocking the booker locally still revokes it).
     'token_days' => (int) env('MOBILE_SYNC_TOKEN_DAYS', 90),
+
+    // Booker check-in: a visit further than this from the shop's saved location is flagged (still allowed).
+    'visit_radius_m' => (int) env('MOBILE_VISIT_RADIUS_M', 100),
 ];

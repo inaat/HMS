@@ -21,6 +21,12 @@
             <i class="fa fa-money-bill-wave"></i> Payments
             @if (! empty($counts['payment'])) <span class="label label-warning">{{ $counts['payment'] }}</span> @endif
         </a>
+        @can('customer.update')
+        <a href="{{ action([\App\Http\Controllers\MobileOrderController::class, 'shopEdits']) }}" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-primary">
+            <i class="fa fa-store"></i> Shop edits
+            @if (! empty($shop_edits)) <span class="label label-warning">{{ $shop_edits }}</span> @endif
+        </a>
+        @endcan
         <form method="GET" style="display: flex; gap: 8px; align-items: center; margin-left: 12px;">
             <input type="hidden" name="kind" value="{{ $kind }}">
             @if ($locations->count() > 1)

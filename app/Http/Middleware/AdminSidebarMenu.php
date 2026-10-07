@@ -375,6 +375,11 @@ class AdminSidebarMenu
                                 'Mobile orders',
                                 ['icon' => '', 'active' => request()->segment(1) == 'mobile-orders']
                             );
+                            $sub->url(
+                                action([\App\Http\Controllers\BookerRouteController::class, 'index']),
+                                'Booker routes',
+                                ['icon' => '', 'active' => request()->segment(1) == 'booker-routes']
+                            );
                         }
 
                         if (!empty($pos_settings['enable_sales_order']) && ($is_admin || auth()->user()->hasAnyPermission(['so.view_own', 'so.view_all', 'so.create']))) {

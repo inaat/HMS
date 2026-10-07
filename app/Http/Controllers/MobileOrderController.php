@@ -70,7 +70,9 @@ class MobileOrderController extends Controller
         $counts = DB::table('mobile_inbox')->where('status', 'waiting')->groupBy('kind')->selectRaw('kind, COUNT(*) as c')->pluck('c', 'kind');
         $last_run = json_decode((string) DB::table('system')->where('key', 'mobile_sync_last_run')->value('value'), true);
 
-        return view('mobile_order.index', compact('rows', 'kind', 'status', 'counts', 'last_run', 'locations', 'location'));
+        $shop_edits = DB::table('booker_customer_updates')->where('business_id', request()->session()->get('user.business_id'))->where('status', 'waiting')->count();
+
+        return view('mobile_order.index', compact('rows', 'kind', 'status', 'counts', 'last_run', 'locations', 'location', 'shop_edits'));
     }
 
     public function show($id)
@@ -193,6 +195,61 @@ class MobileOrderController extends Controller
     }
 
     /** Cloud sync panel / progress bar (polled). */
+    /**
+     * Mobile orders > Shop edits: shop changes bookers made in the app (location, photo, phone, address, route...).
+     * Empty fields were filled automatically; changes to existing values wait here.
+     */
+    public function shopEdits(Request $request)
+    {
+        if (! auth()->user()->can('customer.update')) {
+            abort(403, 'Unauthorized action.');
+        }
+        $business_id = request()->session()->get('user.business_id');
+        $status = in_array($request->input('status'), ['waiting', 'applied', 'rejected', 'all']) ? $request->input('status') : 'waiting';
+
+        $query = DB::table('booker_customer_updates as e')
+            ->leftJoin('contacts as c', 'c.id', '=', 'e.contact_id')
+            ->leftJoin('users as u', 'u.id', '=', 'e.booker_id')
+            ->leftJoin('users as d', 'd.id', '=', 'e.decided_by')
+            ->where('e.business_id', $business_id)
+            ->select('e.*', 'c.name', 'c.supplier_business_name', 'c.mobile', 'c.address_line_1', 'c.city', 'c.position',
+                'c.route_id', 'c.outlet_type', 'c.outlet_class', 'c.shop_photo',
+                DB::raw("TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as booker"),
+                DB::raw("TRIM(CONCAT(COALESCE(d.first_name, ''), ' ', COALESCE(d.last_name, ''))) as decided_by_name"))
+            ->orderByDesc('e.id');
+        if ($status !== 'all') {
+            $query->where('e.status', $status);
+        }
+        $rows = $query->paginate(50)->withQueryString();
+
+        $counts = DB::table('mobile_inbox')->where('status', 'waiting')->groupBy('kind')->selectRaw('kind, COUNT(*) as c')->pluck('c', 'kind');
+        $counts['shop_edit'] = DB::table('booker_customer_updates')->where('business_id', $business_id)->where('status', 'waiting')->count();
+        $routes = DB::table('booker_routes')->where('business_id', $business_id)->pluck('name', 'id');
+
+        return view('mobile_order.shop_edits', compact('rows', 'status', 'counts', 'routes'));
+    }
+
+    public function decideShopEdit(Request $request, $id)
+    {
+        if (! auth()->user()->can('customer.update')) {
+            abort(403, 'Unauthorized action.');
+        }
+        try {
+            if ($request->input('decision') === 'approve') {
+                $this->inbox()->approveShopEdit((int) $id, auth()->id());
+                $msg = 'Shop updated';
+            } else {
+                $this->inbox()->rejectShopEdit((int) $id, auth()->id());
+                $msg = 'Change rejected';
+            }
+            $output = ['success' => 1, 'msg' => $msg];
+        } catch (\Exception $e) {
+            $output = ['success' => 0, 'msg' => $e->getMessage()];
+        }
+
+        return redirect()->back()->with('status', $output);
+    }
+
     public function syncStatus()
     {
         return response()->json(SyncStatus::snapshot());

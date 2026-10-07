@@ -56,7 +56,8 @@ class MobileSyncRun extends Command
             $response = $this->cloud()->get('/api/sync/inbox');
             if ($response->successful()) {
                 $added = $inbox->store((array) $response->json());
-                $this->line(sprintf('collected  customers %d  orders %d  payments %d', $added['customers'], $added['orders'], $added['payments']));
+                $this->line(sprintf('collected  customers %d  orders %d  payments %d  shop edits %d', $added['customers'], $added['orders'], $added['payments'], $added['shop_edits']));
+                $this->downloadPhotos($inbox->missingPhotos());
             } else {
                 $this->failed('Collect', $response);
             }
@@ -65,7 +66,10 @@ class MobileSyncRun extends Command
             SyncStatus::progress('Sending order statuses to bookers', 15);
             $inbox->markInvoiced();
             $ack = $inbox->pendingAcks();
-            if (! empty($ack['ids'])) {
+            if ($inbox->customerUpdateAcks) {
+                $ack['customer_updates'] = $inbox->customerUpdateAcks;
+            }
+            if (! empty($ack['ids']) || ! empty($ack['customer_updates'])) {
                 $ids = $ack['ids'];
                 unset($ack['ids']);
                 $response = $this->cloud()->post('/api/sync/ack', $ack);
@@ -123,6 +127,20 @@ class MobileSyncRun extends Command
     }
 
     private $errors = [];
+
+    /** Shop photos bookers took are kept on the cloud; the PC keeps its own copy under public/uploads/booker. */
+    private function downloadPhotos(array $paths): void
+    {
+        foreach ($paths as $path) {
+            $response = $this->cloud()->accept('image/jpeg')->get('/api/sync/file', ['path' => $path]);
+            if ($response->successful() && strlen($response->body()) > 0) {
+                if (! is_dir(dirname(public_path($path)))) {
+                    mkdir(dirname(public_path($path)), 0755, true);
+                }
+                file_put_contents(public_path($path), $response->body());
+            }
+        }
+    }
 
     private function failed(string $step, $response): void
     {

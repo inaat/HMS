@@ -62,6 +62,19 @@ class MobileInbox
                     'created_by' => $this->bookerOrAdmin($c['created_by'] ?? null),
                     'contact_status' => 'active',
                 ]);
+                $extra = array_filter([
+                    'position' => $c['position'] ?? null,
+                    'shop_photo' => $c['photo_url'] ?? null,
+                    'route_id' => $this->localRouteId($c['route_id'] ?? null),
+                    'outlet_type' => $c['outlet_type'] ?? null,
+                    'outlet_class' => $c['outlet_class'] ?? null,
+                ]);
+                if (! empty($extra['route_id'])) {
+                    $extra['visit_sequence'] = $this->nextSequence($extra['route_id']);
+                }
+                if ($extra) {
+                    DB::table('contacts')->where('id', $result['data']->id)->update($extra);
+                }
                 DB::table('mobile_inbox')->insert([
                     'kind' => 'customer',
                     'uuid' => $c['uuid'],
@@ -122,7 +135,156 @@ class MobileInbox
             $added['payments']++;
         }
 
+        $added['shop_edits'] = 0;
+        foreach ($inbox['customer_updates'] ?? [] as $u) {
+            // Acknowledged every time it comes, so a lost ack heals itself on the next sync.
+            $this->customerUpdateAcks[] = $u['uuid'];
+            if (DB::table('booker_customer_updates')->where('uuid', $u['uuid'])->exists()) {
+                continue;
+            }
+            $this->storeCustomerUpdate($u);
+            $added['shop_edits']++;
+        }
+
         return $added;
+    }
+
+    /** UUIDs of shop edits stored (or already stored) by store(); /api/sync/ack takes them as customer_updates. */
+    public $customerUpdateAcks = [];
+
+    // Booker field => contacts column.
+    const SHOP_FIELDS = [
+        'name' => 'name', 'business_name' => 'supplier_business_name', 'mobile' => 'mobile', 'address' => 'address_line_1',
+        'city' => 'city', 'position' => 'position', 'route_id' => 'route_id', 'outlet_type' => 'outlet_type',
+        'outlet_class' => 'outlet_class', 'photo' => 'shop_photo',
+    ];
+
+    /**
+     * A booker's edit of a shop: fields that are empty on the customer are filled at once (first GPS, first
+     * photo...); changes to values the customer already has wait for approval (Mobile orders > Shop edits).
+     */
+    private function storeCustomerUpdate(array $u): void
+    {
+        DB::transaction(function () use ($u) {
+            $contact = DB::table('contacts')->where('business_id', $this->business_id)->where('id', (int) ($u['contact_id'] ?? 0))->first();
+            $fields = (array) ($u['fields'] ?? []);
+            if (! empty($u['photo'])) {
+                $fields['photo'] = $u['photo'];
+            }
+            if (isset($fields['route_id'])) {
+                $fields['route_id'] = $this->localRouteId($fields['route_id']);
+            }
+
+            $apply = $wait = [];
+            foreach ($fields as $key => $value) {
+                $column = self::SHOP_FIELDS[$key] ?? null;
+                if (empty($contact) || $column === null || $value === null || $value === '') {
+                    continue;
+                }
+                $old = $contact->{$column};
+                if ((string) $old === (string) $value) {
+                    continue;
+                }
+                if ($old === null || in_array(trim((string) $old), ['', '-', '0'], true)) {
+                    $apply[$key] = $value;
+                } else {
+                    $wait[$key] = $value;
+                }
+            }
+
+            if ($apply) {
+                $this->applyShopFields((int) $contact->id, $apply);
+            }
+
+            DB::table('booker_customer_updates')->insert([
+                'uuid' => $u['uuid'],
+                'business_id' => $this->business_id,
+                'booker_id' => (int) ($u['user_id'] ?? 0),
+                'contact_id' => $contact->id ?? null,
+                'fields' => json_encode($wait + ['accuracy_m' => $u['accuracy_m'] ?? null]),
+                'applied' => json_encode($apply),
+                'photo' => $u['photo'] ?? null,
+                'status' => $wait ? 'waiting' : 'applied',
+                'decided_at' => $wait ? null : now(),
+                'created_at' => $u['edited_at'] ?? now(),
+                'updated_at' => now(),
+            ]);
+        });
+    }
+
+    /** Write booker fields to the customer (a new route puts the shop last on that route). */
+    private function applyShopFields(int $contact_id, array $fields): void
+    {
+        $update = [];
+        foreach ($fields as $key => $value) {
+            if (isset(self::SHOP_FIELDS[$key])) {
+                $update[self::SHOP_FIELDS[$key]] = $value;
+            }
+        }
+        if (! empty($update['route_id'])) {
+            $update['visit_sequence'] = $this->nextSequence((int) $update['route_id']);
+        }
+        if ($update) {
+            DB::table('contacts')->where('business_id', $this->business_id)->where('id', $contact_id)->update($update + ['updated_at' => now()]);
+        }
+    }
+
+    /** Approve a waiting shop edit: its changes go onto the customer. */
+    public function approveShopEdit(int $id, int $user_id): void
+    {
+        DB::transaction(function () use ($id, $user_id) {
+            $row = $this->lockShopEdit($id);
+            $fields = json_decode($row->fields, true) ?: [];
+            unset($fields['accuracy_m']);
+            if (! empty($row->contact_id)) {
+                $this->applyShopFields((int) $row->contact_id, $fields);
+            }
+            DB::table('booker_customer_updates')->where('id', $id)->update(['status' => 'applied', 'decided_by' => $user_id, 'decided_at' => now(), 'updated_at' => now()]);
+        });
+    }
+
+    public function rejectShopEdit(int $id, int $user_id): void
+    {
+        DB::transaction(function () use ($id, $user_id) {
+            $this->lockShopEdit($id);
+            DB::table('booker_customer_updates')->where('id', $id)->update(['status' => 'rejected', 'decided_by' => $user_id, 'decided_at' => now(), 'updated_at' => now()]);
+        });
+    }
+
+    private function lockShopEdit(int $id)
+    {
+        $row = DB::table('booker_customer_updates')->where('business_id', $this->business_id)->where('id', $id)->lockForUpdate()->first();
+        if (empty($row)) {
+            throw new \Exception('Not found');
+        }
+        if ($row->status !== 'waiting') {
+            throw new \Exception('Already '.$row->status);
+        }
+
+        return $row;
+    }
+
+    /** Booker photos (shop / new customer) the PC has no copy of yet: paths under public/. */
+    public function missingPhotos(): array
+    {
+        return DB::table('booker_customer_updates')->whereNotNull('photo')->pluck('photo')
+            ->merge(DB::table('contacts')->where('business_id', $this->business_id)->where('shop_photo', 'like', 'uploads/booker/%')->pluck('shop_photo'))
+            ->unique()
+            ->filter(function ($path) {
+                return preg_match('#^uploads/booker/[a-z0-9-]+\.jpg$#', $path) && ! is_file(public_path($path));
+            })
+            ->values()
+            ->all();
+    }
+
+    private function localRouteId($id): ?int
+    {
+        return ! empty($id) && DB::table('booker_routes')->where('business_id', $this->business_id)->where('id', (int) $id)->exists() ? (int) $id : null;
+    }
+
+    private function nextSequence(int $route_id): int
+    {
+        return (int) DB::table('contacts')->where('route_id', $route_id)->max('visit_sequence') + 1;
     }
 
     /**

@@ -273,14 +273,31 @@
             function initAutocomplete() {
                 var map = new google.maps.Map(document.getElementById('map'), {
                     center: {
-                        lat: -33.8688,
-                        lng: 151.2195
+                        lat: 34.8,
+                        lng: 71.9
                     },
                     zoom: 10,
                     mapTypeId: 'roadmap'
                 });
 
-                if (navigator.geolocation) {
+                // Shop location pin: open on the saved location; click the map or drag the pin to set it
+                // (stored in the hidden "position" field as "lat,lng", used by the booker app and routes).
+                var pin = null;
+                function setPin(latLng, pan) {
+                    if (!pin) {
+                        pin = new google.maps.Marker({map: map, position: latLng, draggable: true, title: 'Shop location'});
+                        pin.addListener('dragend', function (e) { setPin(e.latLng); });
+                    }
+                    pin.setPosition(latLng);
+                    $('#position').val(latLng.lat().toFixed(7) + ',' + latLng.lng().toFixed(7));
+                    if (pan) { map.setCenter(latLng); map.setZoom(17); }
+                }
+                map.addListener('click', function (e) { setPin(e.latLng); });
+
+                var saved = String($('#position').val() || '').split(',');
+                if (saved.length === 2 && !isNaN(parseFloat(saved[0])) && !isNaN(parseFloat(saved[1]))) {
+                    setPin(new google.maps.LatLng(parseFloat(saved[0]), parseFloat(saved[1])), true);
+                } else if (navigator.geolocation) {
                     navigator.geolocation.getCurrentPosition(function(position) {
                         initialLocation = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
                         map.setCenter(initialLocation);
@@ -321,25 +338,8 @@
                             console.log("Returned place contains no geometry");
                             return;
                         }
-                        var icon = {
-                            url: place.icon,
-                            size: new google.maps.Size(71, 71),
-                            origin: new google.maps.Point(0, 0),
-                            anchor: new google.maps.Point(17, 34),
-                            scaledSize: new google.maps.Size(25, 25)
-                        };
-
-                        // Create a marker for each place.
-                        markers.push(new google.maps.Marker({
-                            map: map,
-                            icon: icon,
-                            title: place.name,
-                            position: place.geometry.location
-                        }));
-
-                        //set position field value
-                        var lat_long = [place.geometry.location.lat(), place.geometry.location.lng()]
-                        $('#position').val(lat_long);
+                        // Move the (draggable) shop pin there and set the position field
+                        setPin(place.geometry.location);
 
                         if (place.geometry.viewport) {
                             // Only geocodes have viewport.

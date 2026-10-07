@@ -48,17 +48,17 @@ const db = {
 const S = {
   token: null, user: null, since: null, stock: {}, stockAt: null, lastSync: null, seq: { order: 1, receipt: 1 },
   products: new Map(), customers: new Map(), invoices: new Map(), outbox: new Map(), history: new Map(),
-  draft: { customer: null, lines: [], note: '' }, tab: 'home', cartOpen: false, syncing: false, online: navigator.onLine,
+  draft: { customer: null, lines: [], note: '' }, routes: [], outletTypes: [], editsSent: {}, tab: 'home', cartOpen: false, syncing: false, online: navigator.onLine,
 };
 
 async function loadState() {
-  for (const k of ['locations', 'location', 'stockByLoc', 'business', 'token', 'user', 'since', 'stock', 'stockAt', 'lastSync', 'seq', 'draft']) {
+  for (const k of ['locations', 'location', 'stockByLoc', 'business', 'token', 'user', 'since', 'stock', 'stockAt', 'lastSync', 'seq', 'draft', 'routes', 'outletTypes', 'editsSent']) {
     const v = await db.get(k);
     if (v !== undefined && v !== null) S[k] = v;
   }
   if (!Array.isArray(S.draft.lines)) S.draft = { customer: null, lines: [], note: '' };
   (await db.all('products')).forEach((p) => S.products.set(p.variation_id, p));
-  (await db.all('customers')).forEach((c) => S.customers.set(c.key, c));
+  (await db.all('customers')).forEach((c) => S.customers.set(c.key, cleanCust(c)));
   (await db.all('invoices')).forEach((i) => S.invoices.set(i.id, i));
   (await db.all('outbox')).forEach((o) => S.outbox.set(o.uuid, o));
   (await db.all('history')).forEach((o) => S.history.set(o.uuid, o));
@@ -85,6 +85,13 @@ const ago = (t) => {
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
   const r = (Math.random() * 16) | 0; return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
 }));
+/** The POS stores "0" or "-" when a customer has no mobile: show nothing instead. */
+const cleanCust = (c) => ({ ...c, mobile: ['0', '-'].includes(String(c.mobile ?? '').trim()) ? '' : c.mobile });
+const DAYS = { 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat', 7: 'Sun' };
+const routeName = (id) => ((S.routes || []).find((r) => r.id === num(id)) || {}).name || '';
+/** Booker photos live on the cloud copy next to the app (public/uploads/booker/...). */
+const photoUrl = (path) => new URL('../' + path, location.href).href;
+const mapLink = (pos) => 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(pos);
 const match = (text, q) => q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => text.toLowerCase().includes(w));
 
 function toast(msg, ms = 2600) {
@@ -204,17 +211,19 @@ async function sync(manual) {
 async function upload() {
   const items = [...S.outbox.values()].filter((o) => o.state !== 'error').sort((a, b) => a.created.localeCompare(b.created));
   if (!items.length) return;
-  const body = { customers: [], orders: [], payments: [] };
-  items.forEach((o) => body[o.type === 'customer' ? 'customers' : o.type + 's'].push(o));
+  const sets = { customer: 'customers', order: 'orders', payment: 'payments', customer_update: 'customer_updates' };
+  const body = { customers: [], orders: [], payments: [], customer_updates: [] };
+  items.forEach((o) => body[sets[o.type]].push(o));
   const res = await api('POST', '/upload', body);
 
   const done = [];
-  ['customers', 'orders', 'payments'].forEach((k) => (res[k] || []).forEach((r) => {
+  Object.values(sets).forEach((k) => (res[k] || []).forEach((r) => {
     const item = S.outbox.get(r.uuid);
     if (!item) return;
     if (r.result === 'saved' || r.result === 'duplicate') {
       done.push(item.uuid);
-      if (item.type !== 'customer') {
+      if (item.type === 'customer_update') S.editsSent[item.contact_id] = nowStr();
+      if (item.type === 'order' || item.type === 'payment') {
         const hist = { ...item, status: r.status || 'pending', short_stock: !!r.short_stock, wa_sent: !!r.whatsapp, sent: nowStr() };
         delete hist.state; delete hist.error;
         S.history.set(hist.uuid, hist);
@@ -228,6 +237,7 @@ async function upload() {
   await db.del('outbox', done);
   await db.put('outbox', [...S.outbox.values()]);
   await db.put('history', [...S.history.values()]);
+  await db.set('editsSent', S.editsSent);
 }
 
 async function download() {
@@ -244,7 +254,7 @@ async function download() {
     const key = custKey(c);
     if (c.uuid && c.local_id && S.customers.has('u' + c.uuid)) { S.customers.delete('u' + c.uuid); delC.push('u' + c.uuid); }
     if (c.status === 'deleted') { S.customers.delete(key); delC.push(key); return; }
-    const row = { ...c, key };
+    const row = cleanCust({ ...c, key });
     S.customers.set(key, row); putC.push(row);
   });
   await db.put('customers', putC); await db.del('customers', delC);
@@ -262,6 +272,8 @@ async function download() {
   await db.put('history', [...S.history.values()]);
 
   if (data.business) { S.business = data.business; await db.set('business', data.business); }
+  if (data.routes) { S.routes = data.routes; await db.set('routes', S.routes); }
+  if (data.outlet_types) { S.outletTypes = data.outlet_types; await db.set('outletTypes', S.outletTypes); }
   S.stock = data.stock || {};
   if (data.locations) { S.locations = data.locations; await db.set('locations', S.locations); }
   if (data.stock_by_location) { S.stockByLoc = data.stock_by_location; await db.set('stockByLoc', S.stockByLoc); }
@@ -511,9 +523,12 @@ function customerRows(q, act) {
     ...newOnes.map((o) => `<div class="item tap" data-act="${act}" data-key="u${o.uuid}"><b>${h(o.name)}</b> <span class="pill warn">new · not sent</span><div class="muted">${h(o.mobile || '')} ${h(o.city || '')}</div></div>`),
     ...list.map((c) => {
       const { due, pending } = customerDue(c);
+      const editing = [...S.outbox.values()].some((o) => o.type === 'customer_update' && o.contact_id === c.local_id);
       return `<div class="item tap" data-act="${act}" data-key="${h(c.key)}"><div class="row"><div class="grow"><b>${h(custName(c))}</b>
-        ${c.status === 'pending' ? '<span class="pill">new</span>' : ''}<div class="muted">${h(c.mobile || '')} ${h(c.city || '')}</div></div>
-        <div class="right"><div class="${due > 0 ? '' : 'muted'}">${money(due)}</div>${pending ? `<div class="muted">−${money(pending)} collected</div>` : ''}</div></div></div>`;
+        ${c.status === 'pending' ? '<span class="pill">new</span>' : ''}${editing ? ' <span class="pill warn">edit not sent</span>' : ''}
+        <div class="muted">${c.position ? '📍 ' : ''}${c.photo_url ? '📷 ' : ''}${h([c.mobile, c.city, routeName(c.route_id)].filter(Boolean).join(' · '))}</div></div>
+        <div class="right"><div class="${due > 0 ? '' : 'muted'}">${money(due)}</div>${pending ? `<div class="muted">−${money(pending)} collected</div>` : ''}</div>
+        ${act === 'open-customer' && c.local_id ? `<button class="btn small light" data-act="edit-shop" data-key="${h(c.key)}">✎ Edit</button>` : ''}</div></div>`;
     }),
   ];
   return rows.join('') || '<div class="empty">No customers. Sync to download them.</div>';
@@ -527,14 +542,14 @@ function findCustomer(key) {
 }
 
 function activityView() {
-  const items = [...S.outbox.values()].filter((o) => o.type !== 'customer').map((o) => ({ ...o, status: o.state === 'error' ? 'error' : 'not sent' }))
+  const items = [...S.outbox.values()].filter((o) => o.type === 'order' || o.type === 'payment').map((o) => ({ ...o, status: o.state === 'error' ? 'error' : 'not sent' }))
     .concat([...S.history.values()])
     .sort((a, b) => String(b.created).localeCompare(String(a.created))).slice(0, 150);
-  const errorsC = [...S.outbox.values()].filter((o) => o.type === 'customer' && o.state === 'error');
+  const errorsC = [...S.outbox.values()].filter((o) => (o.type === 'customer' || o.type === 'customer_update') && o.state === 'error');
   const pill = (s) => ({ 'not sent': 'warn', error: 'bad', pending: '', received: '', approved: 'ok', invoiced: 'ok', rejected: 'bad' }[s] ?? '');
   const label = (s) => ({ pending: 'sent', received: 'at office', approved: 'approved', invoiced: 'invoiced' }[s] || s);
   return `
-    ${errorsC.map((o) => `<div class="card"><b>New customer ${h(o.name)}</b> <span class="pill bad">not accepted</span><div class="muted">${h(o.error)}</div>
+    ${errorsC.map((o) => `<div class="card"><b>${o.type === 'customer' ? 'New customer ' + h(o.name) : 'Shop edit ' + h(o.customer_name)}</b> <span class="pill bad">not accepted</span><div class="muted">${h(o.error)}</div>
       <div class="row" style="margin-top:8px"><button class="btn small light" data-act="retry" data-uuid="${o.uuid}">Try again</button><button class="btn small bad" data-act="discard" data-uuid="${o.uuid}">Delete</button></div></div>`).join('')}
     <div class="card list">${items.map((o) => `
       <div class="item tap" data-act="open-slip" data-uuid="${o.uuid}">
@@ -596,6 +611,7 @@ function customerForm() {
     <label>Mobile</label><input name="mobile" inputmode="tel">
     <label>Address</label><input name="address">
     <label>City / area</label><input name="city">
+    ${shopFields({})}
     <button class="btn block" style="margin-top:14px">Save customer</button></form>`);
 }
 
@@ -605,7 +621,11 @@ function openCustomer(key) {
   const { due, pending } = customerDue(c);
   const invoices = c.local_id ? [...S.invoices.values()].filter((i) => i.contact_id === c.local_id).sort((a, b) => a.transaction_date.localeCompare(b.transaction_date)) : [];
   sheet(custName(c), `
+    ${c.photo_url ? `<img src="${h(photoUrl(c.photo_url))}" class="shop-photo" alt="">` : ''}
     <div class="card"><div class="muted">${h(c.mobile || '')} ${h(c.address || '')} ${h(c.city || '')}</div>
+      <div class="muted">${h([routeName(c.route_id) && 'Route ' + routeName(c.route_id), c.outlet_type, c.outlet_class && 'Class ' + c.outlet_class].filter(Boolean).join(' · '))}</div>
+      ${c.position ? `<div style="margin-top:6px">📍 <a href="${h(mapLink(c.position))}" target="_blank" rel="noopener">Navigate to shop</a></div>` : '<div class="muted" style="margin-top:6px">📍 No location yet — tap Edit shop at the shop and “Set location here”.</div>'}
+      ${S.editsSent[c.local_id] ? `<div class="muted">Your changes went to the office ${h(ago(S.editsSent[c.local_id]))}</div>` : ''}
       <div class="row" style="margin-top:8px"><div class="grow">Balance due</div><b class="big">${money(due)}</b></div>
       ${pending ? `<div class="row muted"><div class="grow">Collected, waiting approval</div>−${money(pending)}</div>` : ''}</div>
     ${invoices.length ? `<div class="card list"><b>Unpaid invoices</b>${invoices.map((i) => `<div class="item row"><div class="grow">${h(i.invoice_no)}<div class="muted">${h(i.transaction_date.slice(0, 10))} · total ${money(i.final_total)}</div></div><b>${money(i.due)}</b></div>`).join('')}</div>` : ''}
@@ -613,7 +633,113 @@ function openCustomer(key) {
       <button class="btn ok grow" data-act="order-for" data-key="${h(key)}">New order</button>
       <button class="btn grow" data-act="collect" data-key="${h(key)}">Collect payment</button>
     </div>
+    ${c.local_id ? `<button class="btn light block" style="margin-top:8px" data-act="edit-shop" data-key="${h(key)}">✎ Edit shop (location, photo, phone…)</button>` : ''}
     ${c.mobile ? `<a class="btn light block" style="margin-top:8px;text-decoration:none" href="tel:${h(c.mobile)}">Call ${h(c.mobile)}</a>` : ''}`);
+}
+
+/** Route, shop type / class, GPS and photo: on the new-customer form and on Edit shop. */
+function shopFields(c) {
+  return `
+    <label>Route</label><select name="route_id"><option value="">—</option>${(S.routes || []).map((r) => `<option value="${r.id}" ${num(c.route_id) === r.id ? 'selected' : ''}>${h(r.name)}${(r.days || []).length ? ' · ' + r.days.map((d) => DAYS[d]).join(' ') : ''}</option>`).join('')}</select>
+    <div class="row"><div class="grow"><label>Shop type</label><select name="outlet_type"><option value="">—</option>${(S.outletTypes || []).map((t) => `<option ${c.outlet_type === t ? 'selected' : ''}>${h(t)}</option>`).join('')}</select></div>
+      <div style="width:90px"><label>Class</label><select name="outlet_class"><option value="">—</option>${['A', 'B', 'C'].map((x) => `<option ${c.outlet_class === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div></div>
+    <label>Shop location</label>
+    <div class="card" style="margin:0"><div id="gps-text" class="muted">${c.position ? '📍 Saved: ' + h(c.position) : 'Not set yet'}</div>
+      <button type="button" class="btn block" style="margin-top:8px" data-act="gps-here">📍 Set location here (stand at the shop)</button></div>
+    <input type="hidden" name="position"><input type="hidden" name="accuracy_m">
+    <label>Shop photo</label>
+    <div id="photo-prev">${c.photo_url ? `<img src="${h(photoUrl(c.photo_url))}" class="shop-photo" alt="">` : ''}</div>
+    <label class="btn light block" style="text-align:center;margin:0">📷 ${c.photo_url ? 'Take a new photo' : 'Take photo'}<input type="file" accept="image/*" capture="environment" data-act="photo-in" style="display:none"></label>
+    <input type="hidden" name="photo">`;
+}
+
+/** Edit an existing shop. The office approves changes to filled-in values; empty fields are filled at once. */
+function editShopForm(key) {
+  const c = findCustomer(key);
+  if (!c || !c.local_id) return;
+  sheet('Edit ' + custName(c), `<form data-form="shop-edit" data-key="${h(key)}">
+    <label>Shop / customer name</label><input name="name" value="${h(c.name)}">
+    <label>Owner / business name</label><input name="business_name" value="${h(c.business_name || '')}">
+    <label>Mobile</label><input name="mobile" inputmode="tel" value="${h(c.mobile || '')}">
+    <label>Address</label><input name="address" value="${h(c.address || '')}">
+    <label>City / area</label><input name="city" value="${h(c.city || '')}">
+    ${shopFields(c)}
+    <div class="muted" style="margin-top:10px">Empty details are saved at once. Changes to details the office already has are checked by the office first.</div>
+    <button class="btn ok block" style="margin-top:14px">Save changes</button></form>`);
+}
+
+/** Current GPS position, as accurate as the phone can get in 20 seconds. */
+function getGps() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('This phone cannot give a location')); return; }
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
+      (e) => reject(new Error(e.code === 1 ? 'Location is blocked: allow Location for this app in the phone settings' : 'No GPS signal. Step outside and try again')),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  });
+}
+
+async function setGpsHere(btn) {
+  const form = btn.closest('form');
+  const text = form.querySelector('#gps-text');
+  btn.disabled = true;
+  text.textContent = 'Finding your location…';
+  try {
+    const g = await getGps();
+    if (g.accuracy > 50) {
+      text.innerHTML = `<span style="color:var(--bad)">GPS is weak (±${Math.round(g.accuracy)} m). Step outside the shop and tap again.</span>`;
+      return;
+    }
+    form.querySelector('[name=position]').value = g.lat.toFixed(7) + ',' + g.lng.toFixed(7);
+    form.querySelector('[name=accuracy_m]').value = Math.round(g.accuracy);
+    text.innerHTML = `<b style="color:var(--ok)">📍 Location set</b> (±${Math.round(g.accuracy)} m) <a href="${h(mapLink(g.lat + ',' + g.lng))}" target="_blank" rel="noopener">check on map</a>`;
+  } catch (e) {
+    text.innerHTML = `<span style="color:var(--bad)">${h(e.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/** A camera photo made small (longest side 1280 px, JPEG) so it uploads quickly on mobile data. */
+function shrinkPhoto(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, 1280 / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(url);
+      resolve(cv.toDataURL('image/jpeg', 0.7));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That is not a picture')); };
+    img.src = url;
+  });
+}
+
+/** Shop details from the form that differ from what the phone has (blank = not changed). */
+function shopChanges(f, c) {
+  const fields = {};
+  ['name', 'business_name', 'mobile', 'address', 'city', 'outlet_type', 'outlet_class', 'route_id'].forEach((k) => {
+    const v = String(f.get(k) || '').trim();
+    if (v !== '' && v !== String(c[k] ?? '')) fields[k] = k === 'route_id' ? num(v) : v;
+  });
+  if (f.get('position')) { fields.position = f.get('position'); fields.accuracy_m = num(f.get('accuracy_m')); }
+  return fields;
+}
+
+async function saveShopEdit(form) {
+  const c = findCustomer(form.dataset.key);
+  const f = new FormData(form);
+  const fields = shopChanges(f, c);
+  const photo = f.get('photo') || null;
+  if (!Object.keys(fields).length && !photo) { toast('Nothing changed'); return; }
+  await addToOutbox({ uuid: uuid(), type: 'customer_update', contact_id: c.local_id, customer_name: custName(c), fields, photo, created: nowStr() });
+  closeSheet();
+  render();
+  toast('Saved. It goes to the office with the next sync.');
+  sync();
 }
 
 function paymentForm(key) {
@@ -757,7 +883,9 @@ async function saveCustomer(form) {
   const name = String(f.get('name') || '').trim();
   if (!name) return;
   const c = { uuid: uuid(), type: 'customer', name, business_name: f.get('business_name') || null, mobile: f.get('mobile') || null,
-    address: f.get('address') || null, city: f.get('city') || null, created: nowStr() };
+    address: f.get('address') || null, city: f.get('city') || null, route_id: num(f.get('route_id')) || null,
+    outlet_type: f.get('outlet_type') || null, outlet_class: f.get('outlet_class') || null,
+    position: f.get('position') || null, photo: f.get('photo') || null, created: nowStr() };
   await addToOutbox(c);
   closeSheet();
   S.draft.customer = 'u' + c.uuid;
@@ -832,6 +960,8 @@ document.addEventListener('click', async (e) => {
     case 'pick-product': pickProduct(); break;
     case 'add-customer': customerForm(); break;
     case 'open-customer': openCustomer(el.dataset.key); break;
+    case 'edit-shop': editShopForm(el.dataset.key); break;
+    case 'gps-here': setGpsHere(el); break;
     case 'choose-customer': d.customer = el.dataset.key; await saveDraft(); closeSheet(); render(); if ($('#prod-q')) $('#prod-q').focus(); break;
     case 'order-for': d.customer = el.dataset.key; await saveDraft(); closeSheet(); S.tab = 'order'; render(); break;
     case 'collect': paymentForm(el.dataset.key); break;
@@ -870,6 +1000,14 @@ document.addEventListener('change', async (e) => {
     if (v === '' || isNaN(Number(v)) || Number(v) < 0) delete S.draft.lines[i].price; else S.draft.lines[i].price = Number(v);
     await saveDraft(); refreshPos();
   }
+  if (el.dataset.act === 'photo-in' && el.files && el.files[0]) {
+    const form = el.closest('form');
+    try {
+      const data = await shrinkPhoto(el.files[0]);
+      form.querySelector('[name=photo]').value = data;
+      form.querySelector('#photo-prev').innerHTML = `<img src="${data}" class="shop-photo" alt="">`;
+    } catch (err) { toast(err.message); }
+  }
   if (el.dataset.act === 'qty-in') { S.draft.lines[i].qty = num(el.value); await saveDraft(); refreshPos(); }
 });
 
@@ -884,7 +1022,7 @@ document.addEventListener('input', (e) => {
 document.addEventListener('submit', (e) => {
   const form = e.target;
   e.preventDefault();
-  ({ login, customer: saveCustomer, payment: savePayment }[form.dataset.form] || (() => {}))(form);
+  ({ login, customer: saveCustomer, payment: savePayment, 'shop-edit': saveShopEdit }[form.dataset.form] || (() => {}))(form);
 });
 
 document.addEventListener('keydown', (e) => {

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Cloud side of the local PC <-> cloud link (header X-Sync-Key, see App\Http\Middleware\MobileSync).
@@ -55,8 +56,14 @@ class MobileSyncController extends Controller
                 }
 
                 $result['customers'] = $this->syncSet('mb_customers', 'local_id', $customers,
-                    ['name', 'business_name', 'mobile', 'address', 'city', 'credit_limit', 'balance_due', 'status'],
+                    ['name', 'business_name', 'mobile', 'address', 'city', 'credit_limit', 'balance_due', 'status',
+                        'route_id', 'position', 'photo_url', 'outlet_type', 'outlet_class', 'visit_sequence'],
                     ['status' => 'deleted']);
+            }
+
+            if (is_array($request->input('routes')) && Schema::hasTable('mb_routes')) {
+                $result['routes'] = $this->syncSet('mb_routes', 'id', $request->input('routes'),
+                    ['name', 'location_id', 'days', 'booker_id', 'active'], ['active' => 0]);
             }
 
             if (is_array($request->input('invoices'))) {
@@ -92,7 +99,16 @@ class MobileSyncController extends Controller
 
         $customers = DB::table('mb_customers')->where('status', 'pending')->whereNull('local_id')->orderBy('id')->get();
 
-        return response()->json(compact('customers', 'orders', 'payments'));
+        // Shop edits from bookers (location, photo, phone...): the PC applies or queues them for approval.
+        $customer_updates = Schema::hasTable('mb_customer_updates')
+            ? DB::table('mb_customer_updates')->where('status', 'pending')->orderBy('id')->limit($limit)->get()
+                ->map(function ($u) {
+                    return ['uuid' => $u->uuid, 'user_id' => $u->user_id, 'photo' => $u->photo, 'created_at' => (string) $u->created_at]
+                        + (json_decode($u->data, true) ?: []);
+                })
+            : [];
+
+        return response()->json(compact('customers', 'orders', 'payments', 'customer_updates'));
     }
 
     public function ack(Request $request)
@@ -106,6 +122,12 @@ class MobileSyncController extends Controller
                     $done['customers'] += DB::table('mb_customers')->where('uuid', $c['uuid'])
                         ->update(['local_id' => (int) $c['local_id'], 'status' => 'active', 'updated_at' => $now]);
                 }
+            }
+
+            $updates = array_filter((array) $request->input('customer_updates', []), 'is_string');
+            if ($updates && Schema::hasTable('mb_customer_updates')) {
+                $done['customer_updates'] = DB::table('mb_customer_updates')->whereIn('uuid', $updates)
+                    ->update(['status' => 'received', 'updated_at' => $now]);
             }
 
             foreach ((array) $request->input('orders', []) as $o) {
@@ -183,6 +205,17 @@ class MobileSyncController extends Controller
      * Upsert a full snapshot into $table keyed on $key, touching updated_at only when a row really changed, and
      * apply $missing to rows the snapshot no longer contains.
      */
+    /** A photo a booker uploaded (shop / visit), for the PC to keep a copy. */
+    public function file(Request $request)
+    {
+        $path = (string) $request->input('path');
+        if (! preg_match('#^uploads/booker/[a-z0-9-]+\.jpg$#', $path) || ! is_file(public_path($path))) {
+            abort(404);
+        }
+
+        return response()->file(public_path($path), ['Content-Type' => 'image/jpeg']);
+    }
+
     private function syncSet(string $table, string $key, array $rows, array $fields, array $missing): array
     {
         $now = now();

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
@@ -105,8 +106,17 @@ class MobileController extends Controller
             });
 
         $customers = $changed(DB::table('mb_customers'))
-            ->select('id', 'local_id', 'uuid', 'name', 'business_name', 'mobile', 'address', 'city', 'credit_limit', 'balance_due', 'status')
+            ->select('id', 'local_id', 'uuid', 'name', 'business_name', 'mobile', 'address', 'city', 'credit_limit', 'balance_due', 'status',
+                'route_id', 'position', 'photo_url', 'outlet_type', 'outlet_class', 'visit_sequence')
             ->get();
+
+        // Routes are few: always sent in full (the app shows the booker's own routes per weekday).
+        $routes = Schema::hasTable('mb_routes')
+            ? DB::table('mb_routes')->where('active', 1)->orderBy('name')->get(['id', 'name', 'location_id', 'days', 'booker_id'])
+                ->each(function ($r) {
+                    $r->days = json_decode($r->days ?? '[]', true) ?: [];
+                })
+            : [];
 
         $invoices = $changed(DB::table('mb_invoices'))
             ->select('id', 'contact_id', 'invoice_no', 'transaction_date', 'final_total', 'paid', 'due', 'active')
@@ -135,6 +145,9 @@ class MobileController extends Controller
             }),
             'products' => $products,
             'customers' => $customers,
+            'routes' => $routes,
+            'outlet_types' => \App\Http\Controllers\BookerRouteController::OUTLET_TYPES,
+            'visit_radius_m' => (int) config('mobile_sync.visit_radius_m', 100),
             'invoices' => $invoices,
             'orders' => $orders,
             'payments' => $payments,
@@ -144,7 +157,7 @@ class MobileController extends Controller
     public function upload(Request $request)
     {
         $user = $request->attributes->get('mb_user');
-        $result = ['customers' => [], 'orders' => [], 'payments' => []];
+        $result = ['customers' => [], 'orders' => [], 'payments' => [], 'customer_updates' => []];
 
         // Customers first: an order in the same upload may be for a customer the booker just added.
         foreach ((array) $request->input('customers', []) as $row) {
@@ -155,6 +168,9 @@ class MobileController extends Controller
         }
         foreach ((array) $request->input('payments', []) as $row) {
             $result['payments'][] = $this->savePayment($user, (array) $row);
+        }
+        foreach ((array) $request->input('customer_updates', []) as $row) {
+            $result['customer_updates'][] = $this->saveCustomerUpdate($user, (array) $row);
         }
 
         return response()->json($result + ['server_time' => now()->toDateTimeString()]);
@@ -181,6 +197,11 @@ class MobileController extends Controller
             'mobile' => $this->str($row, 'mobile'),
             'address' => $this->str($row, 'address'),
             'city' => $this->str($row, 'city'),
+            'position' => $this->position($row['position'] ?? null),
+            'photo_url' => $this->savePhoto($row['photo'] ?? null, $uuid),
+            'route_id' => $this->routeId($row['route_id'] ?? null),
+            'outlet_type' => $this->str($row, 'outlet_type', 50),
+            'outlet_class' => $this->outletClass($row['outlet_class'] ?? null),
             'balance_due' => 0,
             'created_by' => $user->id,
             'status' => 'pending',
@@ -189,6 +210,117 @@ class MobileController extends Controller
         ]);
 
         return ['uuid' => $uuid, 'result' => 'saved'];
+    }
+
+    /**
+     * A booker's edit of an existing shop (location, photo, phone, address, route, type...). Only the changed
+     * fields are sent; the PC fills empty fields at once and keeps changes to existing values for approval.
+     */
+    private function saveCustomerUpdate($user, array $row): array
+    {
+        $uuid = $this->uuid($row);
+        if (empty($uuid)) {
+            return ['uuid' => $row['uuid'] ?? null, 'result' => 'error', 'message' => 'Missing or bad uuid'];
+        }
+        if (DB::table('mb_customer_updates')->where('uuid', $uuid)->exists()) {
+            return ['uuid' => $uuid, 'result' => 'duplicate'];
+        }
+        $contact_id = (int) ($row['contact_id'] ?? 0);
+        if (! DB::table('mb_customers')->where('local_id', $contact_id)->where('status', 'active')->exists()) {
+            return ['uuid' => $uuid, 'result' => 'error', 'message' => 'This customer is not on the office list any more'];
+        }
+
+        $in = (array) ($row['fields'] ?? []);
+        $fields = [];
+        foreach (['name', 'business_name', 'mobile', 'address', 'city'] as $key) {
+            if (($v = $this->str($in, $key)) !== null) {
+                $fields[$key] = $v;
+            }
+        }
+        if (($v = $this->str($in, 'outlet_type', 50)) !== null) {
+            $fields['outlet_type'] = $v;
+        }
+        if ($v = $this->outletClass($in['outlet_class'] ?? null)) {
+            $fields['outlet_class'] = $v;
+        }
+        if ($v = $this->routeId($in['route_id'] ?? null)) {
+            $fields['route_id'] = $v;
+        }
+        if ($v = $this->position($in['position'] ?? null)) {
+            $fields['position'] = $v;
+        }
+        $photo = $this->savePhoto($row['photo'] ?? null, $uuid);
+        if (empty($fields) && ! $photo) {
+            return ['uuid' => $uuid, 'result' => 'error', 'message' => 'Nothing was changed'];
+        }
+
+        DB::table('mb_customer_updates')->insert([
+            'uuid' => $uuid,
+            'user_id' => $user->id,
+            'data' => json_encode([
+                'contact_id' => $contact_id,
+                'fields' => $fields,
+                'accuracy_m' => isset($in['accuracy_m']) ? round((float) $in['accuracy_m'], 1) : null,
+                'edited_at' => $this->dateTime($row, 'created'),
+            ]),
+            'photo' => $photo,
+            'status' => 'pending',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return ['uuid' => $uuid, 'result' => 'saved'];
+    }
+
+    /** "34.1234567,71.1234567" or null. */
+    private function position($value): ?string
+    {
+        if (! preg_match('/^\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/', (string) $value, $m)
+            || abs((float) $m[1]) > 90 || abs((float) $m[2]) > 180 || ((float) $m[1] == 0 && (float) $m[2] == 0)) {
+            return null;
+        }
+
+        return round((float) $m[1], 7).','.round((float) $m[2], 7);
+    }
+
+    private function routeId($value): ?int
+    {
+        $id = (int) $value;
+
+        return $id > 0 && Schema::hasTable('mb_routes') && DB::table('mb_routes')->where('id', $id)->where('active', 1)->exists() ? $id : null;
+    }
+
+    private function outletClass($value): ?string
+    {
+        $value = strtoupper(trim((string) $value));
+
+        return in_array($value, ['A', 'B', 'C'], true) ? $value : null;
+    }
+
+    /**
+     * A JPEG from the phone (base64, data: prefix allowed, at most 4 MB) saved as public/uploads/booker/<uuid>.jpg;
+     * the PC downloads the same path. Returns that path, or null when there is no valid photo.
+     */
+    private function savePhoto($data, string $uuid): ?string
+    {
+        if (! is_string($data) || $data === '') {
+            return null;
+        }
+        $bytes = base64_decode(preg_replace('#^data:image/\w+;base64,#', '', $data), true);
+        if ($bytes === false || strlen($bytes) > 4 * 1024 * 1024) {
+            return null;
+        }
+        $info = @getimagesizefromstring($bytes);
+        if (! $info || $info[2] !== IMAGETYPE_JPEG) {
+            return null;
+        }
+        $path = 'uploads/booker/'.$uuid.'.jpg';
+        if (! is_dir(public_path('uploads/booker'))) {
+            mkdir(public_path('uploads/booker'), 0755, true);
+        }
+        file_put_contents(public_path($path), $bytes);
+
+        return $path;
     }
 
     private function saveOrder($user, array $row): array

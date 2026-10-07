@@ -30,6 +30,7 @@ class LocalSnapshot
             'users' => $this->users(),
             'products' => $this->products(),
             'customers' => $this->customers(),
+            'routes' => $this->routes(),
             'invoices' => $this->invoices(),
         ];
     }
@@ -220,19 +221,38 @@ class LocalSnapshot
             ->whereNull('deleted_at')
             ->where('contact_status', 'active')
             ->orderBy('id')
-            ->get(['id', 'name', 'supplier_business_name', 'mobile', 'address_line_1', 'address_line_2', 'city', 'credit_limit'])
+            ->get(['id', 'name', 'supplier_business_name', 'mobile', 'address_line_1', 'address_line_2', 'city', 'credit_limit',
+                'route_id', 'position', 'shop_photo', 'outlet_type', 'outlet_class', 'visit_sequence'])
             ->map(function ($c) use ($due) {
                 return [
                     'local_id' => $c->id,
                     'name' => $c->name ?: ($c->supplier_business_name ?: '#'.$c->id),
                     'business_name' => $c->supplier_business_name,
-                    'mobile' => $c->mobile,
+                    'mobile' => in_array(trim((string) $c->mobile), ['0', '-'], true) ? null : $c->mobile,
                     'address' => trim($c->address_line_1.' '.$c->address_line_2) ?: null,
                     'city' => $c->city,
                     'credit_limit' => $c->credit_limit === null ? null : round((float) $c->credit_limit, 4),
                     'balance_due' => round((float) ($due[$c->id] ?? 0), 4),
                     'status' => 'active',
+                    'route_id' => $c->route_id,
+                    'position' => $c->position ?: null,
+                    'photo_url' => $c->shop_photo ?: null,
+                    'outlet_type' => $c->outlet_type,
+                    'outlet_class' => $c->outlet_class,
+                    'visit_sequence' => $c->visit_sequence,
                 ];
+            })
+            ->all();
+    }
+
+    /** Booker routes with their weekdays (1 = Monday .. 7 = Sunday). */
+    public function routes(): array
+    {
+        return DB::table('booker_routes')->where('business_id', $this->business_id)->orderBy('name')
+            ->get(['id', 'name', 'location_id', 'days', 'booker_id', 'is_active'])
+            ->map(function ($r) {
+                return ['id' => $r->id, 'name' => $r->name, 'location_id' => $r->location_id, 'days' => $r->days,
+                    'booker_id' => $r->booker_id, 'active' => (int) $r->is_active];
             })
             ->all();
     }
