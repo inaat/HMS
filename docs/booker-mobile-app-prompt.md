@@ -24,7 +24,7 @@ UltimatePOS (Laravel). The backend API already exists and is live; **do not chan
 8. **Checks in** at a shop (GPS compared with the shop's saved location, optional photo), books / collects, then
    **leaves the shop** with the result (order, payment, or a reason why there was no order).
 9. **Edits shops**: sets the shop's GPS location ("Set location here"), takes a shop photo, corrects mobile, address,
-   city, route, shop type and class. Empty details are filled at once; changes to existing details wait for the
+   city, route, shop type and class. Every change waits for the
    office's approval.
 
 The booker never creates invoices or changes stock; the office approves orders and payments on the shop PC.
@@ -107,6 +107,7 @@ Omit `since` on the first sync (full download). Response 200:
   "routes": [{"id": 1, "name": "Khwaza Khela Bazar", "location_id": 1, "days": [3], "booker_id": 11}],
   "outlet_types": ["Kiryana", "General store", "Wholesale", "Medical store", "Bakery", "Super store", "Hotel / Restaurant", "Other"],
   "visit_radius_m": 100,
+  "can_edit_shops": true,
   "invoices": [{
     "id": 15763, "contact_id": 57, "invoice_no": "15479", "transaction_date": "2025-12-20 08:49:00",
     "final_total": "826805.0000", "paid": "147918.0000", "due": "678887.0000", "active": 1
@@ -318,7 +319,10 @@ lost; turning airplane mode OFF uploads all 14 items once and the statuses updat
 14. **Edit shop** (existing customers only): send only fields that differ from the phone's copy (blank = unchanged).
     "Set location here" needs GPS accuracy ≤ 50 m (otherwise "GPS is weak (±80 m). Step outside and tap again").
     After upload show "Your changes went to the office"; the new values arrive through the normal sync once the
-    office has them (empty fields at once, changes to existing values after approval).
+    office approves them (every change waits for approval).
+15. **Edit lock:** `/sync` returns `can_edit_shops` (bool). `false` → hide every Edit button and "Save this as the shop
+    location", show "🔒 Shop editing is locked by the office"; the server also refuses `customer_updates` with
+    `error` "Shop editing is locked by the office".
 
 ## 6. Screens
 
@@ -401,7 +405,7 @@ pull-to-refresh, Sync button.
     the shop", 2 km away → red warning; leave with "Owner not there"; the shop gets ✓ with the time and reason; the
     visit reaches the office (Sell → Booker visits) with distance, photo and result.
 12. Check in at a shop with no location → "Save this as the shop location" → after sync the shop has that location.
-13. Edit shop: mobile empty on the POS → filled at once; city already set → waits in Mobile orders → Shop edits until
+13. Edit shop: every change (also an empty mobile or location) waits in Mobile orders → Shop edits until
     approved; the photo shows on the shop after sync.
 14. Airplane mode: a full visit with photo, an order inside it and a shop edit → all upload once when back online.
 

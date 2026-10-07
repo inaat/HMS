@@ -30,8 +30,11 @@ class MobileSyncController extends Controller
 
         DB::transaction(function () use ($request, &$result) {
             if (is_array($request->input('users'))) {
-                $result['users'] = $this->syncSet('mb_users', 'id', $request->input('users'),
-                    ['username', 'password', 'name', 'code', 'allow_login', 'locations'], ['allow_login' => 0]);
+                $user_fields = ['username', 'password', 'name', 'code', 'allow_login', 'locations'];
+                if (Schema::hasColumn('mb_users', 'can_edit')) {
+                    $user_fields[] = 'can_edit';
+                }
+                $result['users'] = $this->syncSet('mb_users', 'id', $request->input('users'), $user_fields, ['allow_login' => 0]);
 
                 // A booker who is blocked or removed locally loses every phone login at once.
                 $blocked = DB::table('mb_users')->where('allow_login', 0)->pluck('id');

@@ -146,6 +146,7 @@ class MobileController extends Controller
             'products' => $products,
             'customers' => $customers,
             'routes' => $routes,
+            'can_edit_shops' => $this->canEditShops($user->id),
             'outlet_types' => \App\Http\Controllers\BookerRouteController::OUTLET_TYPES,
             'visit_radius_m' => (int) config('mobile_sync.visit_radius_m', 100),
             'invoices' => $invoices,
@@ -227,6 +228,9 @@ class MobileController extends Controller
         }
         if (DB::table('mb_customer_updates')->where('uuid', $uuid)->exists()) {
             return ['uuid' => $uuid, 'result' => 'duplicate'];
+        }
+        if (! $this->canEditShops($user->id)) {
+            return ['uuid' => $uuid, 'result' => 'error', 'message' => 'Shop editing is locked by the office'];
         }
         $contact_id = (int) ($row['contact_id'] ?? 0);
         if (! DB::table('mb_customers')->where('local_id', $contact_id)->where('status', 'active')->exists()) {
@@ -319,6 +323,12 @@ class MobileController extends Controller
         ]);
 
         return ['uuid' => $uuid, 'result' => 'saved'];
+    }
+
+    /** User Management > Edit user > "Can edit shops" (off = the booker cannot edit shops in the app). */
+    private function canEditShops($user_id): bool
+    {
+        return ! Schema::hasColumn('mb_users', 'can_edit') || (bool) DB::table('mb_users')->where('id', $user_id)->value('can_edit');
     }
 
     /** "34.1234567,71.1234567" or null. */

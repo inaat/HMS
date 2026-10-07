@@ -48,11 +48,11 @@ const db = {
 const S = {
   token: null, user: null, since: null, stock: {}, stockAt: null, lastSync: null, seq: { order: 1, receipt: 1 },
   products: new Map(), customers: new Map(), invoices: new Map(), outbox: new Map(), history: new Map(),
-  draft: { customer: null, lines: [], note: '' }, routes: [], outletTypes: [], editsSent: {}, visit: null, visits: [], radius: 100, tab: 'home', cartOpen: false, syncing: false, online: navigator.onLine,
+  draft: { customer: null, lines: [], note: '' }, routes: [], outletTypes: [], editsSent: {}, visit: null, visits: [], radius: 100, canEdit: true, tab: 'home', cartOpen: false, syncing: false, online: navigator.onLine,
 };
 
 async function loadState() {
-  for (const k of ['locations', 'location', 'stockByLoc', 'business', 'token', 'user', 'since', 'stock', 'stockAt', 'lastSync', 'seq', 'draft', 'routes', 'outletTypes', 'editsSent', 'visit', 'visits', 'radius']) {
+  for (const k of ['locations', 'location', 'stockByLoc', 'business', 'token', 'user', 'since', 'stock', 'stockAt', 'lastSync', 'seq', 'draft', 'routes', 'outletTypes', 'editsSent', 'visit', 'visits', 'radius', 'canEdit']) {
     const v = await db.get(k);
     if (v !== undefined && v !== null) S[k] = v;
   }
@@ -276,6 +276,7 @@ async function download() {
 
   if (data.business) { S.business = data.business; await db.set('business', data.business); }
   if (data.routes) { S.routes = data.routes; await db.set('routes', S.routes); }
+  if (data.can_edit_shops !== undefined) { S.canEdit = !!data.can_edit_shops; await db.set('canEdit', S.canEdit); }
   if (data.visit_radius_m) { S.radius = num(data.visit_radius_m); await db.set('radius', S.radius); }
   if (data.outlet_types) { S.outletTypes = data.outlet_types; await db.set('outletTypes', S.outletTypes); }
   S.stock = data.stock || {};
@@ -537,7 +538,7 @@ function customerRows(q, act) {
         ${c.status === 'pending' ? '<span class="pill">new</span>' : ''}${editing ? ' <span class="pill warn">edit not sent</span>' : ''}
         <div class="muted">${c.position ? '📍 ' : ''}${c.photo_url ? '📷 ' : ''}${h([c.mobile, c.city, routeName(c.route_id)].filter(Boolean).join(' · '))}</div></div>
         <div class="right"><div class="${due > 0 ? '' : 'muted'}">${money(due)}</div>${pending ? `<div class="muted">−${money(pending)} collected</div>` : ''}</div>
-        ${act === 'open-customer' && c.local_id ? `<button class="btn small light" data-act="edit-shop" data-key="${h(c.key)}">✎ Edit</button>` : ''}</div></div>`;
+        ${act === 'open-customer' && c.local_id && S.canEdit ? `<button class="btn small light" data-act="edit-shop" data-key="${h(c.key)}">✎ Edit</button>` : ''}</div></div>`;
     }),
   ];
   return rows.join('') || '<div class="empty">No customers. Sync to download them.</div>';
@@ -649,7 +650,8 @@ function openCustomer(key) {
       <button class="btn ok grow" data-act="order-for" data-key="${h(key)}">New order</button>
       <button class="btn grow" data-act="collect" data-key="${h(key)}">Collect payment</button>
     </div>
-    ${c.local_id ? `<button class="btn light block" style="margin-top:8px" data-act="edit-shop" data-key="${h(key)}">✎ Edit shop (location, photo, phone…)</button>` : ''}
+    ${c.local_id && S.canEdit ? `<button class="btn light block" style="margin-top:8px" data-act="edit-shop" data-key="${h(key)}">✎ Edit shop (location, photo, phone…)</button>` : ''}
+    ${c.local_id && !S.canEdit ? '<div class="muted" style="margin-top:8px;text-align:center">🔒 Shop editing is locked by the office</div>' : ''}
     ${c.mobile ? `<a class="btn light block" style="margin-top:8px;text-decoration:none" href="tel:${h(c.mobile)}">Call ${h(c.mobile)}</a>` : ''}`);
 }
 
@@ -731,7 +733,7 @@ function visitBlock(c, key) {
   return `<div class="card" style="border:2px solid ${far ? 'var(--bad)' : 'var(--ok)'}">
     <div class="row"><b class="grow">🟢 In this shop since ${h(hhmm(v.started_at))}</b></div>
     <div style="margin:4px 0">${where}</div>
-    ${!c.position && v.lat !== null && v.accuracy_m <= 50 && !v.locationSaved ? '<button class="btn light block" style="margin-top:6px" data-act="save-shop-location">📍 Save this as the shop location</button>' : ''}
+    ${S.canEdit && !c.position && v.lat !== null && v.accuracy_m <= 50 && !v.locationSaved ? '<button class="btn light block" style="margin-top:6px" data-act="save-shop-location">📍 Save this as the shop location</button>' : ''}
     ${v.locationSaved ? '<div class="muted">📍 Saved as the shop location</div>' : ''}
     ${v.photo ? `<img src="${v.photo}" class="shop-photo" alt="">` : `<label class="btn light block" style="text-align:center;margin-top:6px">📷 Add photo (optional)<input type="file" accept="image/*" capture="environment" data-act="visit-photo-in" style="display:none"></label>`}
     <div class="muted" style="margin-top:6px">${(v.orders || []).length} order(s) · ${(v.payments || []).length} payment(s) in this visit</div>
@@ -800,7 +802,7 @@ async function leaveShop(form) {
   sync();
 }
 
-/** First visit at a shop with no location: the booker's GPS becomes the shop location (filled at once on the PC). */
+/** First visit at a shop with no location: the booker's GPS becomes the shop location (after the office approves it). */
 async function saveShopLocation() {
   const v = S.visit;
   if (!v || !v.contact_id || v.lat === null) return;
@@ -829,10 +831,11 @@ function shopFields(c) {
     <input type="hidden" name="photo">`;
 }
 
-/** Edit an existing shop. The office approves changes to filled-in values; empty fields are filled at once. */
+/** Edit an existing shop. Every change waits for the office's approval. */
 function editShopForm(key) {
   const c = findCustomer(key);
   if (!c || !c.local_id) return;
+  if (!S.canEdit) { toast('Shop editing is locked by the office'); return; }
   sheet('Edit ' + custName(c), `<form data-form="shop-edit" data-key="${h(key)}">
     <label>Shop / customer name</label><input name="name" value="${h(c.name)}">
     <label>Owner / business name</label><input name="business_name" value="${h(c.business_name || '')}">
@@ -840,7 +843,7 @@ function editShopForm(key) {
     <label>Address</label><input name="address" value="${h(c.address || '')}">
     <label>City / area</label><input name="city" value="${h(c.city || '')}">
     ${shopFields(c)}
-    <div class="muted" style="margin-top:10px">Empty details are saved at once. Changes to details the office already has are checked by the office first.</div>
+    <div class="muted" style="margin-top:10px">Your changes go to the office. They show here after the office approves them.</div>
     <button class="btn ok block" style="margin-top:14px">Save changes</button></form>`);
 }
 

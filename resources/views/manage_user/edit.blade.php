@@ -175,6 +175,14 @@
                     {!! Form::select('mobile_commission_agent_id', \App\User::where('business_id', session('user.business_id'))->where('is_cmmsn_agnt', 1)->whereNull('deleted_at')->get()->mapWithKeys(fn ($a) => [$a->id => trim($a->first_name.' '.$a->last_name)])->all(), $user->mobile_commission_agent_id, ['class' => 'form-control select2', 'style' => 'width: 100%;', 'placeholder' => 'None']); !!}
                 </div>
             </div>
+            {{-- Order booker: may edit shops (location, photo, phone...) in the app; off = editing locked. --}}
+            <div class="col-md-4">
+                <div class="form-group" style="margin-top: 25px;">
+                    <input type="hidden" name="mobile_can_edit_shops" value="0">
+                    <label><input type="checkbox" name="mobile_can_edit_shops" value="1" @if($user->mobile_can_edit_shops ?? 1) checked @endif> Order booker can edit shops in the app</label>
+                    @show_tooltip('Off = the Edit shop button is hidden in the booker app and edits are refused. Every edit still needs your approval in Mobile orders > Shop edits.')
+                </div>
+            </div>
             <div class="clearfix"></div>
             <div class="col-md-4">
                 <div class="form-group">

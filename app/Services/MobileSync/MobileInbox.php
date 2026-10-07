@@ -221,8 +221,8 @@ class MobileInbox
     ];
 
     /**
-     * A booker's edit of a shop: fields that are empty on the customer are filled at once (first GPS, first
-     * photo...); changes to values the customer already has wait for approval (Mobile orders > Shop edits).
+     * A booker's edit of a shop: every change waits for the office's approval (Mobile orders > Shop edits),
+     * also fields that are still empty on the customer.
      */
     private function storeCustomerUpdate(array $u): void
     {
@@ -246,11 +246,8 @@ class MobileInbox
                 if ((string) $old === (string) $value) {
                     continue;
                 }
-                if ($old === null || in_array(trim((string) $old), ['', '-', '0'], true)) {
-                    $apply[$key] = $value;
-                } else {
-                    $wait[$key] = $value;
-                }
+                // Owner's rule: nothing changes on a shop until the office approves it (empty fields too).
+                $wait[$key] = $value;
             }
 
             if ($apply) {

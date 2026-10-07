@@ -57,7 +57,7 @@ class LocalSnapshot
             ->where('r.name', self::BOOKER_ROLE.'#'.$this->business_id)
             ->where('u.business_id', $this->business_id)
             ->whereNull('u.deleted_at')
-            ->select('u.id', 'u.username', 'u.password', 'u.first_name', 'u.last_name', 'u.allow_login', 'u.status')
+            ->select('u.id', 'u.username', 'u.password', 'u.first_name', 'u.last_name', 'u.allow_login', 'u.status', 'u.mobile_can_edit_shops')
             ->get()
             ->map(function ($u) use ($active) {
                 $prefix = strtoupper(substr(preg_replace('/[^A-Za-z]/', '', $u->username), 0, 3)) ?: 'B';
@@ -77,6 +77,7 @@ class LocalSnapshot
                     'code' => $prefix.$u->id,
                     'allow_login' => ($u->allow_login && $u->status === 'active') ? 1 : 0,
                     'locations' => json_encode($locations),
+                    'can_edit' => (int) $u->mobile_can_edit_shops,
                 ];
             })
             ->all();

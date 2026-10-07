@@ -11,7 +11,7 @@
 @endphp
 <section class="content-header no-print">
     <h1 class="tw-text-xl md:tw-text-3xl tw-font-bold tw-text-black">Shop edits
-        <small>changes order bookers made to shops; empty fields were filled automatically, changes to existing values wait for you</small>
+        <small>changes order bookers made to shops; nothing changes on a shop until you approve it</small>
     </h1>
 </section>
 
