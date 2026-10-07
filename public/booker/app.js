@@ -405,9 +405,11 @@ function lineInfo(l) {
   const p = S.products.get(l.variation_id);
   if (!p) return null;
   const unit = (p.units || []).find((u) => u.id === l.unit_id) || { id: null, name: p.unit, multiplier: 1 };
-  const price = num(p.price) * num(unit.multiplier);
+  // The booker may change the price of a line (l.price, per chosen unit); otherwise the list price.
+  const list = num(p.price) * num(unit.multiplier);
+  const price = l.price !== undefined && l.price !== null && l.price !== '' ? num(l.price) : list;
   const free = freeStock(p.variation_id);
-  return { p, unit, price, total: price * num(l.qty), short: p.enable_stock && free !== null && num(l.qty) * num(unit.multiplier) > free };
+  return { p, unit, price, list, total: price * num(l.qty), short: p.enable_stock && free !== null && num(l.qty) * num(unit.multiplier) > free };
 }
 
 function posLines() {
@@ -421,7 +423,8 @@ function posLines() {
         <div class="qty"><button data-act="qty" data-i="${i}" data-d="-1">−</button><input inputmode="decimal" data-act="qty-in" data-i="${i}" value="${h(l.qty)}"><button data-act="qty" data-i="${i}" data-d="1">+</button></div>
         ${(x.p.units || []).length > 1 ? `<select data-act="line-unit" data-i="${i}" class="unit-sel">${x.p.units.map((u) => `<option value="${u.id}" ${u.id === l.unit_id ? 'selected' : ''}>${h(u.name)}</option>`).join('')}</select>` : `<div class="muted" style="margin-top:4px">${h(x.unit.name)}</div>`}
       </td>
-      <td data-label="Price" class="r">${money(x.price)}</td>
+      <td data-label="Price" class="r"><input class="price-in" inputmode="decimal" data-act="price-in" data-i="${i}" value="${h(+x.price.toFixed(2))}">
+        ${Math.abs(x.price - x.list) > 0.001 ? `<div class="muted" style="margin-top:3px">list ${money(x.list)}</div>` : ''}</td>
       <td data-label="Subtotal" class="r"><b>${money(x.total)}</b></td>
       <td class="c"><button class="x" data-act="line-del" data-i="${i}" title="Remove">&times;</button></td>
     </tr>`;
@@ -667,7 +670,7 @@ async function saveOrder() {
     const qty = num(l.qty);
     if (qty <= 0) { toast('Quantity must be more than 0: ' + p.name); return; }
     if (!num(unit.allow_decimal) && Math.floor(qty) !== qty) { toast(unit.name + ' must be a whole number: ' + p.name); return; }
-    const price = num(p.price) * num(unit.multiplier);
+    const price = lineInfo(l).price;
     const free = freeStock(p.variation_id);
     if (p.enable_stock && free !== null && qty * num(unit.multiplier) > free) short = true;
     lines.push({ variation_id: p.variation_id, sub_unit_id: unit.id, quantity: qty, unit_price: price, multiplier: num(unit.multiplier) || 1, name: p.name, unit_name: unit.name });
@@ -818,7 +821,12 @@ document.addEventListener('click', async (e) => {
 document.addEventListener('change', async (e) => {
   const el = e.target;
   const i = Number(el.dataset.i);
-  if (el.dataset.act === 'line-unit') { S.draft.lines[i].unit_id = Number(el.value); await saveDraft(); refreshPos(); }
+  if (el.dataset.act === 'line-unit') { S.draft.lines[i].unit_id = Number(el.value); delete S.draft.lines[i].price; await saveDraft(); refreshPos(); }
+  if (el.dataset.act === 'price-in') {
+    const v = String(el.value).replace(/,/g, '').trim();
+    if (v === '' || isNaN(Number(v)) || Number(v) < 0) delete S.draft.lines[i].price; else S.draft.lines[i].price = Number(v);
+    await saveDraft(); refreshPos();
+  }
   if (el.dataset.act === 'qty-in') { S.draft.lines[i].qty = num(el.value); await saveDraft(); refreshPos(); }
 });
 
