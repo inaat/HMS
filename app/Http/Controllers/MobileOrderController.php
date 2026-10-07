@@ -205,7 +205,7 @@ class MobileOrderController extends Controller
             abort(403, 'Unauthorized action.');
         }
         $business_id = request()->session()->get('user.business_id');
-        $status = in_array($request->input('status'), ['waiting', 'applied', 'rejected', 'all']) ? $request->input('status') : 'waiting';
+        $status = in_array($request->input('status'), ['waiting', 'applied', 'rejected', 'all']) ? $request->input('status') : 'all';
 
         $query = DB::table('booker_customer_updates as e')
             ->leftJoin('contacts as c', 'c.id', '=', 'e.contact_id')

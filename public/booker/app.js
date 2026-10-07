@@ -862,18 +862,28 @@ async function setGpsHere(btn) {
   text.textContent = 'Finding your location…';
   try {
     const g = await getGps();
+    S.gpsFix = g;
     if (g.accuracy > 50) {
-      text.innerHTML = `<span style="color:var(--bad)">GPS is weak (±${Math.round(g.accuracy)} m). Step outside the shop and tap again.</span>`;
+      // Weak fix (indoors, or a computer guessing from Wi-Fi): let the booker retry outside or keep it knowingly.
+      text.innerHTML = `<span style="color:var(--bad)">GPS is weak (±${Math.round(g.accuracy)} m). Best: step outside the shop and tap again.</span>
+        <button type="button" class="btn small light" style="margin-top:6px" data-act="gps-use">Use it anyway (±${Math.round(g.accuracy)} m)</button>`;
       return;
     }
-    form.querySelector('[name=position]').value = g.lat.toFixed(7) + ',' + g.lng.toFixed(7);
-    form.querySelector('[name=accuracy_m]').value = Math.round(g.accuracy);
-    text.innerHTML = `<b style="color:var(--ok)">📍 Location set</b> (±${Math.round(g.accuracy)} m) <a href="${h(mapLink(g.lat + ',' + g.lng))}" target="_blank" rel="noopener">check on map</a>`;
+    useGps(form);
   } catch (e) {
     text.innerHTML = `<span style="color:var(--bad)">${h(e.message)}</span>`;
   } finally {
     btn.disabled = false;
   }
+}
+
+/** Put the last GPS fix into the shop form (the office sees its accuracy). */
+function useGps(form) {
+  const g = S.gpsFix;
+  if (!g) return;
+  form.querySelector('[name=position]').value = g.lat.toFixed(7) + ',' + g.lng.toFixed(7);
+  form.querySelector('[name=accuracy_m]').value = Math.round(g.accuracy);
+  form.querySelector('#gps-text').innerHTML = `<b style="color:${g.accuracy > 50 ? 'var(--warn)' : 'var(--ok)'}">📍 Location set</b> (±${Math.round(g.accuracy)} m) <a href="${h(mapLink(g.lat + ',' + g.lng))}" target="_blank" rel="noopener">check on map</a>`;
 }
 
 /** A camera photo made small (longest side 1280 px, JPEG) so it uploads quickly on mobile data. */
@@ -1141,6 +1151,7 @@ document.addEventListener('click', async (e) => {
     case 'open-customer': openCustomer(el.dataset.key); break;
     case 'edit-shop': editShopForm(el.dataset.key); break;
     case 'gps-here': setGpsHere(el); break;
+    case 'gps-use': useGps(el.closest('form')); break;
     case 'check-in': checkIn(el.dataset.key); break;
     case 'route-shops': S.custRoute = num(el.dataset.id); S.custQuery = ''; S.tab = 'customers'; render(); window.scrollTo(0, 0); break;
     case 'leave-shop': leaveForm(); break;

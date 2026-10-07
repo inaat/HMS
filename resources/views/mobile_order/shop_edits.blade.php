@@ -31,7 +31,7 @@
         </a>
         <form method="GET" style="margin-left: 12px;">
             <select name="status" class="form-control input-sm" onchange="this.form.submit()">
-                @foreach (['waiting' => 'Waiting for approval', 'applied' => 'Applied', 'rejected' => 'Rejected', 'all' => 'All'] as $k => $v)
+                @foreach (['all' => 'All', 'waiting' => 'Waiting for approval', 'applied' => 'Applied', 'rejected' => 'Rejected'] as $k => $v)
                     <option value="{{ $k }}" @if ($status == $k) selected @endif>{{ $v }}</option>
                 @endforeach
             </select>
@@ -107,7 +107,7 @@
                                 @endforeach
                             </td>
                             <td>
-                                <span class="label {{ $badge[$r->status] ?? 'label-default' }}">{{ ucfirst($r->status) }}</span>
+                                <span class="label {{ $badge[$r->status] ?? 'label-default' }}">{{ $r->status == 'applied' && ! $r->decided_by ? 'Filled automatically' : ($r->status == 'applied' ? 'Approved' : ucfirst($r->status)) }}</span>
                                 @if ($r->decided_by_name) <div class="text-muted small">{{ $r->decided_by_name }}</div> @endif
                             </td>
                             <td>
