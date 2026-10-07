@@ -48,7 +48,7 @@ const db = {
 const S = {
   token: null, user: null, since: null, stock: {}, stockAt: null, lastSync: null, seq: { order: 1, receipt: 1 },
   products: new Map(), customers: new Map(), invoices: new Map(), outbox: new Map(), history: new Map(),
-  draft: { customer: null, lines: [], note: '' }, tab: 'order', syncing: false, online: navigator.onLine,
+  draft: { customer: null, lines: [], note: '' }, tab: 'home', cartOpen: false, syncing: false, online: navigator.onLine,
 };
 
 async function loadState() {
@@ -101,7 +101,7 @@ function sheet(title, html) {
   m.className = 'modal';
   m.id = 'sheet';
   m.innerHTML = `<div class="sheet"><h2><span>${h(title)}</span><button class="x noprint" data-act="close">&times;</button></h2>${html}</div>`;
-  m.addEventListener('click', (e) => { if (e.target === m) closeSheet(); });
+  m.addEventListener('click', (e) => { if (e.target === m) { S.cartOpen = false; closeSheet(); } });
   document.body.appendChild(m);
   return m;
 }
@@ -269,17 +269,73 @@ async function nextSeq(kind) {
 function render() {
   const app = $('#app');
   if (!S.token) { app.innerHTML = loginView(); return; }
-  const title = { order: 'New order', customers: 'Customers', activity: 'My orders & payments', more: 'Account' }[S.tab];
+  const views = { home: homeView, order: orderView, customers: customersView, activity: activityView, more: moreView };
+  if (!views[S.tab]) S.tab = 'home';
+  const title = { home: 'Dashboard', order: 'New order', customers: 'Customers', activity: 'My orders & payments', more: 'Account' }[S.tab];
   const waiting = S.outbox.size;
   app.innerHTML = `
-    <header><h1>${h(title)}</h1><button data-act="sync">${S.syncing ? 'Syncing…' : '⟳ Sync'}</button></header>
+    <header><h1>${h(title)}</h1><span class="hdr-user">${h(S.user.name)}</span><button data-act="sync">${S.syncing ? 'Syncing…' : '⟳ Sync'}</button></header>
     <div class="bar" id="bar"></div>
-    <main>${{ order: orderView, customers: customersView, activity: activityView, more: moreView }[S.tab]()}</main>
+    <main class="${S.tab === 'order' ? 'pos' : ''}">${views[S.tab]()}</main>
     <nav>
-      ${[['order', '🛒', 'Order'], ['customers', '👥', 'Customers'], ['activity', '📋', 'My work' + (waiting ? ' (' + waiting + ')' : '')], ['more', '⚙️', 'Account']]
+      ${[['home', '🏠', 'Home'], ['order', '🛒', 'New order'], ['customers', '👥', 'Customers'], ['activity', '📋', 'My work' + (waiting ? ' (' + waiting + ')' : '')], ['more', '⚙️', 'Account']]
         .map(([t, i, l]) => `<button data-act="tab" data-tab="${t}" class="${S.tab === t ? 'on' : ''}"><b>${i}</b>${h(l)}</button>`).join('')}
-    </nav>`;
+    </nav>
+    ${S.tab === 'order' ? cartBar() : ''}`;
   renderBar();
+}
+
+/** After a cart change: update the cards, the cart and the cart bar in place, so the product list keeps its scroll. */
+function refreshPos() {
+  if (S.tab !== 'order' || !$('#pcards')) { render(); return; }
+  $('#pcards').innerHTML = productCards();
+  $('#cart').innerHTML = cartInner();
+  const bar = document.querySelector('.cartbar');
+  if (bar) bar.remove();
+  $('#app').insertAdjacentHTML('beforeend', cartBar());
+  const sheetCart = document.querySelector('#sheet .cart');
+  if (sheetCart) sheetCart.innerHTML = cartInner();
+}
+
+// ---------- dashboard ----------
+function homeView() {
+  const today = nowStr().slice(0, 10);
+  const all = [...S.outbox.values()].filter((o) => o.type !== 'customer').map((o) => ({ ...o, status: 'not sent' })).concat([...S.history.values()]);
+  const todays = all.filter((o) => String(o.created || '').startsWith(today) && o.status !== 'rejected');
+  const booked = todays.filter((o) => o.type === 'order');
+  const collected = todays.filter((o) => o.type === 'payment');
+  const orders = all.filter((o) => o.type === 'order');
+  const count = (s) => orders.filter((o) => s.includes(o.status)).length;
+  const dues = [...S.customers.values()].filter((c) => num(c.balance_due) > 0).sort((a, b) => num(b.balance_due) - num(a.balance_due)).slice(0, 6);
+  const recent = all.sort((a, b) => String(b.created).localeCompare(String(a.created))).slice(0, 6);
+  const pill = { 'not sent': 'warn', pending: '', received: '', approved: 'ok', invoiced: 'ok', rejected: 'bad' };
+  const label = { pending: 'sent', received: 'at office' };
+  const hour = new Date().getHours();
+
+  return `
+    <div class="card" style="display:flex;align-items:center;gap:12px">
+      <div class="grow"><div class="big">${hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'}, ${h(S.user.name.split(' ')[0])}</div>
+        <div class="muted">${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</div></div>
+      <button class="btn" data-act="tab" data-tab="order">🛒 New order</button>
+    </div>
+    <div class="tiles">
+      <div class="tile"><div class="l">Booked today</div><div class="v">${money(booked.reduce((s, o) => s + num(o.total), 0))}</div><div class="l">${booked.length} order(s)</div></div>
+      <div class="tile"><div class="l">Collected today (cash in hand)</div><div class="v">${money(collected.reduce((s, o) => s + num(o.amount), 0))}</div><div class="l">${collected.length} receipt(s)</div></div>
+      <div class="tile tap" data-act="tab" data-tab="activity"><div class="l">Waiting at office</div><div class="v">${count(['pending', 'received'])}</div><div class="l">approved ${count(['approved'])} · invoiced ${count(['invoiced'])}</div></div>
+      <div class="tile tap" data-act="tab" data-tab="activity"><div class="l">Not sent yet</div><div class="v" style="color:${S.outbox.size ? 'var(--warn)' : 'inherit'}">${S.outbox.size}</div><div class="l">${count(['rejected'])} rejected</div></div>
+    </div>
+    <div class="actions">
+      <button class="btn light" data-act="tab" data-tab="order">🛒<br>New order</button>
+      <button class="btn light" data-act="tab" data-tab="customers">💵<br>Collect payment</button>
+      <button class="btn light" data-act="add-customer">👤<br>New customer</button>
+    </div>
+    <div class="dash-cols">
+      <div class="card list"><b>Highest dues</b>${dues.map((c) => `
+        <div class="item tap row" data-act="open-customer" data-key="${h(c.key)}"><div class="grow">${h(custName(c))}<div class="muted">${h(c.mobile || '')} ${h(c.city || '')}</div></div><b>${money(c.balance_due)}</b></div>`).join('') || '<div class="empty">No dues.</div>'}</div>
+      <div class="card list"><b>Recent work</b>${recent.map((o) => `
+        <div class="item tap row" data-act="open-slip" data-uuid="${o.uuid}"><div class="grow">${o.type === 'order' ? '🛒' : '💵'} ${h(o.number)} <span class="pill ${pill[o.status] ?? ''}">${h(label[o.status] || o.status)}</span>
+          <div class="muted">${h(o.customer_name || '')}</div></div><b>${money(o.type === 'order' ? o.total : o.amount)}</b></div>`).join('') || '<div class="empty">Nothing yet. Tap New order to start.</div>'}</div>
+    </div>`;
 }
 
 function renderBar() {
@@ -308,42 +364,107 @@ function loginView() {
   </div>`;
 }
 
+// ---------- POS order screen: product cards + cart ----------
 function orderView() {
+  return `<div class="pos-grid">
+    <section class="pos-products">
+      <div class="pos-search"><input id="pos-q" data-act="pos-search" placeholder="🔍  Search product name or code…" value="${h(S.posQuery || '')}" autocomplete="off"></div>
+      <div class="chips">${brandChips()}</div>
+      <div class="cards" id="pcards">${productCards()}</div>
+    </section>
+    <aside class="cart" id="cart">${cartInner()}</aside>
+  </div>`;
+}
+
+function brandChips() {
+  const counts = {};
+  S.products.forEach((p) => { const b = p.brand || 'Other'; counts[b] = (counts[b] || 0) + 1; });
+  const brands = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  return [['', 'All']].concat(brands.map((b) => [b, b])).map(([v, l]) =>
+    `<button class="chip ${(S.posBrand || '') === v ? 'on' : ''}" data-act="pos-brand" data-brand="${h(v)}">${h(l)}${v ? ' <span style="opacity:.7">' + counts[v] + '</span>' : ''}</button>`).join('');
+}
+
+function productCards() {
+  const q = S.posQuery || '';
+  const inCart = {};
+  S.draft.lines.forEach((l) => { inCart[l.variation_id] = (inCart[l.variation_id] || 0) + num(l.qty); });
+  const list = [...S.products.values()]
+    .filter((p) => (!S.posBrand || (p.brand || 'Other') === S.posBrand) && (!q || match([p.name, p.sku, p.brand, p.category].join(' '), q)))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (!list.length) return '<div class="empty" style="grid-column:1/-1">No products found.</div>';
+  return list.slice(0, 150).map((p) => {
+    const unit = (p.units || [])[0] || { name: p.unit, multiplier: 1 };
+    const free = freeStock(p.variation_id);
+    const out = p.enable_stock && free !== null && free <= 0;
+    return `<button class="pcard ${out ? 'out' : ''}" data-act="add" data-v="${p.variation_id}">
+      ${inCart[p.variation_id] ? `<span class="incart">${qtyFmt(inCart[p.variation_id])}</span>` : ''}
+      <span class="pname">${h(p.name)}</span>
+      <span class="pmeta">${h(p.sku || '')}${p.brand ? ' · ' + h(p.brand) : ''}</span>
+      <span class="pprice">${money(num(p.price) * num(unit.multiplier))} <span class="pmeta">/ ${h(unit.name)}</span></span>
+      <span class="pstock ${out ? '' : 'muted'}">${stockText(p, unit) || '—'}</span>
+    </button>`;
+  }).join('') + (list.length > 150 ? `<div class="empty" style="grid-column:1/-1">Showing 150 of ${list.length}. Type to search.</div>` : '');
+}
+
+function cartTotal() {
+  return S.draft.lines.reduce((s, l) => {
+    const p = S.products.get(l.variation_id);
+    if (!p) return s;
+    const unit = (p.units || []).find((u) => u.id === l.unit_id) || { multiplier: 1 };
+    return s + num(p.price) * num(unit.multiplier) * num(l.qty);
+  }, 0);
+}
+
+function cartInner() {
   const d = S.draft;
   const c = d.customer ? findCustomer(d.customer) : null;
-  let total = 0;
   const lines = d.lines.map((l, i) => {
     const p = S.products.get(l.variation_id);
-    if (!p) return `<div class="card"><span class="pill bad">Product no longer available</span> <button class="btn small bad" data-act="line-del" data-i="${i}">Remove</button></div>`;
+    if (!p) return `<div class="cline row"><span class="pill bad grow">Product no longer available</span><button class="x" data-act="line-del" data-i="${i}">&times;</button></div>`;
     const unit = (p.units || []).find((u) => u.id === l.unit_id) || { id: null, name: p.unit, multiplier: 1 };
     const price = num(p.price) * num(unit.multiplier);
-    const lineTotal = price * num(l.qty);
-    total += lineTotal;
     const free = freeStock(p.variation_id);
     const short = p.enable_stock && free !== null && num(l.qty) * num(unit.multiplier) > free;
-    return `<div class="card">
-      <div class="row"><div class="grow"><b>${h(p.name)}</b><div class="muted">${h(p.sku || '')} · ${money(price)} / ${h(unit.name)}</div></div>
-        <button class="x" data-act="line-del" data-i="${i}">&times;</button></div>
-      <div class="row" style="margin-top:8px">
-        ${(p.units || []).length > 1 ? `<select data-act="line-unit" data-i="${i}" style="width:auto;flex:1">${p.units.map((u) => `<option value="${u.id}" ${u.id === l.unit_id ? 'selected' : ''}>${h(u.name)}</option>`).join('')}</select>` : `<span class="grow">${h(unit.name)}</span>`}
+    return `<div class="cline">
+      <div class="row"><div class="grow"><b style="font-size:14px">${h(p.name)}</b><div class="muted">${money(price)} / ${h(unit.name)} ${short ? '<span class="pill warn">short stock</span>' : ''}</div></div>
+        <button class="x" data-act="line-del" data-i="${i}" title="Remove">&times;</button></div>
+      <div class="row" style="margin-top:6px">
+        ${(p.units || []).length > 1 ? `<select data-act="line-unit" data-i="${i}" style="width:auto;flex:1;padding:7px">${p.units.map((u) => `<option value="${u.id}" ${u.id === l.unit_id ? 'selected' : ''}>${h(u.name)}</option>`).join('')}</select>` : `<span class="grow muted">${h(unit.name)}</span>`}
         <div class="qty"><button data-act="qty" data-i="${i}" data-d="-1">−</button><input inputmode="decimal" data-act="qty-in" data-i="${i}" value="${h(l.qty)}"><button data-act="qty" data-i="${i}" data-d="1">+</button></div>
+        <b style="min-width:80px;text-align:right">${money(price * num(l.qty))}</b>
       </div>
-      <div class="row muted" style="margin-top:6px"><span class="grow">Available: ${stockText(p, unit) || 'not tracked'} ${short ? '<span class="pill warn">short stock</span>' : ''}</span><b>${money(lineTotal)}</b></div>
     </div>`;
   }).join('');
 
   return `
-    <div class="card tap" data-act="pick-customer">
-      ${c ? `<div class="row"><div class="grow"><b>${h(custName(c))}</b><div class="muted">${h(c.mobile || '')} ${h(c.city || '')}</div></div><span class="muted">Due ${money(customerDue(c).due)}</span></div>`
-        : '<div class="row"><b class="grow">Choose customer</b><span>›</span></div>'}
+    <div class="cart-head">
+      <div class="row">
+        <div class="cust-pick grow ${c ? 'set' : ''}" data-act="pick-customer">
+          ${c ? `<div class="grow"><b>${h(custName(c))}</b><div class="muted">${h(c.mobile || '')} ${h(c.city || '')} · Due ${money(customerDue(c).due)}</div></div><span class="muted">Change</span>`
+            : '<div class="grow"><b>👤 Choose customer</b><div class="muted">Tap to pick the shop</div></div><span>›</span>'}
+        </div>
+        <button class="btn light" data-act="add-customer" title="Add a new shop" style="align-self:stretch">+ New<br>customer</button>
+      </div>
     </div>
-    ${lines || '<div class="empty">No items yet.</div>'}
-    <button class="btn light block" data-act="pick-product">+ Add product</button>
-    <label>Note for the shop</label>
-    <textarea rows="2" data-act="note">${h(d.note)}</textarea>
-    <div class="total"><div class="grow"><div class="muted">${d.lines.length} item(s)</div><div class="big">${money(total)}</div></div>
-      ${d.lines.length || d.customer ? '<button class="btn small bad" data-act="clear-order">Clear</button>' : ''}
-      <button class="btn ok" data-act="save-order" ${!c || !d.lines.length ? 'disabled' : ''}>Save order</button></div>`;
+    <div class="cart-lines">${lines || '<div class="empty">Tap a product to add it.</div>'}</div>
+    <div class="cart-foot">
+      <textarea rows="2" data-act="note" placeholder="Note for the shop (optional)">${h(d.note)}</textarea>
+      <div class="cart-total"><span class="muted">${d.lines.length} item(s)</span><b>${money(cartTotal())}</b></div>
+      <div class="row">
+        ${d.lines.length || d.customer ? '<button class="btn bad" data-act="clear-order">Clear</button>' : ''}
+        <button class="btn ok grow" data-act="save-order" ${!c || !d.lines.length ? 'disabled' : ''}>${!c ? 'Choose customer first' : 'Save order'}</button>
+      </div>
+    </div>`;
+}
+
+function cartBar() {
+  if (!S.draft.lines.length) return '';
+  return `<button class="cartbar" data-act="open-cart"><span>🛒 ${S.draft.lines.length} item(s) · ${money(cartTotal())}</span><span>View cart ›</span></button>`;
+}
+
+function openCart() {
+  S.cartOpen = true;
+  sheet('Cart', `<div class="cart">${cartInner()}</div>`);
 }
 
 function customersView() {
@@ -555,6 +676,7 @@ async function saveOrder() {
   };
   await addToOutbox(order);
   S.draft = { customer: null, lines: [], note: '' };
+  S.cartOpen = false;
   await saveDraft();
   render();
   openSlip(order.uuid);
@@ -637,15 +759,26 @@ document.addEventListener('click', async (e) => {
   const d = S.draft;
   const i = Number(el.dataset.i);
   switch (act) {
-    case 'close': closeSheet(); break;
-    case 'tab': S.tab = el.dataset.tab; render(); window.scrollTo(0, 0); break;
+    case 'close': S.cartOpen = false; closeSheet(); break;
+    case 'add': {
+      // Tap a product card: one more of its first unit (e.g. 1 CTN 24).
+      const p = S.products.get(Number(el.dataset.v));
+      const unit = (p.units || [])[0];
+      const uid = unit ? unit.id : null;
+      const line = d.lines.find((l) => l.variation_id === p.variation_id && l.unit_id === uid);
+      if (line) line.qty = num(line.qty) + 1; else d.lines.push({ variation_id: p.variation_id, unit_id: uid, qty: 1 });
+      await saveDraft(); refreshPos(); break;
+    }
+    case 'pos-brand': S.posBrand = el.dataset.brand; render(); break;
+    case 'open-cart': openCart(); break;
+    case 'tab': S.cartOpen = false; closeSheet(); S.tab = el.dataset.tab; render(); window.scrollTo(0, 0); break;
     case 'sync': sync(true); break;
     case 'logout': logout(); break;
     case 'pick-customer': pickCustomer(); break;
     case 'pick-product': pickProduct(); break;
     case 'add-customer': customerForm(); break;
     case 'open-customer': openCustomer(el.dataset.key); break;
-    case 'choose-customer': d.customer = el.dataset.key; await saveDraft(); closeSheet(); render(); break;
+    case 'choose-customer': d.customer = el.dataset.key; await saveDraft(); closeSheet(); refreshPos(); if (S.cartOpen && innerWidth < 900) openCart(); break;
     case 'order-for': d.customer = el.dataset.key; await saveDraft(); closeSheet(); S.tab = 'order'; render(); break;
     case 'collect': paymentForm(el.dataset.key); break;
     case 'choose-product': {
@@ -654,9 +787,9 @@ document.addEventListener('click', async (e) => {
       d.lines.push({ variation_id: p.variation_id, unit_id: unit ? unit.id : null, qty: 1 });
       await saveDraft(); closeSheet(); render(); break;
     }
-    case 'line-del': d.lines.splice(i, 1); await saveDraft(); render(); break;
-    case 'qty': d.lines[i].qty = Math.max(0, num(d.lines[i].qty) + Number(el.dataset.d)); await saveDraft(); render(); break;
-    case 'clear-order': if (confirm('Clear this order?')) { S.draft = { customer: null, lines: [], note: '' }; await saveDraft(); render(); } break;
+    case 'line-del': d.lines.splice(i, 1); await saveDraft(); refreshPos(); break;
+    case 'qty': d.lines[i].qty = Math.max(0, num(d.lines[i].qty) + Number(el.dataset.d)); await saveDraft(); refreshPos(); break;
+    case 'clear-order': if (confirm('Clear this order?')) { S.draft = { customer: null, lines: [], note: '' }; S.cartOpen = false; closeSheet(); await saveDraft(); render(); } break;
     case 'save-order': saveOrder(); break;
     case 'open-slip': openSlip(el.dataset.uuid); break;
     case 'share': share(el.dataset.uuid); break;
@@ -675,13 +808,14 @@ document.addEventListener('click', async (e) => {
 document.addEventListener('change', async (e) => {
   const el = e.target;
   const i = Number(el.dataset.i);
-  if (el.dataset.act === 'line-unit') { S.draft.lines[i].unit_id = Number(el.value); await saveDraft(); render(); }
-  if (el.dataset.act === 'qty-in') { S.draft.lines[i].qty = num(el.value); await saveDraft(); render(); }
+  if (el.dataset.act === 'line-unit') { S.draft.lines[i].unit_id = Number(el.value); await saveDraft(); refreshPos(); }
+  if (el.dataset.act === 'qty-in') { S.draft.lines[i].qty = num(el.value); await saveDraft(); refreshPos(); }
 });
 
 document.addEventListener('input', (e) => {
   const el = e.target;
   if (el.dataset.act === 'note') { S.draft.note = el.value; saveDraft(); }
+  if (el.dataset.act === 'pos-search') { S.posQuery = el.value; $('#pcards').innerHTML = productCards(); }
   if (el.dataset.act === 'cust-search') { S.custQuery = el.value; $('#cust-list').innerHTML = customerRows(el.value, 'open-customer'); }
 });
 

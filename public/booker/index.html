@@ -11,8 +11,8 @@
 <style>
   :root {
     --bg: #f4f6f9; --card: #fff; --text: #1b1f24; --muted: #667085; --line: #e3e7ed;
-    --primary: #1f6feb; --primary-text: #fff; --ok: #1a7f37; --warn: #b54708; --bad: #c62828;
-    --ok-bg: #e7f6ec; --warn-bg: #fff4e5; --bad-bg: #fdecec; --info-bg: #e8f0fe;
+    --primary: #2e9e6a; --primary-dark: #23805a; --primary-text: #fff; --ok: #1a7f37; --warn: #b54708; --bad: #c62828;
+    --ok-bg: #e7f6ec; --warn-bg: #fff4e5; --bad-bg: #fdecec; --info-bg: #e6f4ed;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -61,6 +61,74 @@
   .toast { position: fixed; left: 16px; right: 16px; bottom: 80px; z-index: 20; background: #1b1f24; color: #fff; padding: 12px 14px; border-radius: 10px; text-align: center; }
   .slip { background: #fff; border: 1px dashed #98a2b3; border-radius: 8px; padding: 12px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; white-space: pre-wrap; }
   .login { max-width: 380px; margin: 60px auto; }
+  nav button { min-height: 58px; }
+
+  /* ---- POS order screen: product grid + cart ---- */
+  main.pos { max-width: none; padding: 0; }
+  .pos-grid { display: block; }
+  .pos-products { padding: 12px 16px 90px; }
+  .pos-search { display: flex; gap: 8px; margin-bottom: 10px; }
+  .pos-search input { padding: 12px 14px; font-size: 16px; border-radius: 10px; }
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 6px; scrollbar-width: none; }
+  .chip { flex: none; border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 99px; padding: 6px 12px; font: inherit; font-size: 13px; white-space: nowrap; }
+  .chip.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .pcard { position: relative; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px; text-align: left; font: inherit; color: var(--text); display: flex; flex-direction: column; gap: 4px; min-height: 120px; cursor: pointer; transition: border-color .1s, box-shadow .1s; }
+  .pcard:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(46,158,106,.15); }
+  .pcard:active { transform: scale(.98); }
+  .pcard .pname { font-weight: 600; font-size: 14px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pcard .pmeta { font-size: 12px; color: var(--muted); }
+  .pcard .pprice { margin-top: auto; font-weight: 700; color: var(--primary-dark); font-size: 15px; }
+  .pcard .pstock { font-size: 12px; }
+  .pcard .incart { position: absolute; top: -7px; right: -7px; background: var(--primary); color: #fff; border-radius: 99px; min-width: 24px; height: 24px; padding: 0 6px; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .pcard.out .pstock { color: var(--bad); }
+  .cart { background: #fff; display: flex; flex-direction: column; }
+  .cart-head { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .cart-lines { flex: 1; overflow-y: auto; padding: 4px 14px; }
+  .cline { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .cline:last-child { border-bottom: 0; }
+  .cart-foot { padding: 12px 14px; border-top: 1px solid var(--line); background: #fafbfc; }
+  .cart-total { display: flex; justify-content: space-between; align-items: baseline; margin: 6px 0 10px; }
+  .cart-total b { font-size: 24px; }
+  .cartbar { position: fixed; left: 12px; right: 12px; bottom: 68px; z-index: 6; background: var(--primary); color: #fff; border: 0; border-radius: 12px; padding: 12px 16px; font: inherit; font-weight: 600; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.18); }
+  .cust-pick { display: flex; align-items: center; gap: 10px; border: 1px dashed var(--primary); border-radius: 10px; padding: 10px 12px; cursor: pointer; background: var(--info-bg); }
+  .cust-pick.set { border-style: solid; background: #fff; border-color: var(--line); }
+
+  .hdr-user { font-size: 13px; opacity: .9; }
+  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 10px; }
+  .tile { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .tile .v { font-size: 22px; font-weight: 700; margin: 2px 0; }
+  .tile .l { font-size: 12px; color: var(--muted); }
+  .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 10px; }
+  .actions .btn { padding: 14px 8px; font-size: 13px; line-height: 1.6; }
+  .dash-cols { display: grid; gap: 10px; }
+  @media (max-width: 899px) { .pos-grid > .cart { display: none; } .hdr-user { display: none; } }
+
+  /* Computer / tablet: tabs on top, products left, cart always on the right. */
+  @media (min-width: 900px) {
+    body { padding-bottom: 0; }
+    #app { display: flex; flex-direction: column; min-height: 100vh; }
+    header { order: 0; }
+    nav { order: 1; position: sticky; top: 52px; bottom: auto; border-top: 0; border-bottom: 1px solid var(--line); justify-content: flex-start; padding: 0 12px; z-index: 4; }
+    nav button { flex: none; min-height: 0; padding: 10px 18px; font-size: 14px; display: flex; gap: 8px; align-items: center; border-bottom: 3px solid transparent; }
+    nav button b { font-size: 16px; display: inline; }
+    nav button.on { border-bottom-color: var(--primary); }
+    .bar { order: 2; }
+    main { order: 3; flex: 1; width: 100%; max-width: 900px; }
+    main.pos { max-width: none; }
+    .pos-grid { display: grid; grid-template-columns: 1fr 400px; height: calc(100vh - 128px); }
+    .pos-products { overflow-y: auto; padding: 14px 18px 18px; }
+    .cart { border-left: 1px solid var(--line); height: 100%; }
+    .cartbar { display: none; }
+    .total { position: static; }
+    .toast { left: auto; right: 24px; bottom: 24px; max-width: 420px; }
+    .modal { align-items: center; }
+    .sheet { max-width: 560px; border-radius: 16px; max-height: 86vh; }
+    .tiles { grid-template-columns: repeat(4, 1fr); }
+    .tile .v { font-size: 26px; }
+    .dash-cols { grid-template-columns: 1fr 1fr; }
+    main:not(.pos) { max-width: 1100px; padding: 16px 24px; }
+  }
   @media print { header, nav, .bar, .noprint { display: none !important; } body { padding: 0; background: #fff; } .modal { position: static; background: none; } .sheet { max-height: none; } }
 </style>
 </head>
