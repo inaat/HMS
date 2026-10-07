@@ -15,7 +15,7 @@ class SyncStatus
     const KEY = 'mobile_sync_progress';
 
     // A run that has not reported for this long has died (PC slept, PHP killed); a new one may start.
-    const STALE_SECONDS = 600;
+    const STALE_SECONDS = 300;
 
     public static function progress(string $step, int $percent, string $detail = ''): void
     {

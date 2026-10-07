@@ -104,6 +104,12 @@ class MobileSyncRun extends Command
             $offline = true;
             $this->errors[] = 'No internet or the cloud site is not reachable. Your work is safe and will be sent automatically when the internet is back.';
             $this->error(end($this->errors));
+        } catch (\Throwable $e) {
+            // Any other failure still ends the run, so the Cloud sync panel never stays on "Syncing…".
+            $offline = false;
+            $this->errors[] = 'Sync stopped: '.mb_substr($e->getMessage(), 0, 200);
+            $this->error(end($this->errors));
+            report($e);
         }
 
         $ok = empty($this->errors);
