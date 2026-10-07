@@ -16,3 +16,19 @@ use Illuminate\Http\Request;
 Route::middleware('auth:api')->get('/user', function (Request $request) {
     return $request->user();
 });
+
+// Order-booker mobile sync; only answers on the cloud copy (MOBILE_SYNC_ROLE=cloud), see config/mobile_sync.php
+Route::prefix('mobile')->group(function () {
+    Route::post('login', [\App\Http\Controllers\Api\MobileController::class, 'login'])->middleware(['mobile.sync:login', 'throttle:10,1']);
+    Route::middleware('mobile.sync:mobile')->group(function () {
+        Route::post('logout', [\App\Http\Controllers\Api\MobileController::class, 'logout']);
+        Route::get('sync', [\App\Http\Controllers\Api\MobileController::class, 'sync']);
+        Route::post('upload', [\App\Http\Controllers\Api\MobileController::class, 'upload']);
+    });
+});
+
+Route::prefix('sync')->middleware('mobile.sync:sync')->group(function () {
+    Route::post('push', [\App\Http\Controllers\Api\MobileSyncController::class, 'push']);
+    Route::get('inbox', [\App\Http\Controllers\Api\MobileSyncController::class, 'inbox']);
+    Route::post('ack', [\App\Http\Controllers\Api\MobileSyncController::class, 'ack']);
+});

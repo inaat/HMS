@@ -1,0 +1,135 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Services\MobileSync\MobileInbox;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Sell > Mobile orders: orders and collections order bookers sent from the app (see config/mobile_sync.php),
+ * waiting for staff to approve or reject. An approved order becomes a Sales Order; Make invoice opens Add Sale
+ * with that sales order picked.
+ */
+class MobileOrderController extends Controller
+{
+    private function authorizeAccess()
+    {
+        if (! auth()->user()->can('sell.create') && ! auth()->user()->can('so.create') && ! auth()->user()->can('direct_sell.access')) {
+            abort(403, 'Unauthorized action.');
+        }
+    }
+
+    private function inbox(): MobileInbox
+    {
+        return new MobileInbox(request()->session()->get('user.business_id'), config('mobile_sync.location_id'));
+    }
+
+    public function index(Request $request)
+    {
+        $this->authorizeAccess();
+
+        $kind = $request->input('kind') === 'payment' ? 'payment' : 'order';
+        $status = $request->input('status', 'waiting');
+
+        $query = DB::table('mobile_inbox as m')
+            ->leftJoin('contacts as c', 'c.id', '=', 'm.contact_id')
+            ->leftJoin('users as u', 'u.id', '=', 'm.booker_id')
+            ->leftJoin('users as d', 'd.id', '=', 'm.decided_by')
+            ->where('m.kind', $kind)
+            ->select('m.*', 'c.name as customer', 'c.supplier_business_name', 'c.mobile as customer_mobile',
+                DB::raw("TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as booker"),
+                DB::raw("TRIM(CONCAT(COALESCE(d.first_name, ''), ' ', COALESCE(d.last_name, ''))) as decided_by_name"))
+            ->orderByDesc('m.id');
+        if ($status !== 'all') {
+            $query->where('m.status', $status);
+        }
+        $rows = $query->paginate(50)->withQueryString();
+
+        $counts = DB::table('mobile_inbox')->where('status', 'waiting')->groupBy('kind')->selectRaw('kind, COUNT(*) as c')->pluck('c', 'kind');
+        $last_run = json_decode((string) DB::table('system')->where('key', 'mobile_sync_last_run')->value('value'), true);
+
+        return view('mobile_order.index', compact('rows', 'kind', 'status', 'counts', 'last_run'));
+    }
+
+    public function show($id)
+    {
+        $this->authorizeAccess();
+
+        $row = DB::table('mobile_inbox as m')
+            ->leftJoin('contacts as c', 'c.id', '=', 'm.contact_id')
+            ->leftJoin('users as u', 'u.id', '=', 'm.booker_id')
+            ->where('m.id', $id)
+            ->whereIn('m.kind', ['order', 'payment'])
+            ->select('m.*', 'c.name as customer', 'c.supplier_business_name', 'c.mobile as customer_mobile',
+                DB::raw("TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as booker"))
+            ->first();
+        abort_if(empty($row), 404);
+        $data = json_decode($row->data, true);
+
+        $lines = [];
+        $invoices = collect();
+        if ($row->kind === 'order') {
+            $location_id = config('mobile_sync.location_id');
+            foreach ($data['lines'] ?? [] as $l) {
+                $v = DB::table('variations as v')
+                    ->join('products as p', 'p.id', '=', 'v.product_id')
+                    ->leftJoin('variation_location_details as vld', function ($join) use ($location_id) {
+                        $join->on('vld.variation_id', '=', 'v.id')->where('vld.location_id', $location_id);
+                    })
+                    ->where('v.id', $l['variation_id'])
+                    ->first(['p.name', 'v.sub_sku', 'v.sell_price_inc_tax', 'vld.qty_available', 'p.enable_stock']);
+                $lines[] = $l + [
+                    'name' => $v->name ?? 'Product #'.$l['product_id'].' (deleted)',
+                    'sku' => $v->sub_sku ?? '',
+                    'unit_name' => DB::table('units')->where('id', $l['sub_unit_id'])->value('actual_name'),
+                    'current_price' => isset($v->sell_price_inc_tax) ? $v->sell_price_inc_tax * $l['multiplier'] : null,
+                    'stock' => $v->qty_available ?? 0,
+                    'enable_stock' => $v->enable_stock ?? 0,
+                ];
+            }
+        } else {
+            $ids = array_column($data['allocations'] ?? [], 'invoice_id');
+            $invoices = DB::table('transactions')->whereIn('id', $ids)->pluck('invoice_no', 'id');
+        }
+
+        return view('mobile_order.show', compact('row', 'data', 'lines', 'invoices'));
+    }
+
+    public function approve($id)
+    {
+        $this->authorizeAccess();
+
+        try {
+            $row = DB::table('mobile_inbox')->find($id);
+            if (! empty($row) && $row->kind === 'payment') {
+                $payment = $this->inbox()->approvePayment($id, auth()->id());
+                $msg = 'Payment posted: '.$payment->payment_ref_no;
+            } else {
+                $so = $this->inbox()->approveOrder($id, auth()->id());
+                $msg = 'Sales order created: '.$so->invoice_no;
+            }
+            $output = ['success' => 1, 'msg' => $msg];
+        } catch (\Exception $e) {
+            \Log::emergency('Mobile approve: File:'.$e->getFile().' Line:'.$e->getLine().' Message:'.$e->getMessage());
+            $output = ['success' => 0, 'msg' => $e->getMessage()];
+        }
+
+        return redirect()->back()->with('status', $output);
+    }
+
+    public function reject(Request $request, $id)
+    {
+        $this->authorizeAccess();
+        $request->validate(['reason' => 'required|string|max:191']);
+
+        try {
+            $this->inbox()->reject($id, auth()->id(), $request->input('reason'));
+            $output = ['success' => 1, 'msg' => 'Rejected; the booker will see the reason'];
+        } catch (\Exception $e) {
+            $output = ['success' => 0, 'msg' => $e->getMessage()];
+        }
+
+        return redirect()->back()->with('status', $output);
+    }
+}

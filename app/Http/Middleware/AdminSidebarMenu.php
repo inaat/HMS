@@ -368,6 +368,15 @@ class AdminSidebarMenu
                 $menu->dropdown(
                     __('sale.sale'),
                     function ($sub) use ($enabled_modules, $is_admin, $pos_settings) {
+                        // Order-booker app inbox (config/mobile_sync.php), only on the local copy.
+                        if (config('mobile_sync.role') === 'local' && ($is_admin || auth()->user()->hasAnyPermission(['sell.create', 'so.create', 'direct_sell.access']))) {
+                            $sub->url(
+                                action([\App\Http\Controllers\MobileOrderController::class, 'index']),
+                                'Mobile orders',
+                                ['icon' => '', 'active' => request()->segment(1) == 'mobile-orders']
+                            );
+                        }
+
                         if (!empty($pos_settings['enable_sales_order']) && ($is_admin || auth()->user()->hasAnyPermission(['so.view_own', 'so.view_all', 'so.create']))) {
                             $sub->url(
                                 action([\App\Http\Controllers\SalesOrderController::class, 'index']),

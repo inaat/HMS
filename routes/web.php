@@ -296,6 +296,10 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::post('/commission-payouts/pay', [\App\Http\Controllers\CommissionPayoutController::class, 'store']);
     Route::get('/commission-payouts/{id}', [\App\Http\Controllers\CommissionPayoutController::class, 'show']);
     Route::post('/commission-payouts/{id}/unlock', [\App\Http\Controllers\CommissionPayoutController::class, 'unlock']);
+    Route::get('/mobile-orders', [\App\Http\Controllers\MobileOrderController::class, 'index']);
+    Route::get('/mobile-orders/{id}', [\App\Http\Controllers\MobileOrderController::class, 'show']);
+    Route::post('/mobile-orders/{id}/approve', [\App\Http\Controllers\MobileOrderController::class, 'approve']);
+    Route::post('/mobile-orders/{id}/reject', [\App\Http\Controllers\MobileOrderController::class, 'reject']);
     Route::post('/reports/commission-agent-report/send-whatsapp', [ReportController::class, 'sendCommissionAgentReportWhatsapp']);
     Route::get('/reports/sales-representative-total-expense', [ReportController::class, 'getSalesRepresentativeTotalExpense']);
     Route::get('/reports/sales-representative-total-sell', [ReportController::class, 'getSalesRepresentativeTotalSell']);

@@ -1585,6 +1585,19 @@ class SellPosController extends Controller
                 $quantity = $sell_line->quantity - $sell_line->so_quantity_invoiced;
                 $sell_line->qty_available = $quantity;
                 $sell_line->formatted_qty_available = $this->transactionUtil->num_f($quantity);
+
+                // Sell lines hold base units; show the line in the unit it was ordered in (e.g. 3 x CTN 24, not
+                // 72 Pc), as the edit screen does. The row multiplies a fixed discount itself and keeps
+                // qty_available in base units for the max quantity check.
+                $multiplier = empty($sell_line->sub_unit_id) ? 1 : (float) (DB::table('units')->where('id', $sell_line->sub_unit_id)->value('base_unit_multiplier') ?: 1);
+                if ($multiplier != 1) {
+                    $quantity = $quantity / $multiplier;
+                    $sell_line->unit_price_before_discount = $sell_line->unit_price_before_discount * $multiplier;
+                    $sell_line->unit_price = $sell_line->unit_price * $multiplier;
+                    $sell_line->unit_price_inc_tax = $sell_line->unit_price_inc_tax * $multiplier;
+                    $sell_line->item_tax = $sell_line->item_tax * $multiplier;
+                }
+
                 $sell_line_row = $this->getSellLineRow($sell_line->variation_id, $sales_order->location_id, $quantity, $row_count, true, $sell_line);
                 $html .= $sell_line_row['html_content'];
                 $row_count++;
@@ -1624,6 +1637,11 @@ class SellPosController extends Controller
 
         if (!isset($product->quantity_ordered)) {
             $product->quantity_ordered = $quantity;
+        }
+
+        // A sales order line keeps the unit it was ordered in (getSalesOrderLines converted qty and price to it).
+        if (!empty($so_line) && !empty($so_line->sub_unit_id)) {
+            $product->sub_unit_id = $so_line->sub_unit_id;
         }
 
         $product->secondary_unit_quantity = !isset($product->secondary_unit_quantity) ? 0 : $product->secondary_unit_quantity;
@@ -1666,6 +1684,12 @@ class SellPosController extends Controller
                 $product->sell_price_inc_tax = $variation_group_prices['price_inc_tax'];
                 $product->default_sell_price = $variation_group_prices['price_exc_tax'];
             }
+        }
+
+        // A sales order line sells at the order's price: the row derives its base price from default_sell_price
+        // (divided by the unit multiplier) and pos.js multiplies it back when the unit is applied.
+        if (!empty($so_line)) {
+            $product->default_sell_price = $so_line->unit_price_before_discount;
         }
 
         $warranties = $this->__getwarranties();

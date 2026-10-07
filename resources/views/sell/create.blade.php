@@ -332,7 +332,7 @@
 	            </div>
 		        <div class="clearfix"></div>
 
-		        @if((!empty($pos_settings['enable_sales_order']) && $sale_type != 'sales_order') || $is_order_request_enabled)
+		        @if((!empty($pos_settings['enable_sales_order']) && $sale_type != 'sales_order') || $is_order_request_enabled || request()->filled('mobile_so'))
 					<div class="col-sm-3">
 						<div class="form-group">
 							{!! Form::label('sales_order_ids', __('lang_v1.sales_order').':') !!}
@@ -914,6 +914,39 @@
 	<script src="{{ asset('js/pos.js?v=' . $asset_v) }}"></script>
 	<script src="{{ asset('js/product.js?v=' . $asset_v) }}"></script>
 	<script src="{{ asset('js/opening_stock.js?v=' . $asset_v) }}"></script>
+
+	@php
+		$mobile_so = request()->filled('mobile_so') ? \App\Transaction::with('contact')->where('business_id', session('user.business_id'))
+			->where('type', 'sales_order')->whereIn('status', ['ordered', 'partial'])->find(request()->input('mobile_so')) : null;
+	@endphp
+	@if(! empty($mobile_so))
+	<script>
+		// "Make invoice" from Sell > Mobile orders: pick the customer and the booker's sales order, as staff would by hand.
+		$(document).ready(function () {
+			var so_id = '{{ $mobile_so->id }}';
+			var contact_id = '{{ $mobile_so->contact_id }}';
+			$.getJSON('/contacts/customers', {q: @json($mobile_so->contact->contact_id ?: $mobile_so->contact->name)}, function (list) {
+				var item = (list || []).find(function (c) { return String(c.id) === contact_id; });
+				if (!item) { toastr.error('Customer not found; pick the customer and sales order by hand'); return; }
+				$('#customer_id').append(new Option(item.text, item.id, true, true)).trigger('change');
+				$('#customer_id').trigger({type: 'select2:select', params: {data: item}});
+
+				// get_sales_orders() fills the sales order box over ajax; wait for our order to appear, then pick it.
+				var tries = 0;
+				var timer = setInterval(function () {
+					if ($('#sales_order_ids option[value="' + so_id + '"]').length) {
+						clearInterval(timer);
+						$('#sales_order_ids').val([so_id]).trigger('change');
+						$('#sales_order_ids').trigger({type: 'select2:select', params: {data: {id: so_id}}});
+					} else if (++tries > 40) {
+						clearInterval(timer);
+						toastr.error('Sales order {{ $mobile_so->invoice_no }} not found for this location');
+					}
+				}, 250);
+			});
+		});
+	</script>
+	@endif
 
 	<!-- Call restaurant module if defined -->
     @if(in_array('tables' ,$enabled_modules) || in_array('modifiers' ,$enabled_modules) || in_array('service_staff' ,$enabled_modules))

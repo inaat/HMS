@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f6feb">
+<title>Order Booker</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #fff; --text: #1b1f24; --muted: #667085; --line: #e3e7ed;
+    --primary: #1f6feb; --primary-text: #fff; --ok: #1a7f37; --warn: #b54708; --bad: #c62828;
+    --ok-bg: #e7f6ec; --warn-bg: #fff4e5; --bad-bg: #fdecec; --info-bg: #e8f0fe;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { padding-bottom: 72px; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--primary); color: var(--primary-text); padding: 10px 16px; display: flex; align-items: center; gap: 10px; }
+  header h1 { font-size: 17px; margin: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header button { background: rgba(255,255,255,.18); color: #fff; border: 0; border-radius: 8px; padding: 6px 10px; font-size: 14px; }
+  .bar { font-size: 12px; color: var(--muted); padding: 6px 16px; background: #fff; border-bottom: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  main { padding: 12px 16px; max-width: 720px; margin: 0 auto; }
+  nav { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid var(--line); display: flex; z-index: 5; padding-bottom: env(safe-area-inset-bottom); }
+  nav button { flex: 1; border: 0; background: none; padding: 9px 4px 8px; font-size: 12px; color: var(--muted); }
+  nav button b { display: block; font-size: 19px; line-height: 1.1; }
+  nav button.on { color: var(--primary); font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .grow { flex: 1; min-width: 0; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .right { text-align: right; }
+  .big { font-size: 18px; font-weight: 700; }
+  input, select, textarea { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 4px; }
+  .btn { display: inline-block; border: 0; border-radius: 10px; padding: 11px 14px; font: inherit; font-weight: 600; background: var(--primary); color: var(--primary-text); text-align: center; }
+  .btn.block { display: block; width: 100%; }
+  .btn.light { background: var(--info-bg); color: var(--primary); }
+  .btn.ok { background: var(--ok); color: #fff; }
+  .btn.bad { background: var(--bad-bg); color: var(--bad); }
+  .btn.small { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
+  .btn:disabled { opacity: .5; }
+  .pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--info-bg); color: var(--primary); white-space: nowrap; }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.bad { background: var(--bad-bg); color: var(--bad); }
+  .list .item { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .list .item:last-child { border-bottom: 0; }
+  .tap { cursor: pointer; }
+  .qty { display: flex; align-items: center; gap: 6px; }
+  .qty button { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--line); background: #fff; font-size: 20px; }
+  .qty input { width: 70px; text-align: center; padding: 7px; }
+  .total { position: sticky; bottom: 64px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 10; display: flex; align-items: flex-end; justify-content: center; }
+  .sheet { background: var(--bg); width: 100%; max-width: 720px; max-height: 92vh; overflow: auto; border-radius: 16px 16px 0 0; padding: 14px 16px 24px; }
+  .sheet h2 { font-size: 17px; margin: 0 0 10px; display: flex; justify-content: space-between; align-items: center; }
+  .x { border: 0; background: none; font-size: 26px; line-height: 1; color: var(--muted); }
+  .empty { text-align: center; color: var(--muted); padding: 24px 0; }
+  .toast { position: fixed; left: 16px; right: 16px; bottom: 80px; z-index: 20; background: #1b1f24; color: #fff; padding: 12px 14px; border-radius: 10px; text-align: center; }
+  .slip { background: #fff; border: 1px dashed #98a2b3; border-radius: 8px; padding: 12px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; white-space: pre-wrap; }
+  .login { max-width: 380px; margin: 60px auto; }
+  @media print { header, nav, .bar, .noprint { display: none !important; } body { padding: 0; background: #fff; } .modal { position: static; background: none; } .sheet { max-height: none; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="app.js"></script>
+</body>
+</html>
