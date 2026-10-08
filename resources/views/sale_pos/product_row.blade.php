@@ -33,7 +33,8 @@
 		</span>
 		<br>
 
-		<span style="opacity: 0.1;">p:</span><small class="text-muted fifo_purchase_price" style="opacity: 0.1;">{{ @num_format($fifo_purchase_price)}}</small>
+		{{-- Purchase (cost) price of this item, small and coloured so the cashier can see it --}}
+		<span style="color:#7c3aed; font-size:11px; font-weight:600;">p:</span><small class="fifo_purchase_price" style="color:#7c3aed; font-weight:600;">{{ @num_format($fifo_purchase_price)}}</small>
 		</div>
 		@else
 			{!! $product_name !!}
@@ -114,7 +115,7 @@
 		</div> 
 		@endif
 <br>
-		<small class="text-muted p-1">
+		<small class="p-1 {{ $product->enable_stock && (float) $product->qty_available <= 0 ? 'text-danger' : 'text-muted' }}" @if($product->enable_stock && (float) $product->qty_available <= 0) style="font-weight:600;" @endif>
 			@if($product->enable_stock)
 			{{ @num_format($product->qty_available) }} {{$product->unit}} @lang('lang_v1.in_stock')
 			@php
