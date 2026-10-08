@@ -321,8 +321,9 @@ class ZakatUtil extends Util
 
         return DB::transaction(function () use ($business_id, $user_id, $data, $settings) {
             $year = $this->currentYear($business_id, $settings, $user_id);
+            $account_entry = null;
             if (! empty($data['account_id'])) {
-                \App\AccountTransaction::createAccountTransaction([
+                $account_entry = \App\AccountTransaction::createAccountTransaction([
                     'amount' => $data['amount'],
                     'account_id' => $data['account_id'],
                     'type' => 'debit',
@@ -332,7 +333,7 @@ class ZakatUtil extends Util
                 ]);
             }
 
-            return DB::table('zakat_payments')->insertGetId([
+            $row = [
                 'business_id' => $business_id,
                 'zakat_year_id' => $year->id,
                 'kind' => $data['kind'] ?? 'cash',
@@ -346,7 +347,53 @@ class ZakatUtil extends Util
                 'created_by' => $user_id,
                 'created_at' => now(),
                 'updated_at' => now(),
-            ]);
+            ];
+            if ($account_entry && \Schema::hasColumn('zakat_payments', 'account_transaction_id')) {
+                $row['account_transaction_id'] = $account_entry->id;
+            }
+
+            return DB::table('zakat_payments')->insertGetId($row);
+        });
+    }
+
+    /**
+     * Delete a zakat entry and undo what it did: goods go back into stock (same steps as deleting a stock
+     * adjustment), the account entry of a cash payment is removed. Not allowed in a locked year.
+     */
+    public function deletePayment(int $business_id, int $id): void
+    {
+        DB::transaction(function () use ($business_id, $id) {
+            $payment = DB::table('zakat_payments')->where('business_id', $business_id)->where('id', $id)->lockForUpdate()->first();
+            if (empty($payment)) {
+                throw new \Exception('Not found');
+            }
+            if ($payment->zakat_year_id && DB::table('zakat_years')->where('id', $payment->zakat_year_id)->value('status') === 'locked') {
+                throw new \Exception('This zakat year is locked — it cannot be changed');
+            }
+
+            if ($payment->kind === 'goods' && $payment->transaction_id) {
+                $adjustment = Transaction::where('business_id', $business_id)->where('id', $payment->transaction_id)
+                    ->where('type', 'stock_adjustment')->where('is_zakat', 1)->with('stock_adjustment_lines')->first();
+                if ($adjustment) {
+                    $productUtil = new ProductUtil();
+                    $line_ids = [];
+                    foreach ($adjustment->stock_adjustment_lines as $line) {
+                        $productUtil->updateProductQuantity($adjustment->location_id, $line->product_id, $line->variation_id, $productUtil->num_f($line->quantity));
+                        $line_ids[] = $line->id;
+                    }
+                    if ($line_ids) {
+                        (new TransactionUtil())->mapPurchaseQuantityForDeleteStockAdjustment($line_ids);
+                    }
+                    $adjustment->delete();
+                    event(new StockAdjustmentCreatedOrModified($adjustment, 'deleted'));
+                }
+            }
+
+            if (! empty($payment->account_transaction_id)) {
+                \App\AccountTransaction::where('id', $payment->account_transaction_id)->delete();
+            }
+
+            DB::table('zakat_payments')->where('id', $payment->id)->delete();
         });
     }
 }

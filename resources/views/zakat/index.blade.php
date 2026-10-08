@@ -148,7 +148,16 @@
                             <td class="text-right">@if ($p->kind == 'goods')<span class="display_currency" data-currency_symbol="true">{{ $p->cost_value }}</span>@endif</td>
                             <td>{{ $p->kind == 'goods' ? 'Stock '.$p->ref_no : ($p->account_name ?: '—') }}</td>
                             <td>{{ $p->given_by }}</td>
-                            <td><a href="{{ action([\App\Http\Controllers\ZakatController::class, 'slip'], [$p->id]) }}" target="_blank" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary"><i class="fa fa-print"></i> Slip</a></td>
+                            <td style="white-space:nowrap;">
+                                <a href="{{ action([\App\Http\Controllers\ZakatController::class, 'slip'], [$p->id]) }}" target="_blank" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary"><i class="fa fa-print"></i> Slip</a>
+                                @unless ($locked)
+                                    <form method="POST" action="{{ action([\App\Http\Controllers\ZakatController::class, 'destroyPayment'], [$p->id]) }}" style="display:inline;" class="zakat-delete"
+                                        data-msg="{{ $p->kind == 'goods' && $p->transaction_id ? 'Delete this zakat? The products go back into stock.' : ($p->account_transaction_id ?? null ? 'Delete this zakat? The amount goes back into the account.' : 'Delete this zakat entry?') }}">
+                                        @csrf
+                                        <button type="submit" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-error"><i class="fa fa-trash"></i> Delete</button>
+                                    </form>
+                                @endunless
+                            </td>
                         </tr>
                     @empty
                         <tr><td colspan="9" class="text-center text-muted">Nothing given yet this year.</td></tr>
@@ -196,6 +205,15 @@
 <script>
     $(function () {
         $('#zakat_calc_date, #zakat_paid_on').datepicker({autoclose: true});
+        // Delete a zakat entry: POS confirm dialog, then the stock / account is put back
+        $(document).on('submit', 'form.zakat-delete', function (e) {
+            var form = this;
+            if ($(form).data('ok')) { return; }
+            e.preventDefault();
+            swal({ title: $(form).data('msg'), icon: 'warning', buttons: ['Cancel', 'Delete'], dangerMode: true }).then(function (ok) {
+                if (ok) { $(form).data('ok', true); form.submit(); }
+            });
+        });
         $('#year_pick').on('change', function () {
             if (this.value) { window.location = '{{ action([\App\Http\Controllers\ZakatController::class, 'index']) }}?year_id=' + this.value; }
         });

@@ -308,6 +308,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::post('/zakat/cash', [\App\Http\Controllers\ZakatController::class, 'payCash']);
     Route::post('/zakat/pos', [\App\Http\Controllers\ZakatController::class, 'storeFromPos']);
     Route::get('/zakat/recipients', [\App\Http\Controllers\ZakatController::class, 'recipients']);
+    Route::post('/zakat/payment/{id}/delete', [\App\Http\Controllers\ZakatController::class, 'destroyPayment']);
     Route::get('/zakat/slip/{id}', [\App\Http\Controllers\ZakatController::class, 'slip']);
     Route::get('/booker-routes/sheet', [\App\Http\Controllers\BookerRouteController::class, 'exportSheet']);
     Route::post('/booker-routes/sheet', [\App\Http\Controllers\BookerRouteController::class, 'importSheet']);

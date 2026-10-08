@@ -214,6 +214,21 @@ class ZakatController extends Controller
             });
     }
 
+    /** Delete a zakat entry: products go back into stock, a cash payment's account entry is removed. */
+    public function destroyPayment($id)
+    {
+        $this->authorizeZakat();
+        try {
+            (new ZakatUtil())->deletePayment($this->businessId(), (int) $id);
+            $output = ['success' => 1, 'msg' => 'Zakat entry deleted'];
+        } catch (\Throwable $e) {
+            \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
+            $output = ['success' => 0, 'msg' => $e->getMessage()];
+        }
+
+        return redirect()->back()->with('status', $output);
+    }
+
     public function slip($id)
     {
         $this->authorizeZakat();
