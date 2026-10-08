@@ -79,6 +79,28 @@
     </div>
 
     @component('components.widget')
+        {{-- Totals of everything the filters match (all pages), per booker; Print = same filters, all rows --}}
+        <div class="no-print" style="display:flex; flex-wrap:wrap; gap:8px; align-items:stretch; margin-bottom:12px;">
+            <div style="border:1px solid #16a34a; background:#f0fdf4; border-radius:8px; padding:6px 12px;">
+                <div class="text-muted small">Total {{ $kind == 'order' ? 'orders' : 'collected' }} ({{ (int) $grand['count'] }})</div>
+                <b style="font-size:16px;"><span class="display_currency" data-currency_symbol="true">{{ $grand['total'] }}</span></b>
+            </div>
+            @foreach ($by_booker as $b)
+                <a href="{{ request()->fullUrlWithQuery(['booker_id' => $b->booker_id, 'page' => null]) }}" title="Show only this booker"
+                    style="border:1px solid #e5e7eb; border-radius:8px; padding:6px 12px; color:inherit; @if ($booker == $b->booker_id) background:#eff6ff; border-color:#3b82f6; @endif">
+                    <div class="text-muted small">{{ $b->booker ?: '#'.$b->booker_id }} ({{ (int) $b->count }})</div>
+                    <b><span class="display_currency" data-currency_symbol="true">{{ $b->total }}</span></b>
+                </a>
+            @endforeach
+            <div style="margin-left:auto; display:flex; align-items:center; gap:6px;" title="Ticked rows only, or everything the filters show">
+                @if ($kind == 'order')
+                    <a href="{{ request()->fullUrlWithQuery(['print' => 1, 'load' => 1, 'page' => null]) }}" target="_blank" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-success tw-text-white print-btn">
+                        <i class="fa fa-boxes"></i> Load sheet (by brand)</a>
+                @endif
+                <a href="{{ request()->fullUrlWithQuery(['print' => 1, 'page' => null]) }}" target="_blank" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-primary tw-text-white print-btn">
+                    <i class="fa fa-print"></i> Print</a>
+            </div>
+        </div>
         {{-- Bulk: tick rows, then one button invoices every ticked order / approves every ticked payment. --}}
         <form method="POST" id="bulk-form" action="{{ action([\App\Http\Controllers\MobileOrderController::class, 'bulk']) }}" class="no-print" style="margin-bottom: 10px; display: none;">
             @csrf
@@ -162,6 +184,23 @@
                         <tr><td colspan="10" class="text-center text-muted">Nothing here.</td></tr>
                     @endforelse
                 </tbody>
+                @if ($rows->count())
+                    <tfoot>
+                        <tr style="background:#f5f5f5; font-weight:bold;">
+                            <td colspan="{{ $locations->count() > 1 ? 6 : 5 }}" class="text-right">
+                                This page ({{ $rows->count() }}):
+                                <span class="display_currency" data-currency_symbol="true">{{ $rows->sum('total') }}</span>
+                                @if ($rows->lastPage() > 1)
+                                    &nbsp;·&nbsp; All pages ({{ (int) $grand['count'] }}):
+                                @else
+                                    &nbsp;·&nbsp; Total:
+                                @endif
+                            </td>
+                            <td class="text-right" style="white-space:nowrap;"><span class="display_currency" data-currency_symbol="true">{{ $grand['total'] }}</span></td>
+                            <td colspan="3"></td>
+                        </tr>
+                    </tfoot>
+                @endif
             </table>
         </div>
         {{ $rows->links() }}
@@ -262,6 +301,14 @@
         }
         $(document).on('change', '#bulk-all', function () { $('.bulk-row').prop('checked', this.checked); bulkRefresh(); });
         $(document).on('change', '.bulk-row', bulkRefresh);
+        // Print / Load sheet: only the ticked rows when some are ticked, else everything the filters show
+        $(document).on('click', '.print-btn', function (e) {
+            var ids = $('.bulk-row:checked').map(function () { return this.value; }).get();
+            if (ids.length) {
+                e.preventDefault();
+                window.open(this.href + (this.href.indexOf('?') >= 0 ? '&' : '?') + 'ids=' + ids.join(','), '_blank');
+            }
+        });
         $('#bulk-form').on('submit', function () {
             var form = $(this);
             form.find('input[name="ids[]"]').remove();

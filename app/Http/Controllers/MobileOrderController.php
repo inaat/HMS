@@ -76,6 +76,16 @@ class MobileOrderController extends Controller
         if ($start_date && $end_date) {
             $query->whereDate('m.booked_at', '>=', $start_date)->whereDate('m.booked_at', '<=', $end_date);
         }
+        // Totals of everything the filters match (all pages): grand total and per booker
+        $by_booker = (clone $query)->reorder()->groupBy('m.booker_id', 'u.first_name', 'u.last_name')
+            ->select('m.booker_id', DB::raw("TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))) as booker"),
+                DB::raw('COUNT(*) as count'), DB::raw('SUM(m.total) as total'))
+            ->orderByDesc('total')->get();
+        $grand = ['count' => $by_booker->sum('count'), 'total' => $by_booker->sum('total')];
+
+        if ($request->input('print')) {
+            return $this->printList($request, $query, $kind, $status, $start_date, $end_date, $locations, $location);
+        }
         $rows = $query->paginate(50)->withQueryString();
 
         // Everyone who ever sent something from the app (also bookers who left).
@@ -92,7 +102,73 @@ class MobileOrderController extends Controller
         $shop_edits = DB::table('booker_customer_updates')->where('business_id', request()->session()->get('user.business_id'))->where('status', 'waiting')->count();
 
         return view('mobile_order.index', compact('rows', 'kind', 'status', 'counts', 'last_run', 'locations', 'location', 'shop_edits',
-            'bookers', 'booker', 'start_date', 'end_date', 'filters'));
+            'bookers', 'booker', 'start_date', 'end_date', 'filters', 'by_booker', 'grand'));
+    }
+
+    /**
+     * Print of the list (same filters, all pages; or only the ticked rows). Orders also get a load sheet for the
+     * warehouse: every product of these orders added up, grouped by brand, with the quantity in its biggest unit.
+     */
+    private function printList(Request $request, $query, $kind, $status, $start_date, $end_date, $locations, $location)
+    {
+        $business_id = request()->session()->get('user.business_id');
+        $ids = array_filter(array_map('intval', explode(',', (string) $request->input('ids'))));
+        if ($ids) {
+            $query->whereIn('m.id', $ids);
+        }
+        $rows = $query->get();
+        $by_booker = $rows->groupBy('booker_id')->map(function ($g) {
+            return (object) ['booker' => $g->first()->booker ?: '#'.$g->first()->booker_id, 'count' => $g->count(), 'total' => $g->sum('total')];
+        })->sortByDesc('total')->values();
+        $grand = ['count' => $rows->count(), 'total' => $rows->sum('total')];
+
+        $load = collect();
+        if ($kind === 'order') {
+            $qty = [];
+            $orders = [];
+            foreach ($rows as $r) {
+                foreach (json_decode($r->data, true)['lines'] ?? [] as $l) {
+                    $vid = (int) ($l['variation_id'] ?? 0);
+                    $qty[$vid] = ($qty[$vid] ?? 0) + (float) ($l['quantity'] ?? 0);
+                    $orders[$vid][$r->id] = true;
+                }
+            }
+            $location_id = $location ?: (int) config('mobile_sync.location_id');
+            $products = DB::table('variations as v')
+                ->join('products as p', 'p.id', '=', 'v.product_id')
+                ->leftJoin('brands as b', 'b.id', '=', 'p.brand_id')
+                ->leftJoin('units as u', 'u.id', '=', 'p.unit_id')
+                ->leftJoin('product_variations as pv', 'pv.id', '=', 'v.product_variation_id')
+                ->leftJoin('variation_location_details as vld', function ($join) use ($location_id) {
+                    $join->on('vld.variation_id', '=', 'v.id')->where('vld.location_id', $location_id);
+                })
+                ->whereIn('v.id', array_keys($qty) ?: [0])
+                ->select('v.id', 'p.name', 'p.type', 'v.name as variation', 'pv.name as variation_group', 'v.sub_sku',
+                    'p.sub_unit_ids', 'u.short_name as unit', 'b.name as brand', 'vld.qty_available')
+                ->get()->keyBy('id');
+            $productUtil = new \App\Utils\ProductUtil();
+            foreach ($qty as $vid => $q) {
+                $p = $products[$vid] ?? null;
+                $load->push((object) [
+                    'brand' => $p && $p->brand ? $p->brand : 'No brand',
+                    'name' => $p ? $p->name.($p->type == 'variable' ? ' - '.$p->variation : '') : 'Product (deleted) #'.$vid,
+                    'sku' => $p->sub_sku ?? '',
+                    'qty' => $q,
+                    'unit' => $p->unit ?? '',
+                    'big' => $p ? $productUtil->stockInBiggestSubUnit($business_id, $q, $p->sub_unit_ids, $p->unit) : null,
+                    'stock' => $p->qty_available ?? null,
+                    'orders' => count($orders[$vid] ?? []),
+                ]);
+            }
+            $load = $load->sortBy(function ($l) {
+                return ($l->brand === 'No brand' ? 'zzzz' : strtolower($l->brand)).'|'.strtolower($l->name);
+            })->groupBy('brand');
+        }
+        $business = \App\Business::find($business_id);
+        $only_load = (bool) $request->input('load');
+
+        return view('mobile_order.print', compact('rows', 'kind', 'status', 'by_booker', 'grand', 'start_date', 'end_date',
+            'business', 'locations', 'location', 'load', 'only_load', 'ids'));
     }
 
     public function show($id)
