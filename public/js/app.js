@@ -539,7 +539,8 @@ $(document).ready(function() {
                 className: b.className,
                 action: function () {
                     var params = $.extend({}, contact_table.ajax.params(), { print_list: 1 });
-                    window.open('/contacts?' + $.param(params), '_blank');
+                    // base_path = this install's address (also when the POS runs in a sub-folder like /pos2026/public)
+                    window.open(base_path + '/contacts?' + $.param(params), '_blank');
                 },
             };
         }),
