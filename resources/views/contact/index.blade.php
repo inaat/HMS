@@ -160,8 +160,13 @@
                                     <th>@lang('contact.total_purchase_due')</th>
                                     <th>@lang('lang_v1.total_purchase_return_due')</th>
                                 @elseif($type == 'customer')
+                                    {{-- Order: who, how to reach, what they owe; then the rest (app.js columns follow) --}}
                                     <th>@lang('business.business_name')</th>
                                     <th>@lang('user.name')</th>
+                                    <th>@lang('contact.mobile')</th>
+                                    <th>@lang('contact.total_sale_due')</th>
+                                    <th>@lang('lang_v1.total_sell_return_due')</th>
+                                    <th>@lang('business.address')</th>
                                     <th>@lang('business.email')</th>
                                     <th>@lang('contact.tax_no')</th>
                                     <th>@lang('lang_v1.credit_limit')</th>
@@ -173,77 +178,32 @@
                                         <th id="rp_col">{{ session('business.rp_name') }}</th>
                                     @endif
                                     <th>@lang('lang_v1.customer_group')</th>
-                                    <th>@lang('business.address')</th>
-                                    <th>@lang('contact.mobile')</th>
-                                    <th>@lang('contact.total_sale_due')</th>
-                                    <th>@lang('lang_v1.total_sell_return_due')</th>
                                 @endif
                                 @php
                                     $custom_labels = json_decode(session('business.custom_labels'), true);
+                                    // Only custom fields given a name in Settings > Business Settings > Custom Labels
+                                    $shown_custom_fields = array_values(array_filter(range(1, 10), function ($n) use ($custom_labels) {
+                                        return ! empty($custom_labels['contact']['custom_field_'.$n]);
+                                    }));
                                 @endphp
-                                <th>
-                                    {{ $custom_labels['contact']['custom_field_1'] ?? __('lang_v1.contact_custom_field1') }}
-                                </th>
-                                <th>
-                                    {{ $custom_labels['contact']['custom_field_2'] ?? __('lang_v1.contact_custom_field2') }}
-                                </th>
-                                <th>
-                                    {{ $custom_labels['contact']['custom_field_3'] ?? __('lang_v1.contact_custom_field3') }}
-                                </th>
-                                <th>
-                                    {{ $custom_labels['contact']['custom_field_4'] ?? __('lang_v1.contact_custom_field4') }}
-                                </th>
-                                <th>
-                                    {{ $custom_labels['contact']['custom_field_5'] ?? __('lang_v1.custom_field', ['number' => 5]) }}
-                                </th>
-                                <th>
-                                    {{ $custom_labels['contact']['custom_field_6'] ?? __('lang_v1.custom_field', ['number' => 6]) }}
-                                </th>
-                                <th>
-                                    {{ $custom_labels['contact']['custom_field_7'] ?? __('lang_v1.custom_field', ['number' => 7]) }}
-                                </th>
-                                <th>
-                                    {{ $custom_labels['contact']['custom_field_8'] ?? __('lang_v1.custom_field', ['number' => 8]) }}
-                                </th>
-                                <th>
-                                    {{ $custom_labels['contact']['custom_field_9'] ?? __('lang_v1.custom_field', ['number' => 9]) }}
-                                </th>
-                                <th>
-                                    {{ $custom_labels['contact']['custom_field_10'] ?? __('lang_v1.custom_field', ['number' => 10]) }}
-                                </th>
+                                @foreach ($shown_custom_fields as $n)
+                                    <th data-cf="{{ $n }}">{{ $custom_labels['contact']['custom_field_'.$n] }}</th>
+                                @endforeach
                             </tr>
                         </thead>
                         <tfoot>
+                            {{-- Footer cells line up with the header above (custom fields: only the named ones) --}}
+                            @php
+                                $after_dues = $type == 'customer' ? 9 + ($reward_enabled ? 1 : 0) : 0;
+                                $after_dues += count($shown_custom_fields);
+                            @endphp
                             <tr class="bg-gray font-17 text-center footer-total">
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td @if ($type == 'supplier') colspan="6"
-                            @elseif($type == 'customer')
-                                @if ($reward_enabled)
-                                    colspan="9"
-                                @else
-                                    colspan="8" @endif
-                                    @endif>
-                                    <strong>
-                                        @lang('sale.total'):
-                                    </strong>
-                                </td>
+                                <td colspan="{{ $type == 'customer' ? 5 : 12 }}"><strong>@lang('sale.total'):</strong></td>
                                 <td class="footer_contact_due"></td>
                                 <td class="footer_contact_return_due"></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
-                                <td></td>
+                                @if ($after_dues > 0)
+                                    <td colspan="{{ $after_dues }}"></td>
+                                @endif
                             </tr>
                         </tfoot>
                     </table>

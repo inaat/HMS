@@ -289,6 +289,10 @@ class ContactUtil extends Util
                 DB::raw('SUM(IF(is_return = 1, -1 * amount, amount)) as paid_net'),
                 DB::raw('SUM(amount) as paid_gross'))
             ->groupBy('transaction_id');
+        if (! empty($contact_ids)) {
+            // Only these customers' payments (search / defaulters with a list): no full payments scan.
+            $paid->whereIn('transaction_id', DB::table('transactions')->select('id')->whereIn('contact_id', $contact_ids));
+        }
 
         $totals = DB::table('transactions as t')
             ->leftJoinSub($paid, 'p', 'p.transaction_id', '=', 't.id')

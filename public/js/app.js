@@ -422,6 +422,13 @@ $(document).ready(function() {
     //Start: CRUD for Contacts
     //contacts table
     var contact_table_type = $('#contact_type').val();
+    // Custom field columns the page shows (only those named in Settings > Business Settings > Custom Labels)
+    function contact_custom_columns() {
+        return $('#contact_table thead th[data-cf]').map(function () {
+            var n = $(this).data('cf');
+            return { data: 'custom_field' + n, name: 'custom_field' + n };
+        }).get();
+    }
     if (contact_table_type == 'supplier') {
         var columns = [
             { data: 'action', searchable: false, orderable: false },
@@ -438,23 +445,18 @@ $(document).ready(function() {
             { data: 'mobile', name: 'mobile' },
             { data: 'due', searchable: false, orderable: false },
             { data: 'return_due', searchable: false, orderable: false },
-            { data: 'custom_field1', name: 'custom_field1'},
-            { data: 'custom_field2', name: 'custom_field2'},
-            { data: 'custom_field3', name: 'custom_field3'},
-            { data: 'custom_field4', name: 'custom_field4'},
-            { data: 'custom_field5', name: 'custom_field5'},
-            { data: 'custom_field6', name: 'custom_field6'},
-            { data: 'custom_field7', name: 'custom_field7'},
-            { data: 'custom_field8', name: 'custom_field8'},
-            { data: 'custom_field9', name: 'custom_field9'},
-            { data: 'custom_field10', name: 'custom_field10'},
-        ];
+        ].concat(contact_custom_columns());
     } else if (contact_table_type == 'customer') {
+        // Same order as the header in contact/index.blade.php: name, mobile, dues, address first
         var columns = [
             { data: 'action', searchable: false, orderable: false },
             { data: 'contact_id', name: 'contact_id' },
             { data: 'supplier_business_name', name: 'supplier_business_name' },
             { data: 'name', name: 'name' },
+            { data: 'mobile', name: 'mobile' },
+            { data: 'due', name: 'for_ordering_total_due', searchable: false, orderable: true },
+            { data: 'return_due', searchable: false, orderable: false },
+            { data: 'address', name: 'address', orderable: false },
             { data: 'email', name: 'email' },
             { data: 'tax_number', name: 'tax_number' },
             { data: 'credit_limit', name: 'credit_limit' },
@@ -467,22 +469,8 @@ $(document).ready(function() {
         if ($('#rp_col').length) {
             columns.push({ data: 'total_rp', name: 'total_rp' });
         }
-        Array.prototype.push.apply(columns, [{ data: 'customer_group', name: 'cg.name' },
-            { data: 'address', name: 'address', orderable: false },
-            { data: 'mobile', name: 'mobile' },
-            { data: 'due', searchable: false, orderable: false },
-            { data: 'return_due', searchable: false, orderable: false },
-            { data: 'custom_field1', name: 'custom_field1'},
-            { data: 'custom_field2', name: 'custom_field2'},
-            { data: 'custom_field3', name: 'custom_field3'},
-            { data: 'custom_field4', name: 'custom_field4'},
-            { data: 'custom_field5', name: 'custom_field5'},
-            { data: 'custom_field6', name: 'custom_field6'},
-            { data: 'custom_field7', name: 'custom_field7'},
-            { data: 'custom_field8', name: 'custom_field8'},
-            { data: 'custom_field9', name: 'custom_field9'},
-            { data: 'custom_field10', name: 'custom_field10'},
-            ]);
+        columns.push({ data: 'customer_group', name: 'cg.name' });
+        columns = columns.concat(contact_custom_columns());
     }
     
     contact_table = $('#contact_table').DataTable({
@@ -539,7 +527,8 @@ $(document).ready(function() {
                 }
             }
         },
-        aaSorting: [[1, 'desc']],
+        // Customers: highest Total Sale Due first (column 5); others: newest contact id first
+        aaSorting: contact_table_type == 'customer' ? [[5, 'desc']] : [[1, 'desc']],
         columns: columns,
         fnDrawCallback: function(oSettings) {
             __currency_convert_recursively($('#contact_table'));

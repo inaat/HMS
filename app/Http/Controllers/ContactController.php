@@ -303,6 +303,33 @@ class ContactController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
+    /**
+     * Customer ids whose text fields contain every word typed in the list's search box (like the table's own smart
+     * search, but on the contacts table alone). A superset of what the table search keeps.
+     */
+    private function customerIdsMatching($business_id, string $search): array
+    {
+        $columns = ['contacts.name', 'contacts.supplier_business_name', 'contacts.contact_id', 'contacts.mobile',
+            'contacts.landline', 'contacts.alternate_number', 'contacts.email', 'contacts.tax_number', 'contacts.city',
+            'contacts.address_line_1', 'cg.name'];
+        foreach (range(1, 10) as $n) {
+            $columns[] = 'contacts.custom_field'.$n;
+        }
+
+        $query = Contact::leftjoin('customer_groups AS cg', 'contacts.customer_group_id', '=', 'cg.id')
+            ->where('contacts.business_id', $business_id)
+            ->onlyCustomers();
+        foreach (preg_split('/\s+/', $search, -1, PREG_SPLIT_NO_EMPTY) as $word) {
+            $query->where(function ($q) use ($columns, $word) {
+                foreach ($columns as $column) {
+                    $q->orWhere($column, 'like', '%'.$word.'%');
+                }
+            });
+        }
+
+        return $query->limit(5000)->pluck('contacts.id')->all();
+    }
+
     private function indexCustomer()
     {
         if (! auth()->user()->can('customer.view') && ! auth()->user()->can('customer.view_own')) {
@@ -313,7 +340,18 @@ class ContactController extends Controller
 
         $is_admin = $this->contactUtil->is_admin(auth()->user());
 
-        $query = $this->contactUtil->getContactQuery($business_id, 'customer');
+        // Search: find the matching customers first (contacts table only, fast even with 10,000s of customers),
+        // then add up dues only for them. The table's own search still runs on top, so results are unchanged.
+        $search_ids = [];
+        $search = trim((string) request()->input('search.value'));
+        if ($search !== '') {
+            $search_ids = $this->customerIdsMatching($business_id, $search);
+            if (empty($search_ids)) {
+                $search_ids = [0]; // nothing matches
+            }
+        }
+
+        $query = $this->contactUtil->getContactQuery($business_id, 'customer', $search_ids);
 
         if (request()->has('has_sell_due')) {
             $query->havingRaw('(total_invoice - invoice_received) > 0');
