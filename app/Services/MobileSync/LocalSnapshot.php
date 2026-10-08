@@ -33,7 +33,35 @@ class LocalSnapshot
             'routes' => $this->routes(),
             'invoices' => $this->invoices(),
             'settings' => self::settings(),
+            'logouts' => self::logouts(),
         ];
+    }
+
+    /** "Log out phone" requests from Sell > Mobile orders, waiting to reach the cloud: [{id, user_id|"all"}]. */
+    public static function logouts(): array
+    {
+        return json_decode((string) DB::table('system')->where('key', 'mobile_logouts')->value('value'), true) ?: [];
+    }
+
+    /** Drops the requests the cloud has carried out (ids from the push result). */
+    public static function logoutsDone(array $ids): void
+    {
+        if (empty($ids)) {
+            return;
+        }
+        $done = array_filter(self::logouts(), function ($l) use ($ids) {
+            return in_array($l['id'], $ids, true);
+        });
+        $left = array_values(array_diff_key(self::logouts(), $done));
+        DB::table('system')->updateOrInsert(['key' => 'mobile_logouts'], ['value' => json_encode($left)]);
+
+        // Those phones are gone from the cloud now: take them off the office's "Booker phones" list too.
+        $users = array_map('strval', array_column($done, 'user_id'));
+        $sessions = json_decode((string) DB::table('system')->where('key', 'mobile_sessions')->value('value'), true) ?: [];
+        $sessions = array_values(array_filter($sessions, function ($s) use ($users) {
+            return ! in_array('all', $users, true) && ! in_array((string) $s['user_id'], $users, true);
+        }));
+        DB::table('system')->updateOrInsert(['key' => 'mobile_sessions'], ['value' => json_encode($sessions)]);
     }
 
     /** Booker app settings chosen on Sell > Mobile orders (kept in the `system` table, sent with every push). */

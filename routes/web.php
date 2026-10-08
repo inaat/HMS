@@ -321,6 +321,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::get('/mobile-sync/status', [\App\Http\Controllers\MobileOrderController::class, 'syncStatus']);
     Route::post('/mobile-sync/start', [\App\Http\Controllers\MobileOrderController::class, 'syncNow']);
     Route::post('/mobile-orders-settings', [\App\Http\Controllers\MobileOrderController::class, 'saveSettings']);
+    Route::post('/mobile-orders-logout-phone', [\App\Http\Controllers\MobileOrderController::class, 'logoutPhone']);
     Route::get('/mobile-orders/{id}', [\App\Http\Controllers\MobileOrderController::class, 'show']);
     Route::post('/mobile-orders/{id}/approve', [\App\Http\Controllers\MobileOrderController::class, 'approve']);
     Route::post('/mobile-orders/{id}/invoice', [\App\Http\Controllers\MobileOrderController::class, 'invoice']);

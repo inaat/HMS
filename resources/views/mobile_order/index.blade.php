@@ -87,6 +87,50 @@
                 </div>
                 <button type="submit" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-success tw-text-white"><i class="fa fa-save"></i> Save</button>
             {!! Form::close() !!}
+
+            {{-- Booker phones: one phone per booker; "Log out" frees the login (lost / changed phone). As of the last sync. --}}
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eef1f5;">
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px;">
+                    <b><i class="fa fa-mobile-alt"></i> Booker phones logged in ({{ $phones->count() }})</b>
+                    <span class="text-muted" style="font-size: 12px;">one phone per booker — log out here to let them log in on another phone</span>
+                    @if ($phones->count())
+                        {!! Form::open(['url' => action([\App\Http\Controllers\MobileOrderController::class, 'logoutPhone']), 'method' => 'post', 'style' => 'margin-left: auto;',
+                            'onsubmit' => "return confirm('Log out ALL booker phones? Every booker must log in again. Orders not yet sent from a phone stay on that phone until the booker logs in again.')"]) !!}
+                            <input type="hidden" name="user_id" value="all">
+                            <button type="submit" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-error tw-text-white" @if (in_array('all', $pending_logouts, true)) disabled @endif>
+                                <i class="fa fa-sign-out-alt"></i> {{ in_array('all', $pending_logouts, true) ? 'Logging out all…' : 'Log out ALL phones' }}</button>
+                        {!! Form::close() !!}
+                    @endif
+                </div>
+                @if ($phones->count())
+                    <table class="table table-condensed table-bordered" style="margin: 0; max-width: 760px; background: #fff;">
+                        <thead><tr><th>Booker</th><th>Phone</th><th>Logged in</th><th>Last seen</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach ($phones as $p)
+                                <tr>
+                                    <td>{{ $booker_names[$p->user_id] ?? '#'.$p->user_id }}</td>
+                                    <td>{{ $p->device_name ?: '—' }}</td>
+                                    <td>{{ @format_datetime($p->created_at) }}</td>
+                                    <td>{{ $p->last_used_at ? @format_datetime($p->last_used_at) : '—' }}</td>
+                                    <td class="text-center">
+                                        @if (in_array((string) $p->user_id, $pending_logouts, true) || in_array('all', $pending_logouts, true))
+                                            <span class="label label-warning">logging out…</span>
+                                        @else
+                                            {!! Form::open(['url' => action([\App\Http\Controllers\MobileOrderController::class, 'logoutPhone']), 'method' => 'post', 'style' => 'display: inline;',
+                                                'onsubmit' => "return confirm('Log out this phone? Orders not yet sent from it stay on it until the booker logs in again.')"]) !!}
+                                                <input type="hidden" name="user_id" value="{{ $p->user_id }}">
+                                                <button type="submit" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-error"><i class="fa fa-sign-out-alt"></i> Log out</button>
+                                            {!! Form::close() !!}
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                @else
+                    <span class="text-muted" style="font-size: 12px;">No booker phone logged in (or not synced yet — press Sync now).</span>
+                @endif
+            </div>
         @endcan
     </div>
 

@@ -103,7 +103,14 @@ class MobileOrderController extends Controller
         $shop_edits = DB::table('booker_customer_updates')->where('business_id', request()->session()->get('user.business_id'))->where('status', 'waiting')->count();
 
         return view('mobile_order.index', compact('rows', 'kind', 'status', 'counts', 'last_run', 'locations', 'location', 'shop_edits',
-            'bookers', 'booker', 'start_date', 'end_date', 'filters', 'by_booker', 'grand') + ['booker_settings' => LocalSnapshot::settings()]);
+            'bookers', 'booker', 'start_date', 'end_date', 'filters', 'by_booker', 'grand') + ['booker_settings' => LocalSnapshot::settings(),
+                // phones logged in on the cloud (as of the last sync) and "Log out" requests still waiting to go
+                'phones' => collect(json_decode((string) DB::table('system')->where('key', 'mobile_sessions')->value('value')) ?: []),
+                'pending_logouts' => collect(LocalSnapshot::logouts())->pluck('user_id')->map(function ($id) {
+                    return (string) $id;
+                })->all(),
+                'booker_names' => DB::table('users')->where('business_id', request()->session()->get('user.business_id'))
+                    ->select('id', DB::raw("TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, ''))) as name"))->pluck('name', 'id')]);
     }
 
     /**
@@ -399,6 +406,28 @@ class MobileOrderController extends Controller
         SyncStatus::start();
 
         return redirect()->back()->with('status', ['success' => 1, 'msg' => 'Saved; bookers get it with their next sync']);
+    }
+
+    /**
+     * "Log out phone" (one booker) or "Log out all phones" (user_id = all). Goes to the cloud with the next sync;
+     * that booker can then log in on a phone again.
+     */
+    public function logoutPhone(Request $request)
+    {
+        if (! auth()->user()->can('business_settings.access')) {
+            abort(403, 'Unauthorized action.');
+        }
+        $user_id = $request->input('user_id') === 'all' ? 'all' : (int) $request->input('user_id');
+        if (! $user_id) {
+            abort(404);
+        }
+        $list = LocalSnapshot::logouts();
+        $list[] = ['id' => (string) \Illuminate\Support\Str::uuid(), 'user_id' => $user_id];
+        DB::table('system')->updateOrInsert(['key' => 'mobile_logouts'], ['value' => json_encode($list)]);
+        SyncStatus::start();
+
+        return redirect()->back()->with('status', ['success' => 1,
+            'msg' => ($user_id === 'all' ? 'All booker phones' : 'The phone').' will be logged out with this sync (needs internet)']);
     }
 
     public function reject(Request $request, $id)

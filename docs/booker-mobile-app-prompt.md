@@ -73,6 +73,12 @@ Response 200:
   "server_time": "2026-10-07 13:05:00"
 }
 ```
+
+**One phone per booker.** While the booker is logged in on another phone, login returns **409**
+`{"message": "Already logged in on another phone (Samsung A15). Log out there first, or ask the office to log that phone out.", "code": "other_device"}`
+→ show the message as is (no retry loop). Send a real `device_name` (brand + model) so the office can tell the phones
+apart. The office frees a phone with **Log out** / **Log out ALL phones** on Sell > Mobile orders; that phone then
+gets 401 on its next request (treat as any 401: keep the outbox, show login).
 Response 422: `{"message": "Wrong username or password"}`
 
 `code` + seq make the slip numbers (see §5.6). If a *different* user logs in on the same phone and the outbox is not
@@ -409,6 +415,8 @@ pull-to-refresh, Sync button.
 8. Bluetooth print of a slip on a 58 mm printer is readable and fits the width.
 9. Token revoked on the server → next sync shows login; after login the outbox uploads.
 10. Reinstall → login → slip numbers continue after the last number sent (no reuse).
+11. Logged in on phone A → login on phone B shows the 409 message. Office clicks Log out (Sell > Mobile orders) →
+    after the PC syncs, A gets 401 (outbox kept) and B can log in.
 11. Route on today's weekday assigned to booker1 → Home shows its shops in order; check in at a shop's GPS → "✓ At
     the shop", 2 km away → red warning; leave with "Owner not there"; the shop gets ✓ with the time and reason; the
     visit reaches the office (Sell → Booker visits) with distance, photo and result.

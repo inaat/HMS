@@ -82,6 +82,19 @@ class MobileSyncController extends Controller
                 DB::table('mb_meta')->updateOrInsert(['key' => 'locations'], ['value' => json_encode($request->input('locations')), 'updated_at' => now()]);
             }
 
+            // "Log out phone" from the office: drop every login of that booker (user_id "all" = every booker).
+            $result['logged_out'] = [];
+            foreach ((array) $request->input('logouts') as $l) {
+                if (! empty($l['id']) && ! empty($l['user_id'])) {
+                    $tokens = DB::table('mb_tokens');
+                    if ($l['user_id'] !== 'all') {
+                        $tokens->where('user_id', (int) $l['user_id']);
+                    }
+                    $tokens->delete();
+                    $result['logged_out'][] = $l['id'];
+                }
+            }
+
             if (is_array($request->input('settings'))) {
                 DB::table('mb_meta')->updateOrInsert(['key' => 'settings'], ['value' => json_encode($request->input('settings')), 'updated_at' => now()]);
             }
@@ -125,7 +138,15 @@ class MobileSyncController extends Controller
                 })
             : [];
 
-        return response()->json(compact('customers', 'orders', 'payments', 'customer_updates', 'visits'));
+        // Which phone each booker is logged in on, for the office's "Booker phones" list.
+        $sessions = DB::table('mb_tokens')
+            ->where(function ($q) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->orderBy('user_id')->orderByDesc('last_used_at')
+            ->get(['user_id', 'device_name', 'created_at', 'last_used_at']);
+
+        return response()->json(compact('customers', 'orders', 'payments', 'customer_updates', 'visits', 'sessions'));
     }
 
     public function ack(Request $request)

@@ -39,6 +39,21 @@ class MobileController extends Controller
             return response()->json(['message' => 'Wrong username or password'], 422);
         }
 
+        // One phone per booker: while another phone is logged in, refuse. The office frees it with
+        // "Log out phone" on Sell > Mobile orders (lost / changed phone); it reaches the cloud with the next sync.
+        $other = DB::table('mb_tokens')->where('user_id', $user->id)
+            ->where(function ($q) {
+                $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+            })
+            ->orderByDesc('last_used_at')->first();
+        if (! empty($other)) {
+            return response()->json([
+                'message' => 'Already logged in on another phone'.($other->device_name ? ' ('.$other->device_name.')' : '')
+                    .'. Log out there first, or ask the office to log that phone out.',
+                'code' => 'other_device',
+            ], 409);
+        }
+
         $token = Str::random(64);
         $days = (int) config('mobile_sync.token_days');
         DB::table('mb_tokens')->insert([

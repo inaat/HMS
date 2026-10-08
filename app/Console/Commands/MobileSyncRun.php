@@ -56,6 +56,10 @@ class MobileSyncRun extends Command
             $response = $this->cloud()->get('/api/sync/inbox');
             if ($response->successful()) {
                 $added = $inbox->store((array) $response->json());
+                // Which phone each booker is logged in on (Sell > Mobile orders > Booker phones)
+                if (is_array($response->json('sessions'))) {
+                    DB::table('system')->updateOrInsert(['key' => 'mobile_sessions'], ['value' => json_encode($response->json('sessions'))]);
+                }
                 $this->line(sprintf('collected  customers %d  orders %d  payments %d  shop edits %d  visits %d', $added['customers'], $added['orders'], $added['payments'], $added['shop_edits'], $added['visits']));
                 $this->downloadPhotos($inbox->missingPhotos());
             } else {
@@ -89,7 +93,11 @@ class MobileSyncRun extends Command
             $snapshot = (new LocalSnapshot($business_id, $location_id))->all();
             $response = $this->cloud()->post('/api/sync/push', $snapshot);
             if ($response->successful()) {
-                foreach ((array) $response->json('result') as $set => $counts) {
+                LocalSnapshot::logoutsDone((array) $response->json('result.logged_out'));
+                foreach (array_intersect_key((array) $response->json('result'), $snapshot) as $set => $counts) {
+                    if (! is_array($snapshot[$set]) || ! isset($counts['inserted'])) {
+                        continue;
+                    }
                     $this->line(sprintf('%-10s sent %5d  new %4d  changed %4d  removed %4d', $set, count($snapshot[$set]),
                         $counts['inserted'] ?? 0, $counts['updated'] ?? 0, $counts['switched_off'] ?? 0));
                 }
