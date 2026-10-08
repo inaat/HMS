@@ -471,6 +471,16 @@ class AdminSidebarMenu
                             );
                         }
 
+                        // Zakat list (given from the POS Zakat button); also under Reports
+                        if (! empty(\App\Utils\ZakatUtil::settings(request()->session()->get('user.business_id'))['enabled'])
+                            && ($is_admin || auth()->user()->can('zakat.manage'))) {
+                            $sub->url(
+                                action([\App\Http\Controllers\ZakatController::class, 'index']),
+                                'Zakat · زکوٰۃ',
+                                ['icon' => '', 'active' => request()->segment(1) == 'zakat']
+                            );
+                        }
+
                         if ($is_admin || auth()->user()->hasAnyPermission(['access_shipping', 'access_own_shipping', 'access_commission_agent_shipping'])) {
                             $sub->url(
                                 action([\App\Http\Controllers\SellController::class, 'shipments']),
