@@ -191,27 +191,34 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal">&times;</button>
-                    <h4 class="modal-title"><i class="fas fa-hand-holding-heart" style="color:#2e9e6a;"></i> Give these products as zakat</h4>
+                    <h4 class="modal-title"><i class="fas fa-hand-holding-heart" style="color:#2e9e6a;"></i> Give these products as zakat
+                        <span class="zk-ur" style="margin-left:8px;">یہ اشیاء زکوٰۃ میں دیں</span></h4>
                 </div>
+                <style>
+                    #zakat_pos_modal .zk-ur { font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', 'Noto Naskh Arabic', 'Segoe UI', sans-serif; direction: rtl; unicode-bidi: isolate; }
+                    #zakat_pos_modal label .zk-ur { margin-left: 6px; }
+                </style>
                 <div class="modal-body">
                     <div class="alert alert-success" style="margin-bottom:12px;">
-                        <b>Zakat value: <span id="zakat_pos_value"></span></b> (<span id="zakat_pos_items"></span>)<br>
+                        <b>Zakat value · زکوٰۃ کی مالیت: <span id="zakat_pos_value"></span></b> (<span id="zakat_pos_items"></span>)<br>
                         Stock goes down. No invoice, no payment, no customer due.
+                        <div class="zk-ur">اسٹاک کم ہو جائے گا۔ نہ انوائس، نہ ادائیگی، نہ گاہک کا بقایا۔</div>
                     </div>
                     <div class="row">
                         <div class="col-sm-12" id="zakat_pos_customer_note" style="margin-bottom:6px;"></div>
-                        <div class="col-sm-6"><div class="form-group"><label>Recipient name</label>
-                            <input type="text" id="zakat_pos_name" class="form-control" placeholder="Name of the person"></div></div>
-                        <div class="col-sm-6"><div class="form-group"><label>Mobile</label>
+                        <div class="col-sm-6"><div class="form-group"><label>Mustahiq (recipient) <span class="zk-ur">مستحق</span></label>
+                            <input type="text" id="zakat_pos_name" class="form-control" autocomplete="off" placeholder="Mustahiq · مستحق">
+                            <p class="help-block" style="margin:2px 0 0;">Type a name — people given zakat before are suggested · <span class="zk-ur">نام لکھیں — پہلے والے نام خود سامنے آئیں گے</span></p></div></div>
+                        <div class="col-sm-6"><div class="form-group"><label>Mobile <span class="zk-ur">موبائل</span></label>
                             <input type="text" id="zakat_pos_mobile" class="form-control"></div></div>
-                        <div class="col-sm-6"><div class="form-group"><label>Category</label>
+                        <div class="col-sm-6"><div class="form-group"><label>Category <span class="zk-ur">مصرف</span></label>
                             {!! Form::select('zakat_pos_category_select', \App\Utils\ZakatUtil::CATEGORIES, 'fuqara', ['class' => 'form-control select2', 'style' => 'width:100%', 'id' => 'zakat_pos_category']) !!}</div></div>
-                        <div class="col-sm-6"><div class="form-group"><label>Note</label>
+                        <div class="col-sm-6"><div class="form-group"><label>Note <span class="zk-ur">نوٹ</span></label>
                             <input type="text" id="zakat_pos_note" class="form-control"></div></div>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="tw-dw-btn tw-dw-btn-success tw-text-white" id="zakat_pos_confirm"><i class="fas fa-hand-holding-heart"></i> Give as zakat</button>
+                    <button type="button" class="tw-dw-btn tw-dw-btn-success tw-text-white" id="zakat_pos_confirm"><i class="fas fa-hand-holding-heart"></i> Give as zakat · زکوٰۃ دیں</button>
                     <button type="button" class="tw-dw-btn tw-dw-btn-neutral tw-text-white" data-dismiss="modal">Cancel</button>
                 </div>
             </div>

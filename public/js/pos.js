@@ -583,25 +583,38 @@ $(document).ready(function() {
         $('#zakat_pos_value').text(__currency_trans_from_en(total, true));
         $('#zakat_pos_items').text(items + ' item(s)');
 
-        // A real customer receives it by default; for Walk-in the recipient's name is needed
+        // Default recipient (like "Walk-in Customer" on a sale): the chosen customer, else "Mustahiq"
         var walk_in = $('#customer_id').val() == $('#default_customer_id').val();
         var picked = ($('#customer_id').select2('data') || [])[0];
-        $('#zakat_pos_customer_note').html(walk_in ? '<span class="text-danger">Walk-in customer: enter the recipient\'s name.</span>'
-            : 'Recipient: <b>' + $('<div>').text(picked ? picked.text : '').html() + '</b> (or type another name below)');
-        $('#zakat_pos_name, #zakat_pos_mobile, #zakat_pos_note').val('');
+        var default_name = walk_in || !picked ? 'Mustahiq' : $.trim(picked.text.split('(')[0]);
+        $('#zakat_pos_customer_note').html('<span class="text-muted">Name is optional — default: <b>' + $('<div>').text(default_name).html()
+            + '</b> · نام اختیاری ہے</span>');
+        $('#zakat_pos_mobile, #zakat_pos_note').val('');
+        $('#zakat_pos_name').val(default_name);
         $('#zakat_pos_modal').modal('show');
     });
     $('#zakat_pos_modal').on('shown.bs.modal', function() {
         $('#zakat_pos_category').select2({ dropdownParent: $('#zakat_pos_modal') });
-        $('#zakat_pos_name').focus();
+        // Mustahiq: a plain text box (always typable); people given zakat before are suggested while typing
+        if (!$('#zakat_pos_name').data('ui-autocomplete')) {
+            $('#zakat_pos_name').autocomplete({
+                minLength: 1,
+                delay: 250,
+                appendTo: '#zakat_pos_modal',
+                source: function(request, response) {
+                    $.getJSON('/zakat/recipients', { q: request.term }).done(function(data) {
+                        response($.map(data, function(r) { return { label: r.text, value: r.id, mobile: r.mobile, category: r.category }; }));
+                    }).fail(function() { response([]); });
+                },
+                select: function(e, ui) {
+                    if (ui.item.mobile) { $('#zakat_pos_mobile').val(ui.item.mobile); }
+                    if (ui.item.category) { $('#zakat_pos_category').val(ui.item.category).trigger('change'); }
+                },
+            });
+        }
+        $('#zakat_pos_name').trigger('focus').select();
     });
     $('#zakat_pos_confirm').click(function() {
-        var walk_in = $('#customer_id').val() == $('#default_customer_id').val();
-        if (walk_in && !$.trim($('#zakat_pos_name').val())) {
-            toastr.warning('Enter the name of the person receiving the zakat');
-            $('#zakat_pos_name').focus();
-            return;
-        }
         var btn = $(this);
         var data = pos_form_obj.serialize() + '&' + $.param({
             zakat_name: $('#zakat_pos_name').val(),

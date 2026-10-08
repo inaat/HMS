@@ -166,10 +166,8 @@ class ZakatController extends Controller
 
             $contact = DB::table('contacts')->where('business_id', $business_id)->where('id', (int) $request->input('contact_id'))->first();
             $walk_in = empty($contact) || ! empty($contact->is_default);
-            $name = trim((string) $request->input('zakat_name')) ?: ($walk_in ? '' : $contact->name);
-            if ($name === '') {
-                return ['success' => 0, 'msg' => 'Enter the name of the person receiving the zakat'];
-            }
+            // Name is optional: the chosen customer, else "Mustahiq" (like "Walk-in Customer" on a sale)
+            $name = trim((string) $request->input('zakat_name')) ?: ($walk_in ? 'Mustahiq' : $contact->name);
 
             $payment_id = (new ZakatUtil())->giveGoods($business_id, (int) $request->input('location_id'), auth()->id(), $lines, [
                 'name' => $name,
@@ -189,6 +187,31 @@ class ZakatController extends Controller
 
             return ['success' => 0, 'msg' => get_class($e) == \App\Exceptions\PurchaseSellMismatch::class ? $e->getMessage() : __('messages.something_went_wrong')];
         }
+    }
+
+    /** Mustahiq list for the POS Zakat pop-up (select2): people given zakat before, most recent first. */
+    public function recipients(Request $request)
+    {
+        $this->authorizeZakat();
+        $q = trim((string) $request->input('q'));
+
+        return DB::table('zakat_payments')
+            ->where('business_id', $this->businessId())
+            ->whereNotNull('recipient_name')->where('recipient_name', '!=', '')
+            ->when($q !== '', function ($query) use ($q) {
+                $query->where(function ($w) use ($q) {
+                    $w->where('recipient_name', 'like', "%{$q}%")->orWhere('recipient_mobile', 'like', "%{$q}%");
+                });
+            })
+            ->groupBy('recipient_name', 'recipient_mobile')
+            ->selectRaw('recipient_name as name, recipient_mobile as mobile, MAX(category) as category, COUNT(*) as times, MAX(paid_on) as last_on')
+            ->orderByDesc('last_on')
+            ->limit(30)
+            ->get()
+            ->map(function ($r) {
+                return ['id' => $r->name, 'text' => $r->name.($r->mobile ? ' · '.$r->mobile : '').' — '.$r->times.'x',
+                    'mobile' => $r->mobile, 'category' => $r->category];
+            });
     }
 
     public function slip($id)
