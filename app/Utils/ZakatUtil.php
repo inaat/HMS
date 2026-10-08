@@ -68,6 +68,7 @@ class ZakatUtil extends Util
             'receivables_days' => 365,
             'deduct_payables' => 1,
             'goods_allowed' => 1,
+            'accounts' => [], // payment accounts counted as cash & bank (empty = all)
         ];
     }
 
@@ -141,13 +142,24 @@ class ZakatUtil extends Util
      */
     public function calculate(int $business_id, string $date, array $settings, array $manual_lines = []): array
     {
-        $cash = (float) DB::table('account_transactions as at')
+        // Cash & bank: balance of each payment account on the date (only the chosen ones; none chosen = all)
+        $accounts_query = DB::table('account_transactions as at')
             ->join('accounts as a', 'a.id', '=', 'at.account_id')
             ->where('a.business_id', $business_id)
             ->whereNull('a.deleted_at')
             ->whereNull('at.deleted_at')
-            ->whereDate('at.operation_date', '<=', $date)
-            ->sum(DB::raw("IF(at.type = 'credit', at.amount, -1 * at.amount)"));
+            ->whereDate('at.operation_date', '<=', $date);
+        $chosen = array_values(array_filter(array_map('intval', (array) ($settings['accounts'] ?? []))));
+        if (! empty($chosen)) {
+            $accounts_query->whereIn('a.id', $chosen);
+        }
+        $cash_accounts = $accounts_query->groupBy('a.id', 'a.name')
+            ->select('a.id', 'a.name', DB::raw("SUM(IF(at.type = 'credit', at.amount, -1 * at.amount)) as balance"))
+            ->orderBy('a.name')->get()
+            ->map(function ($a) {
+                return ['name' => $a->name, 'balance' => round((float) $a->balance, 2)];
+            })->all();
+        $cash = array_sum(array_column($cash_accounts, 'balance'));
 
         $stock = (float) (new TransactionUtil())->getOpeningClosingStock($business_id, $date, null, false, $settings['stock_basis'] === 'sale');
 
@@ -189,6 +201,7 @@ class ZakatUtil extends Util
 
         return [
             'cash' => round($cash, 2),
+            'cash_accounts' => $cash_accounts,
             'stock_value' => round($stock, 2),
             'receivables' => round($receivables, 2),
             'receivables_skipped' => round($skipped, 2),

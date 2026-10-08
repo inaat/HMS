@@ -50,7 +50,16 @@
                     <input type="hidden" name="year_id" value="{{ $year && ! $locked ? $year->id : '' }}">
                     <table class="table table-bordered table-condensed">
                         <tbody>
-                            <tr><td>Cash & bank <small class="text-muted">(payment accounts)</small></td>
+                            <tr><td>Cash & bank <small class="text-muted">({{ empty($settings['accounts']) ? 'all payment accounts' : 'chosen payment accounts' }})</small>
+                                    @if (! empty($calc['cash_accounts']))
+                                        <div class="small text-muted" style="margin-top:3px;">
+                                            @foreach ($calc['cash_accounts'] as $acc)
+                                                <div style="display:flex; justify-content:space-between; gap:12px; padding-left:12px;">
+                                                    <span>{{ $acc['name'] }}</span><span class="display_currency" data-currency_symbol="true">{{ $acc['balance'] }}</span>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    @endif</td>
                                 <td class="text-right"><span class="display_currency" data-currency_symbol="true">{{ $calc['cash'] }}</span></td></tr>
                             <tr><td>Stock for sale <small class="text-muted">({{ $settings['stock_basis'] === 'sale' ? 'selling price' : 'purchase cost' }})</small></td>
                                 <td class="text-right"><span class="display_currency" data-currency_symbol="true">{{ $calc['stock_value'] }}</span></td></tr>

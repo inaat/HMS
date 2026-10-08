@@ -160,5 +160,24 @@
                     ], (int) $zakat['goods_allowed'], ['class' => 'form-control select2', 'style' => 'width:100%', 'id' => 'zakat_goods_allowed']) !!}
             </div>
         </div>
+        <div class="clearfix"></div>
+
+        @php
+            $zakat_accounts = \DB::table('accounts')->where('business_id', $business->id)->where('is_closed', 0)->whereNull('deleted_at')->orderBy('name')->pluck('name', 'id');
+            $zakat_chosen = array_map('intval', (array) ($zakat['accounts'] ?? []));
+        @endphp
+        <div class="col-sm-8">
+            <div class="form-group">
+                <label for="zakat_accounts">Payment accounts counted as cash & bank: <span class="zk-ur">زکوٰۃ میں شامل پیمنٹ اکاؤنٹس</span></label>
+                <select name="common_settings[zakat][accounts][]" id="zakat_accounts" class="form-control select2" multiple style="width:100%;"
+                    data-placeholder="All accounts · تمام اکاؤنٹس">
+                    @foreach ($zakat_accounts as $id => $name)
+                        <option value="{{ $id }}" @if (in_array((int) $id, $zakat_chosen, true)) selected @endif>{{ $name }}</option>
+                    @endforeach
+                </select>
+                <p class="help-block">Leave empty to count all accounts. Leave out money that is not the shop's own (loan, investor capital…).
+                    <span class="zk-ur">خالی چھوڑیں تو تمام اکاؤنٹس شامل ہوں گے۔ جو رقم دکان کی اپنی نہیں (قرض، سرمایہ کار کا سرمایہ…) اسے شامل نہ کریں۔</span></p>
+            </div>
+        </div>
     </div>
 </div>
