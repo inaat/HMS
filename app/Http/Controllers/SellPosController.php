@@ -3317,6 +3317,34 @@ foreach ($contact_ids as $item) {
         return $output;
 
     }
+
+    /**
+     * Delivery challan for the ticked sales: one line per invoice (date, invoice no, customer, amount)
+     * with an empty remark column to write on.
+     */
+    public function deliveryChallan(Request $request)
+    {
+        if (! auth()->user()->can('sell.view') && ! auth()->user()->can('direct_sell.view') && ! auth()->user()->can('view_own_sell_only')) {
+            abort(403, 'Unauthorized action.');
+        }
+        $business_id = $request->session()->get('user.business_id');
+        $ids = array_filter(array_map('intval', explode(',', (string) $request->input('ids'))));
+
+        $rows = Transaction::leftJoin('contacts as c', 'c.id', '=', 'transactions.contact_id')
+            ->where('transactions.business_id', $business_id)
+            ->where('transactions.type', 'sell')
+            ->whereIn('transactions.id', $ids ?: [0])
+            ->orderByRaw("COALESCE(NULLIF(c.supplier_business_name, ''), c.name)")
+            ->orderBy('transactions.contact_id')
+            ->orderBy('transactions.transaction_date')
+            ->orderBy('transactions.id')
+            ->select('transactions.contact_id', 'transactions.transaction_date', 'transactions.invoice_no', 'transactions.final_total',
+                'c.name as customer', 'c.supplier_business_name', 'c.mobile', 'c.address_line_1', 'c.city')
+            ->get();
+        $business = \App\Business::find($business_id);
+
+        return view('sell.delivery_challan', compact('rows', 'business'));
+    }
      /**
      * Returns the content for the receipt
      *

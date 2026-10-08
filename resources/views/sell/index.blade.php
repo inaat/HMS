@@ -105,6 +105,7 @@
                             
                                    <div >
                     <button type="button" class="btn btn-primary btn-block" id="mass-print"><i class="fas fa-print" aria-hidden="true"></i>Print</button>
+                    <button type="button" class="btn btn-success btn-block" id="delivery-challan"><i class="fas fa-truck" aria-hidden="true"></i> Delivery Challan</button>
 
                     </div>
                             <strong>@lang('sale.total'):</strong></td>
@@ -380,6 +381,16 @@
                 function() {
                     sell_table.ajax.reload();
                 });
+
+            // Ticked rows -> delivery challan in a new tab
+            $('#delivery-challan').on('click', function() {
+                var ids = getSelectedRows();
+                if (!ids.length) {
+                    swal('You Have No Row Selected');
+                    return;
+                }
+                window.open('/sells-delivery-challan?ids=' + ids.join(','), '_blank');
+            });
 
             $('#only_subscriptions').on('ifChanged', function(event) {
                 sell_table.ajax.reload();

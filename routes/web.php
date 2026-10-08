@@ -628,6 +628,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone'])
     Route::get('/sells/invoice-url/{id}', [SellPosController::class, 'showInvoiceUrl']);
     Route::get('/show-notification/{id}', [HomeController::class, 'showNotification']);
     Route::post('/sells/mass-print', [SellPosController::class,'massPrint']);
+    Route::get('/sells-delivery-challan', [SellPosController::class, 'deliveryChallan']);
 });
 
 use App\Http\Controllers\DropboxController;
