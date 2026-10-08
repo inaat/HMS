@@ -88,6 +88,21 @@ class BookerRouteController extends Controller
         return redirect()->back()->with('status', ['success' => 1, 'msg' => 'Route saved']);
     }
 
+    /** Routes list > Assign bookers: change only the bookers of a route. */
+    public function assignBookers(Request $request, $id)
+    {
+        $this->authorizeAccess();
+        $this->route($id);
+        $ids = array_values(array_intersect(array_map('intval', (array) $request->input('booker_ids', [])), array_keys($this->bookers())));
+        DB::table('booker_routes')->where('id', $id)->update([
+            'booker_ids' => $ids ? json_encode($ids) : null,
+            'booker_id' => $ids[0] ?? null, // first booker, for older booker apps
+            'updated_at' => now(),
+        ]);
+
+        return redirect()->back()->with('status', ['success' => 1, 'msg' => $ids ? 'Bookers saved' : 'Route has no booker now']);
+    }
+
     public function destroy($id)
     {
         $this->authorizeAccess();

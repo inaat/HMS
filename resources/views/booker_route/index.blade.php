@@ -39,7 +39,13 @@
                         <td class="text-right">{{ $r->shops }}</td>
                         <td class="text-right">{{ $r->with_gps }} @if($r->shops) <small class="text-muted">({{ round($r->with_gps * 100 / $r->shops) }}%)</small>@endif</td>
                         <td>{!! $r->is_active ? '<span class="label label-success">active</span>' : '<span class="label label-default">off</span>' !!}</td>
-                        <td><a href="{{ action([\App\Http\Controllers\BookerRouteController::class, 'show'], [$r->id]) }}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary"><i class="fa fa-map-marked-alt"></i> Shops & map</a></td>
+                        <td style="white-space:nowrap;">
+                            <button type="button" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-success assign_bookers"
+                                data-url="{{ action([\App\Http\Controllers\BookerRouteController::class, 'assignBookers'], [$r->id]) }}"
+                                data-name="{{ $r->name }}" data-ids="{{ json_encode(\App\Http\Controllers\BookerRouteController::bookerIds($r)) }}">
+                                <i class="fa fa-user-plus"></i> Assign bookers</button>
+                            <a href="{{ action([\App\Http\Controllers\BookerRouteController::class, 'show'], [$r->id]) }}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary"><i class="fa fa-map-marked-alt"></i> Shops & map</a>
+                        </td>
                     </tr>
                 @empty
                     <tr><td colspan="8" class="text-center text-muted">No routes yet. Click <b>Add route</b>, e.g. "Dir Bazar — Monday".</td></tr>
@@ -51,4 +57,42 @@
 </section>
 
 @include('booker_route.partials.route_modal', ['route' => null])
+
+{{-- Assign bookers to one route (several allowed) --}}
+<div class="modal fade contains_select2" id="assign_bookers_modal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <form method="POST" class="modal-content" id="assign_bookers_form">
+            @csrf
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal">&times;</button>
+                <h4 class="modal-title"><i class="fa fa-user-plus"></i> Assign bookers — <span id="assign_route_name"></span></h4>
+            </div>
+            <div class="modal-body">
+                <label>Order bookers</label>
+                <select name="booker_ids[]" id="assign_booker_ids" class="form-control select2" multiple data-placeholder="Choose one or more order bookers" style="width:100%;">
+                    @foreach ($bookers as $id => $name)
+                        <option value="{{ $id }}">{{ $name }}</option>
+                    @endforeach
+                </select>
+                <p class="help-block">Several bookers can share a route. Leave empty to take all bookers off this route.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="tw-dw-btn tw-dw-btn-primary tw-text-white">Save</button>
+                <button type="button" class="tw-dw-btn tw-dw-btn-neutral tw-text-white" data-dismiss="modal">Close</button>
+            </div>
+        </form>
+    </div>
+</div>
+@endsection
+
+@section('javascript')
+<script>
+    $(document).on('click', '.assign_bookers', function () {
+        $('#assign_bookers_form').attr('action', $(this).data('url'));
+        $('#assign_route_name').text($(this).data('name'));
+        $('#assign_bookers_modal').modal('show');
+        var ids = ($(this).data('ids') || []).map(String);
+        $('#assign_booker_ids').val(ids).trigger('change');
+    });
+</script>
 @endsection

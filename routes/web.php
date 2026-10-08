@@ -315,6 +315,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::get('/booker-routes/{id}/customers', [\App\Http\Controllers\BookerRouteController::class, 'searchCustomers']);
     Route::post('/booker-routes/{id}/shops', [\App\Http\Controllers\BookerRouteController::class, 'addShops']);
     Route::post('/booker-routes/{id}/shops/{contact_id}/remove', [\App\Http\Controllers\BookerRouteController::class, 'removeShop']);
+    Route::post('/booker-routes/{id}/bookers', [\App\Http\Controllers\BookerRouteController::class, 'assignBookers']);
     Route::post('/booker-routes/{id}/order', [\App\Http\Controllers\BookerRouteController::class, 'saveOrder']);
     Route::resource('booker-routes', \App\Http\Controllers\BookerRouteController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
     Route::get('/mobile-sync/status', [\App\Http\Controllers\MobileOrderController::class, 'syncStatus']);
