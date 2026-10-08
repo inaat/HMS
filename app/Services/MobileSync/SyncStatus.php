@@ -84,7 +84,7 @@ class SyncStatus
     }
 
     /** php.exe for the command line: Laragon keeps it next to the loaded php.ini (the web server may be Apache). */
-    private static function phpBinary(): string
+    public static function phpBinary(): string
     {
         if (! empty(config('mobile_sync.php_bin'))) {
             return config('mobile_sync.php_bin');

@@ -380,8 +380,31 @@ class ContactController extends Controller
         if (! empty(request()->input('contact_status'))) {
             $query->where('contacts.contact_status', request()->input('contact_status'));
         }
-        $query->orderByDesc('for_ordering_total_due');
-        $contacts = Datatables::of($query)
+        // Counting customers does not need the due totals: count them on the contacts table alone (same filters,
+        // without the totals join), so the heavy totals query runs once for the page instead of three times.
+        $light_count = null;
+        if (empty($query->getQuery()->havings)) {
+            $light = clone $query;
+            $lb = $light->getQuery();
+            $lb->joins = array_values(array_filter((array) $lb->joins, function ($join) {
+                return ! ($join->table instanceof \Illuminate\Database\Query\Expression && strpos((string) $join->table->getValue(), 'as `agg`') !== false);
+            }));
+            $lb->bindings['join'] = [];
+            $lb->columns = null;
+            $lb->groups = null;
+            $lb->orders = null;
+            $light_count = $light->distinct()->count('contacts.id');
+        }
+
+        // Sorting comes from the table (default: Total Sale Due, highest first; any header can re-sort)
+        $contacts = Datatables::of($query);
+        if (! is_null($light_count)) {
+            $contacts->setTotalRecords($light_count);
+            if (trim((string) request()->input('search.value')) === '') {
+                $contacts->setFilteredRecords($light_count);
+            }
+        }
+        $contacts = $contacts
             ->addColumn('address', '{{implode(", ", array_filter([$address_line_1, $address_line_2, $city, $state, $country, $zip_code]))}}')
             ->addColumn(
                 'due',

@@ -520,7 +520,8 @@ class Util
             $headers[$sms_settings['header_3']] = $sms_settings['header_val_3'];
         }
 
-        $options = [];
+        // Never wait long for the SMS gateway (it used to wait without limit when the internet was slow).
+        $options = ['connect_timeout' => 5, 'timeout' => 15];
         if (! empty($headers)) {
             $options['headers'] = $headers;
         }

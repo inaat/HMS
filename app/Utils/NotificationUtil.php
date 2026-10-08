@@ -18,6 +18,29 @@ use App\Contact;
 class NotificationUtil extends Util
 {
     /**
+     * Hand an SMS to a background PHP process (php artisan notify:send-sms): the file holds what sendSms() needs.
+     * Starting the process takes milliseconds; the gateway call happens there, never in the cashier's request.
+     */
+    public static function queueSms(array $data, $transaction_id, $business_id): void
+    {
+        $dir = storage_path('app/sms-queue');
+        if (! is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        $file = $dir.DIRECTORY_SEPARATOR.uniqid('sms_', true).'.json';
+        file_put_contents($file, json_encode(['data' => $data, 'transaction_id' => $transaction_id, 'business_id' => $business_id]));
+
+        $php = \App\Services\MobileSync\SyncStatus::phpBinary();
+        $artisan = base_path('artisan');
+        $log = storage_path('logs/sms.log');
+        if (PHP_OS_FAMILY === 'Windows') {
+            pclose(popen('start "" /B "'.$php.'" "'.$artisan.'" notify:send-sms "'.$file.'" >> "'.$log.'" 2>&1', 'r'));
+        } else {
+            exec(escapeshellarg($php).' '.escapeshellarg($artisan).' notify:send-sms '.escapeshellarg($file).' >> '.escapeshellarg($log).' 2>&1 &');
+        }
+    }
+
+    /**
      * Automatically send notification to customer/supplier if enabled in the template setting
      *
      * @param  int  $business_id
@@ -76,13 +99,17 @@ class NotificationUtil extends Util
                 if (! empty($notification_template->auto_send_sms)) {
                     $data['mobile_number'] = $contact->mobile;
                     if (! empty($contact->mobile)) {
-                        try {
-                            $this->sendSms($data);//inayat
-                            
-                            $this->activityLog($transaction, 'sms_notification_sent', null, [], false, $business_id);
-                        } catch (\Exception $e) {
-                            \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
-                        }
+                        // Sent after the response: the cashier never waits for the SMS gateway (slow or no internet),
+                        // and the sale's database transaction is not held open meanwhile.
+                        // A separate background PHP process sends it (notify:send-sms), started once the sale is saved.
+                        $sms_data = $data;
+                        app()->terminating(function () use ($sms_data, $transaction, $business_id) {
+                            try {
+                                self::queueSms($sms_data, $transaction->id, $business_id);
+                            } catch (\Throwable $e) {
+                                \Log::emergency('File:'.$e->getFile().'Line:'.$e->getLine().'Message:'.$e->getMessage());
+                            }
+                        });
                     }
                 }
 
