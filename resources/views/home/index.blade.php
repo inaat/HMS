@@ -361,6 +361,44 @@
                         </div>
                     </div>
                 @endcan
+                {{-- Customers who stopped buying (InactiveCustomerController::ALERT_DAYS) --}}
+                @if (! empty($inactive_customers) && $inactive_customers['count'] > 0)
+                    <div
+                        class="tw-transition-all lg:tw-col-span-2 tw-duration-200 tw-bg-white tw-shadow-sm tw-rounded-xl tw-ring-1 hover:tw-shadow-md hover:tw--translate-y-0.5 tw-ring-gray-200">
+                        <div class="tw-p-4 sm:tw-p-5">
+                            <div class="tw-flex tw-items-center tw-gap-2.5">
+                                <div class="tw-border-2 tw-flex tw-items-center tw-justify-center tw-rounded-full tw-w-10 tw-h-10">
+                                    <i class="fa fa-user-clock tw-text-red-500"></i>
+                                </div>
+                                <h3 class="tw-font-bold tw-text-base lg:tw-text-xl tw-flex-1">
+                                    Customers not buying
+                                    <span class="label label-danger">{{ $inactive_customers['count'] }}</span>
+                                    <small class="text-muted" style="font-size: 13px; font-weight: normal;">no purchase in {{ \App\Http\Controllers\InactiveCustomerController::ALERT_DAYS }}+ days</small>
+                                </h3>
+                                <a href="{{ action([\App\Http\Controllers\InactiveCustomerController::class, 'index']) }}"
+                                    class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-primary">View all</a>
+                            </div>
+                            <div class="table-responsive" style="margin-top: 12px;">
+                                <table class="table table-bordered table-striped" style="margin: 0;">
+                                    <thead>
+                                        <tr><th>@lang('contact.customer')</th><th>@lang('contact.mobile')</th><th>Last purchase</th><th>Total bought</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach ($inactive_customers['top'] as $c)
+                                            <tr>
+                                                <td><a href="{{ action([\App\Http\Controllers\ContactController::class, 'show'], [$c->id]) }}" target="_blank">{{ $c->supplier_business_name ?: $c->name }}</a></td>
+                                                <td>{{ $c->mobile }}</td>
+                                                <td>{{ @format_date($c->last_purchase) }}
+                                                    <small class="text-danger">({{ \Carbon::parse($c->last_purchase)->startOfDay()->diffInDays(\Carbon::today()) }} days)</small></td>
+                                                <td>@format_currency($c->total_bought)</td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                @endif
                 @can('stock_report.view')
                     <div
                         class="tw-transition-all lg:tw-col-span-2 tw-duration-200 tw-bg-white tw-shadow-sm tw-rounded-xl tw-ring-1 hover:tw-shadow-md hover:tw--translate-y-0.5 tw-ring-gray-200">

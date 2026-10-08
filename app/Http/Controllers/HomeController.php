@@ -228,8 +228,14 @@ class HomeController extends Controller
 
         $common_settings = ! empty(session('business.common_settings')) ? session('business.common_settings') : [];
 
+        // Dashboard alert: customers who stopped buying (biggest past buyers first)
+        $inactive_customers = null;
+        if (auth()->user()->can('customer.view')) {
+            $query = InactiveCustomerController::query($business_id, InactiveCustomerController::ALERT_DAYS);
+            $inactive_customers = ['count' => (clone $query)->count(), 'top' => $query->limit(10)->get()];
+        }
 
-        return view('home.index', compact('sells_chart_1', 'sells_chart_2', 'widgets', 'all_locations', 'common_settings', 'is_admin'));
+        return view('home.index', compact('sells_chart_1', 'sells_chart_2', 'widgets', 'all_locations', 'common_settings', 'is_admin', 'inactive_customers'));
     }
 
     /**

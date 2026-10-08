@@ -139,6 +139,11 @@ class AdminSidebarMenu
                                 'Top Defaulters',
                                 ['icon' => '', 'active' => request()->segment(1) == 'top-defaulters']
                             );
+                            $sub->url(
+                                action([\App\Http\Controllers\InactiveCustomerController::class, 'index']),
+                                'Customers Not Buying',
+                                ['icon' => '', 'active' => request()->segment(1) == 'inactive-customers']
+                            );
                         }
                         if (auth()->user()->can('supplier.create') || auth()->user()->can('customer.create')) {
                             $sub->url(

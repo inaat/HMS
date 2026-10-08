@@ -490,6 +490,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
 
     Route::resource('notification-templates', NotificationTemplateController::class)->only(['index', 'store']);
     Route::get('top-defaulters', [\App\Http\Controllers\DefaulterController::class, 'index']);
+    Route::get('inactive-customers', [\App\Http\Controllers\InactiveCustomerController::class, 'index']);
     Route::post('top-defaulters/send', [\App\Http\Controllers\DefaulterController::class, 'send']);
     Route::get('whatsapp', [\App\Http\Controllers\WhatsappController::class, 'index']);
     Route::post('whatsapp', [\App\Http\Controllers\WhatsappController::class, 'store']);
