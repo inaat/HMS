@@ -76,6 +76,18 @@
         <div id="cs-bar-wrap" class="progress" style="margin: 10px 0 0; height: 18px; display: none;">
             <div id="cs-bar" class="progress-bar progress-bar-striped active" role="progressbar" style="width: 0%; min-width: 2em;">0%</div>
         </div>
+        {{-- Booker app settings: reach the phones with the next sync --}}
+        @can('business_settings.access')
+            {!! Form::open(['url' => action([\App\Http\Controllers\MobileOrderController::class, 'saveSettings']), 'method' => 'post',
+                'style' => 'display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid #eef1f5;']) !!}
+                <label for="allow_short_stock" style="margin: 0;">Booker can book more than stock:</label>
+                <div style="width: 280px;">
+                    {!! Form::select('allow_short_stock', ['1' => 'Yes — book and show "short stock" warning', '0' => 'No — cannot book more than free stock'],
+                        $booker_settings['allow_short_stock'] ? '1' : '0', ['class' => 'form-control select2', 'style' => 'width:100%', 'id' => 'allow_short_stock']) !!}
+                </div>
+                <button type="submit" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-success tw-text-white"><i class="fa fa-save"></i> Save</button>
+            {!! Form::close() !!}
+        @endcan
     </div>
 
     @component('components.widget')

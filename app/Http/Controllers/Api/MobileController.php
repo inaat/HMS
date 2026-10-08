@@ -151,6 +151,7 @@ class MobileController extends Controller
             'can_edit_shops' => $this->canEditShops($user->id),
             'outlet_types' => \App\Http\Controllers\BookerRouteController::OUTLET_TYPES,
             'visit_radius_m' => (int) config('mobile_sync.visit_radius_m', 100),
+            'allow_short_stock' => $this->allowShortStock(),
             'invoices' => $invoices,
             'orders' => $orders,
             'payments' => $payments,
@@ -491,6 +492,14 @@ class MobileController extends Controller
         $sent = $this->whatsappOrder(DB::table('mb_orders')->where('uuid', $uuid)->first());
 
         return ['uuid' => $uuid, 'result' => 'saved', 'status' => 'pending', 'short_stock' => $short, 'whatsapp' => $sent === true];
+    }
+
+    /** Sent up by the local PC with every push (LocalSnapshot::settings); allowed until the PC says otherwise. */
+    private function allowShortStock(): bool
+    {
+        $settings = json_decode((string) DB::table('mb_meta')->where('key', 'settings')->value('value'), true) ?: [];
+
+        return (bool) ($settings['allow_short_stock'] ?? true);
     }
 
     private function savePayment($user, array $row): array

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\MobileSync\LocalSnapshot;
 use App\Services\MobileSync\MobileInbox;
 use App\Services\MobileSync\SyncStatus;
 use Illuminate\Http\Request;
@@ -102,7 +103,7 @@ class MobileOrderController extends Controller
         $shop_edits = DB::table('booker_customer_updates')->where('business_id', request()->session()->get('user.business_id'))->where('status', 'waiting')->count();
 
         return view('mobile_order.index', compact('rows', 'kind', 'status', 'counts', 'last_run', 'locations', 'location', 'shop_edits',
-            'bookers', 'booker', 'start_date', 'end_date', 'filters', 'by_booker', 'grand'));
+            'bookers', 'booker', 'start_date', 'end_date', 'filters', 'by_booker', 'grand') + ['booker_settings' => LocalSnapshot::settings()]);
     }
 
     /**
@@ -384,6 +385,20 @@ class MobileOrderController extends Controller
         $started = SyncStatus::start();
 
         return response()->json(['started' => $started] + SyncStatus::snapshot());
+    }
+
+    /** Booker app settings; they reach the phones with the next sync (LocalSnapshot::settings goes with every push). */
+    public function saveSettings(Request $request)
+    {
+        if (! auth()->user()->can('business_settings.access')) {
+            abort(403, 'Unauthorized action.');
+        }
+        DB::table('system')->updateOrInsert(['key' => 'mobile_booker_settings'], ['value' => json_encode([
+            'allow_short_stock' => $request->input('allow_short_stock') === '1',
+        ])]);
+        SyncStatus::start();
+
+        return redirect()->back()->with('status', ['success' => 1, 'msg' => 'Saved; bookers get it with their next sync']);
     }
 
     public function reject(Request $request, $id)

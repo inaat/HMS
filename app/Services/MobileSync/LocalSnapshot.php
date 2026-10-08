@@ -32,7 +32,17 @@ class LocalSnapshot
             'customers' => $this->customers(),
             'routes' => $this->routes(),
             'invoices' => $this->invoices(),
+            'settings' => self::settings(),
         ];
+    }
+
+    /** Booker app settings chosen on Sell > Mobile orders (kept in the `system` table, sent with every push). */
+    public static function settings(): array
+    {
+        $saved = json_decode((string) DB::table('system')->where('key', 'mobile_booker_settings')->value('value'), true) ?: [];
+
+        // Booking more than the free stock: allowed with a "short stock" warning (default), or not allowed.
+        return ['allow_short_stock' => (bool) ($saved['allow_short_stock'] ?? true)];
     }
 
     /** Active business locations bookers can book for. */

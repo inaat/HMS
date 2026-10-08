@@ -82,6 +82,10 @@ class MobileSyncController extends Controller
                 DB::table('mb_meta')->updateOrInsert(['key' => 'locations'], ['value' => json_encode($request->input('locations')), 'updated_at' => now()]);
             }
 
+            if (is_array($request->input('settings'))) {
+                DB::table('mb_meta')->updateOrInsert(['key' => 'settings'], ['value' => json_encode($request->input('settings')), 'updated_at' => now()]);
+            }
+
             DB::table('mb_meta')->updateOrInsert(['key' => 'last_push_at'], ['value' => now()->toDateTimeString(), 'updated_at' => now()]);
         });
 

@@ -107,6 +107,7 @@ Omit `since` on the first sync (full download). Response 200:
   "routes": [{"id": 1, "name": "Khwaza Khela Bazar", "location_id": 1, "days": [3], "booker_id": 11, "booker_ids": [11, 14]}],
   "outlet_types": ["Kiryana", "General store", "Wholesale", "Medical store", "Bakery", "Super store", "Hotel / Restaurant", "Other"],
   "visit_radius_m": 100,
+  "allow_short_stock": true,
   "can_edit_shops": true,
   "invoices": [{
     "id": 15763, "contact_id": 57, "invoice_no": "15479", "transaction_date": "2025-12-20 08:49:00",
@@ -140,6 +141,7 @@ Rules for applying it (upsert into SQLite):
 - Customer `position` is `"lat,lng"` (null = no location yet). `photo_url` is a path on the server: show it from
   `https://pos.explainerkhan.com/<photo_url>` (cache the image for offline). `mobile` may be null.
 - `outlet_types` and `visit_radius_m` (metres; a check-in further than this from the shop is flagged): replace.
+- `allow_short_stock` (office setting, Sell > Mobile orders): save it in SQLite and use it offline; missing → `true`.
 - Save `server_time` and use it as the next `since`.
 
 ### 3.3 POST `/upload` — send the outbox
@@ -287,8 +289,12 @@ lost; turning airplane mode OFF uploads all 14 items once and the statuses updat
    key** (if `loc_price` is null, treat as sold everywhere). Hide products not sold at the chosen location.
 3. **Free stock** shown = `stock_by_location[location][variation_id]` (fallback `stock[variation_id]`) **minus this
    phone's unsent orders for that location**, in base units. Display in the chosen unit, e.g. `55 CTN 12 + 9 Pc(s)`;
-   ≤ 0 → "out of stock". Ordering more than free stock is **allowed** but marked **short stock** with a warning; ask
-   to confirm on save.
+   ≤ 0 → "out of stock". Ordering more than free stock depends on `allow_short_stock`:
+   - `true`: **allowed** but marked **short stock** with a warning; ask to confirm on save.
+   - `false`: **not allowed**. Out-of-stock products can't be added (grey, "out of stock"); quantity ＋ stops at free
+     stock (in the chosen unit, e.g. 2 CTN when free is 2 CTN 5 Pc); typing more shows "Only <free> in stock" and
+     sets it to the most allowed; **Save order** stays disabled while any line is short, with the short lines in red.
+   Products with stock tracking off (`enable_stock` 0) are never short.
 4. **Price is editable** per line (per chosen unit). If changed, show the list price small underneath. Changing the
    unit resets the line to that unit's list price.
 5. **Customer due** shown = `balance_due` minus this booker's payments not yet approved (outbox + history with status
@@ -395,7 +401,8 @@ pull-to-refresh, Sync button.
 3. Back online → items upload once; status "sent"; resending (simulate by re-posting) gives "duplicate", no doubles.
 4. Office approves/invoices/rejects on the POS → after sync the statuses, invoice numbers and rejection reason show.
 5. Ordering more than free stock shows "short stock" and asks to confirm; free stock drops by this phone's unsent
-   orders.
+   orders. With `allow_short_stock` false (change it on the POS, sync the phone): out-of-stock products can't be
+   added, quantity stops at free stock, and Save order is blocked while a line is short.
 6. Booker with two locations: switching location changes prices, stock and visible products; order is uploaded with
    that `location_id`.
 7. Send on WhatsApp → success message; customer without mobile → server's message is shown.
