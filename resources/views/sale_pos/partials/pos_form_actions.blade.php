@@ -65,6 +65,21 @@
                     @endif
                 @endif
 
+                {{-- Zakat: the cart's products are given as zakat (stock down, no invoice). Settings > Business Settings > Zakat --}}
+                @php
+                    $zakat_settings = \App\Utils\ZakatUtil::settings(session('user.business_id'));
+                    $zakat_button = \App\Utils\ZakatUtil::goodsAllowed($zakat_settings)
+                        && (auth()->user()->can('zakat.manage') || auth()->user()->hasRole('Admin#'.session('user.business_id')));
+                @endphp
+                @if ($zakat_button)
+                    <button type="button"
+                        class="tw-font-bold tw-text-gray-700 tw-cursor-pointer tw-text-xs md:tw-text-sm tw-flex tw-flex-col tw-items-center tw-justify-center tw-gap-1 no-print @if ($is_mobile) col-xs-6 @endif"
+                        id="pos-zakat" title="Give the products in the cart as zakat (no sale, stock goes down)"
+                        @if (!empty($only_payment)) disabled @endif>
+                        <i class="fas fa-hand-holding-heart tw-text-[#2e9e6a]" aria-hidden="true"></i> Zakat
+                    </button>
+                @endif
+
                 @if (!Gate::check('disable_credit_sale') || auth()->user()->can('superadmin') || auth()->user()->can('admin'))
                     @if (empty($pos_settings['disable_credit_sale_button']))
                         <input type="hidden" name="is_credit_sale" value="0" id="is_credit_sale">
@@ -168,3 +183,38 @@
 @endif
 
 @include('sale_pos.partials.edit_shipping_modal')
+
+@if (! empty($zakat_button))
+    {{-- POS > Zakat: who receives the cart's products as zakat (pos.js #pos-zakat sends it to ZakatController@storeFromPos) --}}
+    <div class="modal fade" id="zakat_pos_modal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                    <h4 class="modal-title"><i class="fas fa-hand-holding-heart" style="color:#2e9e6a;"></i> Give these products as zakat</h4>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-success" style="margin-bottom:12px;">
+                        <b>Zakat value: <span id="zakat_pos_value"></span></b> (<span id="zakat_pos_items"></span>)<br>
+                        Stock goes down. No invoice, no payment, no customer due.
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-12" id="zakat_pos_customer_note" style="margin-bottom:6px;"></div>
+                        <div class="col-sm-6"><div class="form-group"><label>Recipient name</label>
+                            <input type="text" id="zakat_pos_name" class="form-control" placeholder="Name of the person"></div></div>
+                        <div class="col-sm-6"><div class="form-group"><label>Mobile</label>
+                            <input type="text" id="zakat_pos_mobile" class="form-control"></div></div>
+                        <div class="col-sm-6"><div class="form-group"><label>Category</label>
+                            {!! Form::select('zakat_pos_category_select', \App\Utils\ZakatUtil::CATEGORIES, 'fuqara', ['class' => 'form-control select2', 'style' => 'width:100%', 'id' => 'zakat_pos_category']) !!}</div></div>
+                        <div class="col-sm-6"><div class="form-group"><label>Note</label>
+                            <input type="text" id="zakat_pos_note" class="form-control"></div></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="tw-dw-btn tw-dw-btn-success tw-text-white" id="zakat_pos_confirm"><i class="fas fa-hand-holding-heart"></i> Give as zakat</button>
+                    <button type="button" class="tw-dw-btn tw-dw-btn-neutral tw-text-white" data-dismiss="modal">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+@endif

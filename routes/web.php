@@ -300,6 +300,14 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::post('/commission-payouts/{id}/unlock', [\App\Http\Controllers\CommissionPayoutController::class, 'unlock']);
     Route::get('/mobile-orders', [\App\Http\Controllers\MobileOrderController::class, 'index']);
     Route::get('/booker-visits', [\App\Http\Controllers\BookerRouteController::class, 'visits']);
+
+    // Zakat (App\Utils\ZakatUtil): yearly calculation, given in cash / goods (POS Zakat button), slip
+    Route::get('/zakat', [\App\Http\Controllers\ZakatController::class, 'index']);
+    Route::post('/zakat/year', [\App\Http\Controllers\ZakatController::class, 'saveYear']);
+    Route::post('/zakat/year/{id}/lock', [\App\Http\Controllers\ZakatController::class, 'lockYear']);
+    Route::post('/zakat/cash', [\App\Http\Controllers\ZakatController::class, 'payCash']);
+    Route::post('/zakat/pos', [\App\Http\Controllers\ZakatController::class, 'storeFromPos']);
+    Route::get('/zakat/slip/{id}', [\App\Http\Controllers\ZakatController::class, 'slip']);
     Route::get('/booker-routes/sheet', [\App\Http\Controllers\BookerRouteController::class, 'exportSheet']);
     Route::post('/booker-routes/sheet', [\App\Http\Controllers\BookerRouteController::class, 'importSheet']);
     Route::get('/booker-routes/{id}/customers', [\App\Http\Controllers\BookerRouteController::class, 'searchCustomers']);

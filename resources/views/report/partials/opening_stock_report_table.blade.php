@@ -26,7 +26,16 @@
         <td>
             <span class="display_currency" data-currency_symbol="true">{{$data['total_adjustment']}}</span>
         </td>
-    </tr> 
+    </tr>
+    @if (! empty($data['total_zakat_goods']))
+        {{-- Zakat given in goods: not a business loss (left out of the adjustment line above); stock is already lower by it --}}
+        <tr>
+            <th>Zakat given in goods (at cost, owner's share — not a loss):</th>
+            <td>
+                <span class="display_currency" data-currency_symbol="true">{{$data['total_zakat_goods']}}</span>
+            </td>
+        </tr>
+    @endif
     <tr>
         <th>{{ __('report.total_expense') }}:</th>
         <td>

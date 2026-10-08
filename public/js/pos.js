@@ -568,6 +568,76 @@ $(document).ready(function() {
     });
 
     //Save invoice as Quotation
+    // Zakat: give the cart's products as zakat (no sale, no due; stock goes down) — ZakatController@storeFromPos
+    $('button#pos-zakat').click(function() {
+        if ($('table#pos_table tbody').find('.product_row').length <= 0) {
+            toastr.warning(LANG.no_products_added);
+            return false;
+        }
+        var total = 0;
+        var items = 0;
+        $('table#pos_table tbody .product_row').each(function() {
+            total += __read_number($(this).find('.pos_line_total'));
+            items++;
+        });
+        $('#zakat_pos_value').text(__currency_trans_from_en(total, true));
+        $('#zakat_pos_items').text(items + ' item(s)');
+
+        // A real customer receives it by default; for Walk-in the recipient's name is needed
+        var walk_in = $('#customer_id').val() == $('#default_customer_id').val();
+        var picked = ($('#customer_id').select2('data') || [])[0];
+        $('#zakat_pos_customer_note').html(walk_in ? '<span class="text-danger">Walk-in customer: enter the recipient\'s name.</span>'
+            : 'Recipient: <b>' + $('<div>').text(picked ? picked.text : '').html() + '</b> (or type another name below)');
+        $('#zakat_pos_name, #zakat_pos_mobile, #zakat_pos_note').val('');
+        $('#zakat_pos_modal').modal('show');
+    });
+    $('#zakat_pos_modal').on('shown.bs.modal', function() {
+        $('#zakat_pos_category').select2({ dropdownParent: $('#zakat_pos_modal') });
+        $('#zakat_pos_name').focus();
+    });
+    $('#zakat_pos_confirm').click(function() {
+        var walk_in = $('#customer_id').val() == $('#default_customer_id').val();
+        if (walk_in && !$.trim($('#zakat_pos_name').val())) {
+            toastr.warning('Enter the name of the person receiving the zakat');
+            $('#zakat_pos_name').focus();
+            return;
+        }
+        var btn = $(this);
+        var data = pos_form_obj.serialize() + '&' + $.param({
+            zakat_name: $('#zakat_pos_name').val(),
+            zakat_mobile: $('#zakat_pos_mobile').val(),
+            zakat_category: $('#zakat_pos_category').val(),
+            zakat_note: $('#zakat_pos_note').val(),
+        });
+        btn.prop('disabled', true);
+        disable_pos_form_actions();
+        $.ajax({
+            method: 'POST',
+            url: '/zakat/pos',
+            data: data,
+            dataType: 'json',
+            success: function(result) {
+                btn.prop('disabled', false);
+                enable_pos_form_actions();
+                if (result.success == 1) {
+                    $('#zakat_pos_modal').modal('hide');
+                    reset_pos_form();
+                    toastr.success(result.msg);
+                    if (result.receipt && result.receipt.is_enabled) {
+                        pos_print(result.receipt);
+                    }
+                } else {
+                    toastr.error(result.msg);
+                }
+            },
+            error: function() {
+                btn.prop('disabled', false);
+                enable_pos_form_actions();
+                toastr.error(LANG.something_went_wrong || 'Something went wrong');
+            },
+        });
+    });
+
     $('button#pos-quotation').click(function() {
         //Check if product is present or not.
         if ($('table#pos_table tbody').find('.product_row').length <= 0) {

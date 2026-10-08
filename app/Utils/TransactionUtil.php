@@ -5121,9 +5121,16 @@ class TransactionUtil extends Util
         }
 
         if (in_array('stock_adjustment', $transaction_types)) {
+            // Zakat given in goods (is_zakat) is not a business loss: kept out of the adjustment total and shown apart.
+            static $has_zakat_flag = null;
+            if ($has_zakat_flag === null) {
+                $has_zakat_flag = \Schema::hasColumn('transactions', 'is_zakat');
+            }
+            $not_zakat = $has_zakat_flag ? ' AND COALESCE(transactions.is_zakat, 0) = 0' : '';
             $query->addSelect(
-                DB::raw("SUM(IF(transactions.type='stock_adjustment', final_total, 0)) as total_adjustment"),
-                DB::raw("SUM(IF(transactions.type='stock_adjustment', total_amount_recovered, 0)) as total_recovered")
+                DB::raw("SUM(IF(transactions.type='stock_adjustment'{$not_zakat}, final_total, 0)) as total_adjustment"),
+                DB::raw("SUM(IF(transactions.type='stock_adjustment', total_amount_recovered, 0)) as total_recovered"),
+                DB::raw($has_zakat_flag ? "SUM(IF(transactions.type='stock_adjustment' AND transactions.is_zakat = 1, final_total, 0)) as total_zakat_goods" : '0 as total_zakat_goods')
             );
         }
 
@@ -5195,6 +5202,7 @@ class TransactionUtil extends Util
             $output['total_recovered'] =
                 ! empty($transaction_totals->total_recovered) ?
                 $transaction_totals->total_recovered : 0;
+            $output['total_zakat_goods'] = ! empty($transaction_totals->total_zakat_goods) ? $transaction_totals->total_zakat_goods : 0;
         }
 
         if (in_array('purchase', $transaction_types)) {
@@ -6589,6 +6597,7 @@ class TransactionUtil extends Util
 
         //Stock adjustments
         $data['total_adjustment'] = $transaction_totals['total_adjustment'];
+        $data['total_zakat_goods'] = $transaction_totals['total_zakat_goods'] ?? 0;
         $data['total_recovered'] = $transaction_totals['total_recovered'];
 
         // $data['closing_stock'] = $data['closing_stock'] - $data['total_adjustment'];

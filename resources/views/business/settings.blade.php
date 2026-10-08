@@ -37,6 +37,7 @@
                     <a href="#" class="list-group-item text-center tw-font-bold tw-text-sm md:tw-text-base">@lang('lang_v1.reward_point_settings')</a>
                     <a href="#" class="list-group-item text-center tw-font-bold tw-text-sm md:tw-text-base">@lang('lang_v1.modules')</a>
                     <a href="#" class="list-group-item text-center tw-font-bold tw-text-sm md:tw-text-base">@lang('lang_v1.custom_labels')</a>
+                    <a href="#" class="list-group-item text-center tw-font-bold tw-text-sm md:tw-text-base">Zakat</a>
                 </div>
             </div>
             <div class="col-lg-10 col-md-10 col-sm-10 col-xs-10 pos-tab">
@@ -82,6 +83,7 @@
                 @include('business.partials.settings_modules')
                 <!-- tab 12 end -->
                 @include('business.partials.settings_custom_labels')
+                @include('business.partials.settings_zakat')
             </div>
         @endcomponent
         {{-- </div> --}}
@@ -101,6 +103,17 @@
 @section('javascript')
 <script type="text/javascript">
     __page_leave_confirmation('#bussiness_edit_form');
+
+    // Zakat tab: choosing a maslak fills in its rules (each can still be changed)
+    $(document).on('change', '#zakat_maslak', function () {
+        var o = $(this).find('option:selected');
+        $('#zakat_goods_allowed').val(String(o.data('goods'))).trigger('change');
+        $('#zakat_deduct_payables').val(String(o.data('debts'))).trigger('change');
+        $('#zakat_nisab_basis').val(o.data('nisab')).trigger('change');
+        $('#zakat_maslak_note').text(o.data('note'));
+        $('#zakat_maslak_note_ur').text(o.data('note-ur') || '');
+    });
+    $('#zakat_date').datepicker({autoclose: true});
     $(document).on('ifToggled', '#use_superadmin_settings', function() {
         if ($('#use_superadmin_settings').is(':checked')) {
             $('#toggle_visibility').addClass('hide');

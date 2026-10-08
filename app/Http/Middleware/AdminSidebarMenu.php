@@ -666,6 +666,15 @@ class AdminSidebarMenu
                                 ['icon' => '', 'active' => request()->segment(2) == 'profit-loss']
                             );
                         }
+                        // Zakat (Settings > Business Settings > Zakat turns it on)
+                        if (! empty(\App\Utils\ZakatUtil::settings(request()->session()->get('user.business_id'))['enabled'])
+                            && ($is_admin || auth()->user()->can('zakat.manage'))) {
+                            $sub->url(
+                                action([\App\Http\Controllers\ZakatController::class, 'index']),
+                                'Zakat',
+                                ['icon' => '', 'active' => request()->segment(1) == 'zakat']
+                            );
+                        }
                         if (auth()->user()->can('profit_loss_report.view') || auth()->user()->can('stock_report.view')) {
                             $sub->url(
                                 action([\App\Http\Controllers\ReportController::class, 'stockLinkCheck']),

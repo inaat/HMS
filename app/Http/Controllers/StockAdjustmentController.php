@@ -68,6 +68,7 @@ class StockAdjustmentController extends Controller
                         'ref_no',
                         'BL.name as location_name',
                         'adjustment_type',
+                        'transactions.is_zakat',
                         'final_total',
                         'total_amount_recovered',
                         'additional_notes',
@@ -129,13 +130,14 @@ class StockAdjustmentController extends Controller
                 )
                 ->editColumn('transaction_date', '{{@format_datetime($transaction_date)}}')
                 ->editColumn('adjustment_type', function ($row) {
-                    return __('stock_adjustment.'.$row->adjustment_type);
+                    // Zakat given in goods (POS Zakat button) is marked is_zakat
+                    return ! empty($row->is_zakat) ? '<span class="label label-success">Zakat</span>' : __('stock_adjustment.'.$row->adjustment_type);
                 })
                 ->setRowAttr([
                     'data-href' => function ($row) {
                         return  action([\App\Http\Controllers\StockAdjustmentController::class, 'show'], [$row->id]);
                     }, ])
-                ->rawColumns(['final_total', 'action', 'total_amount_recovered'])
+                ->rawColumns(['final_total', 'action', 'total_amount_recovered', 'adjustment_type'])
                 ->make(true);
         }
 
