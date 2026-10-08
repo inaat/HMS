@@ -2293,6 +2293,7 @@ $(document).on('click', 'table.ajax_view tbody tr', function(e) {
     if (
         !$(e.target).is('td.selectable_td input[type=checkbox]') &&
         !$(e.target).is('td.selectable_td') &&
+        !$(e.target).closest('td.selectable_td, input, label, .icheckbox_square-blue').length &&
         !$(e.target).is('td.clickable_td') &&
         !$(e.target).is('a') &&
         !$(e.target).is('button') &&

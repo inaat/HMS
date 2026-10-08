@@ -204,7 +204,7 @@
                 scrollX: true,
                 scrollCollapse: true,
                 columns: [
-                                { data: 'mass_print', orderable: false, "searchable": false },
+                                { data: 'mass_print', orderable: false, "searchable": false, className: 'selectable_td' },
 
                     {
                         data: 'action',
@@ -389,7 +389,7 @@
                     swal('You Have No Row Selected');
                     return;
                 }
-                window.open('/sells-delivery-challan?ids=' + ids.join(','), '_blank');
+                window.open("{{ url('/sells-delivery-challan') }}?ids=" + ids.join(','), '_blank');
             });
 
             $('#only_subscriptions').on('ifChanged', function(event) {
