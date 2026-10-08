@@ -92,7 +92,7 @@ class ContactController extends Controller
             return redirect()->back();
         }
 
-        if (request()->ajax()) {
+        if (request()->ajax() || ($type == 'customer' && request()->has('print_list'))) {
             if ($type == 'supplier') {
                 return $this->indexSupplier();
             } elseif ($type == 'customer') {
@@ -330,6 +330,22 @@ class ContactController extends Controller
         return $query->limit(5000)->pluck('contacts.id')->all();
     }
 
+    /** Printable customer list (all rows, list's sort) with an empty Remarks column to write on. */
+    private function printCustomerList($query)
+    {
+        $sortable = ['contact_id' => 'contacts.contact_id', 'supplier_business_name' => 'contacts.supplier_business_name',
+            'name' => 'contacts.name', 'mobile' => 'contacts.mobile', 'due' => 'for_ordering_total_due',
+            'created_at' => 'contacts.created_at', 'customer_group' => 'customer_group'];
+        $order = (array) request()->input('order.0', []);
+        $column = request()->input('columns.'.($order['column'] ?? -1).'.data');
+        $query->orderBy($sortable[$column] ?? 'for_ordering_total_due', ($order['dir'] ?? 'desc') === 'asc' ? 'asc' : 'desc');
+
+        $customers = $query->get();
+        $business = \App\Business::find(request()->session()->get('user.business_id'));
+
+        return view('contact.print_list', compact('customers', 'business'));
+    }
+
     private function indexCustomer()
     {
         if (! auth()->user()->can('customer.view') && ! auth()->user()->can('customer.view_own')) {
@@ -418,6 +434,11 @@ class ContactController extends Controller
         if (! empty(request()->input('contact_status'))) {
             $query->where('contacts.contact_status', request()->input('contact_status'));
         }
+        // "Print list": every customer matching the list's current search / filters / sort, with a Remarks column.
+        if (request()->has('print_list')) {
+            return $this->printCustomerList($query);
+        }
+
         // Counting customers does not need the due totals: count them on the contacts table alone (same filters,
         // without the totals join), so the heavy totals query runs once for the page instead of three times.
         $light_count = null;

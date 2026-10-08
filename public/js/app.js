@@ -529,6 +529,20 @@ $(document).ready(function() {
         },
         // Customers: highest Total Sale Due first (column 5); others: newest contact id first
         aaSorting: contact_table_type == 'customer' ? [[5, 'desc']] : [[1, 'desc']],
+        // Customers: Print opens a clean, ledger-style list of ALL matching customers (with Remarks), not just this page
+        buttons: ($.fn.dataTable.defaults.buttons || []).map(function (b) {
+            if (contact_table_type != 'customer' || b.extend != 'print') {
+                return b;
+            }
+            return {
+                text: b.text,
+                className: b.className,
+                action: function () {
+                    var params = $.extend({}, contact_table.ajax.params(), { print_list: 1 });
+                    window.open('/contacts?' + $.param(params), '_blank');
+                },
+            };
+        }),
         columns: columns,
         fnDrawCallback: function(oSettings) {
             __currency_convert_recursively($('#contact_table'));
