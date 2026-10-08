@@ -282,8 +282,11 @@ class ZakatUtil extends Util
                 'created_by' => $user_id,
             ]);
             $adjustment->stock_adjustment_lines()->createMany($adjustment_lines);
+            // Same rule as a POS sale: when the shop allows overselling, goods below zero / without purchase
+            // quantity are still allowed (otherwise "Mismatch between stock adjustment and purchase quantity").
             $transactionUtil->mapPurchaseSell(
-                ['id' => $business_id, 'accounting_method' => $accounting_method, 'location_id' => $location_id],
+                ['id' => $business_id, 'accounting_method' => $accounting_method, 'location_id' => $location_id,
+                    'pos_settings' => DB::table('business')->where('id', $business_id)->value('pos_settings')],
                 $adjustment->stock_adjustment_lines, 'stock_adjustment');
             event(new StockAdjustmentCreatedOrModified($adjustment, 'added'));
             $transactionUtil->activityLog($adjustment, 'added', null, [], false);
