@@ -323,6 +323,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::post('/mobile-orders/{id}/approve', [\App\Http\Controllers\MobileOrderController::class, 'approve']);
     Route::post('/mobile-orders/{id}/invoice', [\App\Http\Controllers\MobileOrderController::class, 'invoice']);
     Route::get('/mobile-orders-shop-edits', [\App\Http\Controllers\MobileOrderController::class, 'shopEdits']);
+    Route::post('/mobile-orders-shop-edits-bulk', [\App\Http\Controllers\MobileOrderController::class, 'decideShopEditsBulk']);
     Route::post('/mobile-orders-shop-edits/{id}', [\App\Http\Controllers\MobileOrderController::class, 'decideShopEdit']);
     Route::post('/mobile-orders-bulk', [\App\Http\Controllers\MobileOrderController::class, 'bulk']);
     Route::post('/mobile-orders/{id}/reject', [\App\Http\Controllers\MobileOrderController::class, 'reject']);

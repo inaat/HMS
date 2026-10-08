@@ -225,7 +225,7 @@ class MobileOrderController extends Controller
             abort(403, 'Unauthorized action.');
         }
         $business_id = request()->session()->get('user.business_id');
-        $status = in_array($request->input('status'), ['waiting', 'applied', 'rejected', 'all']) ? $request->input('status') : 'all';
+        $status = in_array($request->input('status'), ['waiting', 'applied', 'rejected', 'all']) ? $request->input('status') : 'waiting';
 
         $query = DB::table('booker_customer_updates as e')
             ->leftJoin('contacts as c', 'c.id', '=', 'e.contact_id')
@@ -268,6 +268,30 @@ class MobileOrderController extends Controller
         }
 
         return redirect()->back()->with('status', $output);
+    }
+
+    /** Ticked shop edits: approve or reject them all at once. */
+    public function decideShopEditsBulk(Request $request)
+    {
+        if (! auth()->user()->can('customer.update')) {
+            abort(403, 'Unauthorized action.');
+        }
+        $approve = $request->input('decision') === 'approve';
+        $done = 0;
+        $errors = [];
+        $ids = DB::table('booker_customer_updates')->where('business_id', request()->session()->get('user.business_id'))
+            ->where('status', 'waiting')->whereIn('id', array_map('intval', (array) $request->input('ids', [])))->pluck('id');
+        foreach ($ids as $id) {
+            try {
+                $approve ? $this->inbox()->approveShopEdit($id, auth()->id()) : $this->inbox()->rejectShopEdit($id, auth()->id());
+                $done++;
+            } catch (\Exception $e) {
+                $errors[] = '#'.$id.': '.$e->getMessage();
+            }
+        }
+        $msg = $done.' shop edit(s) '.($approve ? 'approved' : 'rejected').($errors ? '; not done: '.implode(', ', $errors) : '');
+
+        return redirect()->back()->with('status', ['success' => $done > 0 ? 1 : 0, 'msg' => $done ? $msg : ($errors ? $msg : 'Tick the shop edits first')]);
     }
 
     public function syncStatus()
