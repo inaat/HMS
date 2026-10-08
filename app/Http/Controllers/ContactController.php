@@ -92,7 +92,7 @@ class ContactController extends Controller
             return redirect()->back();
         }
 
-        if (request()->ajax() || ($type == 'customer' && request()->has('print_list'))) {
+        if (request()->ajax() || (in_array($type, ['customer', 'supplier']) && request()->has('print_list'))) {
             if ($type == 'supplier') {
                 return $this->indexSupplier();
             } elseif ($type == 'customer') {
@@ -128,7 +128,14 @@ class ContactController extends Controller
 
         $business_id = request()->session()->get('user.business_id');
 
-        $contact = $this->contactUtil->getContactQuery($business_id, 'supplier');
+        // Search: matching suppliers first (contacts table only), then their totals (see indexCustomer)
+        $search_ids = [];
+        $search = trim((string) request()->input('search.value'));
+        if ($search !== '') {
+            $search_ids = $this->customerIdsMatching($business_id, $search, 'supplier') ?: [0];
+        }
+
+        $contact = $this->contactUtil->getContactQuery($business_id, 'supplier', $search_ids);
 
         if (request()->has('has_purchase_due')) {
             $contact->havingRaw('(total_purchase - purchase_paid) > 0');
@@ -154,8 +161,34 @@ class ContactController extends Controller
             $contact->join('user_contact_access AS uc', 'contacts.id', 'uc.contact_id')
                 ->where('uc.user_id', request()->input('assigned_to'));
         }
-        $contact->orderByDesc('for_sup_ordering_total_due');
-        return Datatables::of($contact)
+        // Print: every matching supplier, ledger-style table with Remarks
+        if (request()->has('print_list')) {
+            return $this->printCustomerList($contact, 'supplier');
+        }
+
+        // Sorting comes from the table (default: Total Purchase Due, highest first); counts without the totals
+        $suppliers = Datatables::of($contact);
+        if (empty($contact->getQuery()->havings)) {
+            $light = clone $contact;
+            $lb = $light->getQuery();
+            $lb->joins = array_values(array_filter((array) $lb->joins, function ($join) {
+                return ! (is_string($join->table) && stripos($join->table, 'transactions') === 0);
+            }));
+            $lb->columns = null;
+            $lb->groups = null;
+            $lb->orders = null;
+            $count = $light->distinct()->count('contacts.id');
+            $suppliers->setTotalRecords($count);
+            if ($search === '') {
+                $suppliers->setFilteredRecords($count);
+            }
+        }
+
+        return $suppliers
+            // "0" / "-" is what the POS stores when there is no mobile: show nothing
+            ->editColumn('mobile', function ($row) {
+                return in_array(trim((string) $row->mobile), ['0', '-'], true) ? '' : $row->mobile;
+            })
             ->addColumn('address', '{{implode(", ", array_filter([$address_line_1, $address_line_2, $city, $state, $country, $zip_code]))}}')
             ->addColumn(
                 'due',
@@ -307,7 +340,7 @@ class ContactController extends Controller
      * Customer ids whose text fields contain every word typed in the list's search box (like the table's own smart
      * search, but on the contacts table alone). A superset of what the table search keeps.
      */
-    private function customerIdsMatching($business_id, string $search): array
+    private function customerIdsMatching($business_id, string $search, string $type = 'customer'): array
     {
         $columns = ['contacts.name', 'contacts.supplier_business_name', 'contacts.contact_id', 'contacts.mobile',
             'contacts.landline', 'contacts.alternate_number', 'contacts.email', 'contacts.tax_number', 'contacts.city',
@@ -317,8 +350,8 @@ class ContactController extends Controller
         }
 
         $query = Contact::leftjoin('customer_groups AS cg', 'contacts.customer_group_id', '=', 'cg.id')
-            ->where('contacts.business_id', $business_id)
-            ->onlyCustomers();
+            ->where('contacts.business_id', $business_id);
+        $type == 'supplier' ? $query->onlySuppliers() : $query->onlyCustomers();
         foreach (preg_split('/\s+/', $search, -1, PREG_SPLIT_NO_EMPTY) as $word) {
             $query->where(function ($q) use ($columns, $word) {
                 foreach ($columns as $column) {
@@ -330,20 +363,21 @@ class ContactController extends Controller
         return $query->limit(5000)->pluck('contacts.id')->all();
     }
 
-    /** Printable customer list (all rows, list's sort) with an empty Remarks column to write on. */
-    private function printCustomerList($query)
+    /** Printable customer / supplier list (all rows, list's sort) with an empty Remarks column to write on. */
+    private function printCustomerList($query, string $type = 'customer')
     {
+        $due_column = $type == 'supplier' ? 'display_due' : 'for_ordering_total_due';
         $sortable = ['contact_id' => 'contacts.contact_id', 'supplier_business_name' => 'contacts.supplier_business_name',
-            'name' => 'contacts.name', 'mobile' => 'contacts.mobile', 'due' => 'for_ordering_total_due',
+            'name' => 'contacts.name', 'mobile' => 'contacts.mobile', 'due' => $due_column,
             'created_at' => 'contacts.created_at', 'customer_group' => 'customer_group'];
         $order = (array) request()->input('order.0', []);
         $column = request()->input('columns.'.($order['column'] ?? -1).'.data');
-        $query->orderBy($sortable[$column] ?? 'for_ordering_total_due', ($order['dir'] ?? 'desc') === 'asc' ? 'asc' : 'desc');
+        $query->orderBy($sortable[$column] ?? $due_column, ($order['dir'] ?? 'desc') === 'asc' ? 'asc' : 'desc');
 
         $customers = $query->get();
         $business = \App\Business::find(request()->session()->get('user.business_id'));
 
-        return view('contact.print_list', compact('customers', 'business'));
+        return view('contact.print_list', compact('customers', 'business', 'type'));
     }
 
     private function indexCustomer()
@@ -464,6 +498,10 @@ class ContactController extends Controller
             }
         }
         $contacts = $contacts
+            // "0" / "-" is what the POS stores when there is no mobile: show nothing
+            ->editColumn('mobile', function ($row) {
+                return in_array(trim((string) $row->mobile), ['0', '-'], true) ? '' : $row->mobile;
+            })
             ->addColumn('address', '{{implode(", ", array_filter([$address_line_1, $address_line_2, $city, $state, $country, $zip_code]))}}')
             ->addColumn(
                 'due',

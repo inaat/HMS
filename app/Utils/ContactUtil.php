@@ -263,7 +263,9 @@ class ContactUtil extends Util
         }
         if ($type == 'supplier') {
             $query->addSelect([
-                DB::raw("COALESCE(SUM(IF(t.type = 'purchase' AND t.status = 'final', final_total, 0)),0)-COALESCE(SUM(IF(t.type = 'purchase' AND t.status = 'final', (SELECT SUM(IF(is_return = 1,-1*amount,amount)) FROM transaction_payments WHERE transaction_payments.transaction_id=t.id), 0)),0)+COALESCE(SUM(IF(t.type = 'opening_balance', final_total, 0)),0) -COALESCE(SUM(IF(t.type = 'opening_balance', (SELECT SUM(IF(is_return = 1,-1*amount,amount)) FROM transaction_payments WHERE transaction_payments.transaction_id=t.id), 0)),0) as for_sup_ordering_total_due")
+                DB::raw("COALESCE(SUM(IF(t.type = 'purchase' AND t.status = 'final', final_total, 0)),0)-COALESCE(SUM(IF(t.type = 'purchase' AND t.status = 'final', (SELECT SUM(IF(is_return = 1,-1*amount,amount)) FROM transaction_payments WHERE transaction_payments.transaction_id=t.id), 0)),0)+COALESCE(SUM(IF(t.type = 'opening_balance', final_total, 0)),0) -COALESCE(SUM(IF(t.type = 'opening_balance', (SELECT SUM(IF(is_return = 1,-1*amount,amount)) FROM transaction_payments WHERE transaction_payments.transaction_id=t.id), 0)),0) as for_sup_ordering_total_due"),
+                // The "Total Purchase Due" the supplier list shows (purchases - paid - ledger discount): sorts the list
+                DB::raw("COALESCE(SUM(IF(t.type = 'purchase', final_total, 0)),0) - COALESCE(SUM(IF(t.type = 'purchase', (SELECT SUM(amount) FROM transaction_payments WHERE transaction_payments.transaction_id=t.id), 0)),0) - COALESCE(SUM(IF(t.type = 'ledger_discount', final_total, 0)),0) as display_due"),
             ]);
         }
         else{

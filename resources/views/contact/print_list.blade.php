@@ -32,13 +32,14 @@
     @php
         $phone = fn ($m) => in_array(trim((string) $m), ['', '0', '-'], true) ? '' : $m;
         $total_due = 0;
+        $is_supplier = ($type ?? 'customer') == 'supplier';
     @endphp
 
     <table class="head">
         <tr>
             <td style="width:50%;">
-                <div class="title">Customers</div>
-                <div class="muted">{{ $customers->count() }} customer(s) · printed {{ @format_datetime(now()) }}</div>
+                <div class="title">{{ $is_supplier ? 'Suppliers' : 'Customers' }}</div>
+                <div class="muted">{{ $customers->count() }} {{ $is_supplier ? 'supplier(s)' : 'customer(s)' }} · printed {{ @format_datetime(now()) }}</div>
             </td>
             <td style="width:50%;" class="right">
                 <div class="title">{{ $business->name }}</div>
@@ -55,16 +56,19 @@
                 <th>Contact ID</th>
                 <th>Name</th>
                 <th>Mobile</th>
-                <th>Total Sale Due</th>
+                <th>{{ $is_supplier ? 'Total Purchase Due' : 'Total Sale Due' }}</th>
                 <th>Address</th>
-                <th>Customer Group</th>
+                @if (! $is_supplier)<th>Customer Group</th>@endif
                 <th class="remarks">Remarks</th>
             </tr>
         </thead>
         <tbody>
             @foreach ($customers as $c)
                 @php
-                    $due = ($c->total_invoice - $c->invoice_received) + ($c->opening_balance - $c->opening_balance_paid);
+                    // Same "due" as the list shows
+                    $due = $is_supplier
+                        ? $c->total_purchase - $c->purchase_paid - $c->total_ledger_discount
+                        : ($c->total_invoice - $c->invoice_received) + ($c->opening_balance - $c->opening_balance_paid);
                     $total_due += $due;
                 @endphp
                 <tr>
@@ -74,7 +78,7 @@
                     <td>{{ $phone($c->mobile) }}</td>
                     <td class="amount">@format_currency($due)</td>
                     <td>{{ implode(', ', array_filter([$c->address_line_1, $c->address_line_2, $c->city, $c->state])) }}</td>
-                    <td>{{ $c->customer_group }}</td>
+                    @if (! $is_supplier)<td>{{ $c->customer_group }}</td>@endif
                     <td class="remarks"></td>
                 </tr>
             @endforeach
@@ -83,7 +87,7 @@
             <tr class="total">
                 <td colspan="4" class="right">Total</td>
                 <td class="amount">@format_currency($total_due)</td>
-                <td colspan="3"></td>
+                <td colspan="{{ $is_supplier ? 2 : 3 }}"></td>
             </tr>
         </tfoot>
     </table>

@@ -435,16 +435,17 @@ $(document).ready(function() {
             { data: 'contact_id', name: 'contact_id' },
             { data: 'supplier_business_name', name: 'supplier_business_name' },
             { data: 'name', name: 'name' },
+            // Same layout as customers: mobile, dues, address right after the name
+            { data: 'mobile', name: 'mobile' },
+            { data: 'due', name: 'display_due', searchable: false, orderable: true },
+            { data: 'return_due', searchable: false, orderable: false },
+            { data: 'address', name: 'address', orderable: false },
             { data: 'email', name: 'email' },
             { data: 'tax_number', name: 'tax_number' },
             { data: 'pay_term', name: 'pay_term', searchable: false, orderable: false },
             { data: 'opening_balance', name: 'opening_balance', searchable: false },
             { data: 'balance', name: 'balance', searchable: false },
             { data: 'created_at', name: 'contacts.created_at' },
-            { data: 'address', name: 'address', orderable: false },
-            { data: 'mobile', name: 'mobile' },
-            { data: 'due', searchable: false, orderable: false },
-            { data: 'return_due', searchable: false, orderable: false },
         ].concat(contact_custom_columns());
     } else if (contact_table_type == 'customer') {
         // Same order as the header in contact/index.blade.php: name, mobile, dues, address first
@@ -528,10 +529,10 @@ $(document).ready(function() {
             }
         },
         // Customers: highest Total Sale Due first (column 5); others: newest contact id first
-        aaSorting: contact_table_type == 'customer' ? [[5, 'desc']] : [[1, 'desc']],
+        aaSorting: (contact_table_type == 'customer' || contact_table_type == 'supplier') ? [[5, 'desc']] : [[1, 'desc']],
         // Customers: Print opens a clean, ledger-style list of ALL matching customers (with Remarks), not just this page
         buttons: ($.fn.dataTable.defaults.buttons || []).map(function (b) {
-            if (contact_table_type != 'customer' || b.extend != 'print') {
+            if ((contact_table_type != 'customer' && contact_table_type != 'supplier') || b.extend != 'print') {
                 return b;
             }
             return {

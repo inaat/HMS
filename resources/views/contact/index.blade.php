@@ -144,21 +144,22 @@
                     <table class="table table-bordered table-striped" id="contact_table">
                         <thead>
                             <tr>
-                                <th class="tw-w-full">@lang('messages.action')</th>
+                                <th style="width: 80px;">@lang('messages.action')</th>
                                 <th>@lang('lang_v1.contact_id')</th>
                                 @if ($type == 'supplier')
+                                    {{-- Same layout as customers: name, mobile, dues, address first (app.js follows) --}}
                                     <th>@lang('business.business_name')</th>
                                     <th>@lang('contact.name')</th>
+                                    <th>@lang('contact.mobile')</th>
+                                    <th>@lang('contact.total_purchase_due')</th>
+                                    <th>@lang('lang_v1.total_purchase_return_due')</th>
+                                    <th>@lang('business.address')</th>
                                     <th>@lang('business.email')</th>
                                     <th>@lang('contact.tax_no')</th>
                                     <th>@lang('contact.pay_term')</th>
                                     <th>@lang('account.opening_balance')</th>
                                     <th>@lang('lang_v1.advance_balance')</th>
                                     <th>@lang('lang_v1.added_on')</th>
-                                    <th>@lang('business.address')</th>
-                                    <th>@lang('contact.mobile')</th>
-                                    <th>@lang('contact.total_purchase_due')</th>
-                                    <th>@lang('lang_v1.total_purchase_return_due')</th>
                                 @elseif($type == 'customer')
                                     {{-- Order: who, how to reach, what they owe; then the rest (app.js columns follow) --}}
                                     <th>@lang('business.business_name')</th>
@@ -194,11 +195,11 @@
                         <tfoot>
                             {{-- Footer cells line up with the header above (custom fields: only the named ones) --}}
                             @php
-                                $after_dues = $type == 'customer' ? 9 + ($reward_enabled ? 1 : 0) : 0;
+                                $after_dues = $type == 'customer' ? 9 + ($reward_enabled ? 1 : 0) : 7;
                                 $after_dues += count($shown_custom_fields);
                             @endphp
                             <tr class="bg-gray font-17 text-center footer-total">
-                                <td colspan="{{ $type == 'customer' ? 5 : 12 }}"><strong>@lang('sale.total'):</strong></td>
+                                <td colspan="5"><strong>@lang('sale.total'):</strong></td>
                                 <td class="footer_contact_due"></td>
                                 <td class="footer_contact_return_due"></td>
                                 @if ($after_dues > 0)
