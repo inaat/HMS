@@ -95,11 +95,18 @@
                 @endforeach
               </select>
             </div>
-            <div class="col-sm-6 form-group">
+            <div class="col-sm-{{ empty($accounts) ? 6 : 4 }} form-group">
               <label>Reference</label>
               <input type="text" name="reference" class="form-control" placeholder="Cheque / transaction no.">
             </div>
-            <div class="col-sm-6 form-group">
+            @if (! empty($accounts))
+              {{-- paid from this payment account (Payment Accounts and Accounting show it) --}}
+              <div class="col-sm-4 form-group">
+                <label>Paid from account</label>
+                {!! Form::select('account_id', $accounts, null, ['class' => 'form-control investor-select2', 'placeholder' => 'None (cash not in an account)']) !!}
+              </div>
+            @endif
+            <div class="col-sm-{{ empty($accounts) ? 6 : 4 }} form-group">
               <label>Note</label>
               <input type="text" name="note" class="form-control">
             </div>

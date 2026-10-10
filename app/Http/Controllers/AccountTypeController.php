@@ -53,6 +53,15 @@ class AccountTypeController extends Controller
         try {
             $input = $request->only(['name', 'parent_account_type_id']);
             $input['business_id'] = $request->session()->get('user.business_id');
+            //Chart of accounts: every account sits under a main group and gets its type and normal side
+            if ($this->hasChart()) {
+                $parent = AccountType::where('business_id', $input['business_id'])->whereNull('parent_account_type_id')
+                    ->find($request->input('parent_account_type_id'));
+                if (empty($parent)) {
+                    return redirect()->back()->with('status', ['success' => false, 'msg' => 'Choose the group (Assets, Liabilities, Equity, Income or Expenses)']);
+                }
+                $input = LedgerController::chartFields($request, $parent) + ['business_id' => $input['business_id']];
+            }
 
             AccountType::create($input);
             $output = ['success' => true,
@@ -125,6 +134,17 @@ class AccountTypeController extends Controller
             $account_type = AccountType::where('business_id', $business_id)
                                      ->findOrFail($id);
 
+            if ($this->hasChart()) {
+                $fixed = empty($account_type->parent_account_type_id) || ! empty($account_type->system_key) || ! empty($account_type->expense_category_id);
+                $parent = $fixed ? null : AccountType::where('business_id', $business_id)->whereNull('parent_account_type_id')
+                    ->find($request->input('parent_account_type_id'));
+                //groups and accounts the books post to: name / code only
+                $account_type->update($parent ? LedgerController::chartFields($request, $parent)
+                    : ['name' => trim($request->input('name')), 'code' => trim((string) $request->input('code')) ?: null]);
+
+                return redirect()->back()->with('status', ['success' => true, 'msg' => __('lang_v1.updated_success')]);
+            }
+
             //Account type is changed to subtype update all its sub type's parent type
             if (empty($account_type->parent_account_type_id) && ! empty($input['parent_account_type_id'])) {
                 AccountType::where('business_id', $business_id)
@@ -154,6 +174,11 @@ class AccountTypeController extends Controller
      * @param  \App\AccountType  $accountType
      * @return \Illuminate\Http\Response
      */
+    private function hasChart(): bool
+    {
+        return \Schema::hasColumn('account_types', 'system_key');
+    }
+
     public function destroy($id)
     {
         if (! auth()->user()->can('account.access')) {
@@ -161,6 +186,19 @@ class AccountTypeController extends Controller
         }
 
         $business_id = session()->get('user.business_id');
+
+        //Chart of accounts: an account the books post to, or used by payment accounts / sub accounts, stays
+        $type = AccountType::where('business_id', $business_id)->where('id', $id)->first();
+        $in_use = ! empty($type) && (
+            ! empty($type->system_key) || ! empty($type->expense_category_id)
+            || AccountType::where('parent_account_type_id', $id)->exists()
+            || \App\Account::where('account_type_id', $id)->exists()
+            || (\Schema::hasTable('ledger_lines') && \DB::table('ledger_lines')->where('account_type_id', $id)->exists())
+        );
+        if ($in_use) {
+            return redirect()->back()->with('status', ['success' => false,
+                'msg' => 'This account is used by the books or by payment accounts and cannot be deleted (you can rename it)']);
+        }
 
         AccountType::where('business_id', $business_id)
                                      ->where('id', $id)

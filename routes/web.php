@@ -301,6 +301,32 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::get('/mobile-orders', [\App\Http\Controllers\MobileOrderController::class, 'index']);
     Route::get('/booker-visits', [\App\Http\Controllers\BookerRouteController::class, 'visits']);
 
+    // Accounting (double-entry books)
+    Route::prefix('accounting')->group(function () {
+        Route::get('/', [\App\Http\Controllers\LedgerController::class, 'index']);
+        Route::post('/install', [\App\Http\Controllers\LedgerController::class, 'install']);
+        Route::post('/sync/start', [\App\Http\Controllers\LedgerController::class, 'syncStart']);
+        Route::post('/sync/step', [\App\Http\Controllers\LedgerController::class, 'syncStep']);
+        Route::post('/sync/finish', [\App\Http\Controllers\LedgerController::class, 'syncFinish']);
+        Route::get('/checks', [\App\Http\Controllers\LedgerController::class, 'checks']);
+        Route::get('/cash-setup', [\App\Http\Controllers\LedgerController::class, 'cashSetup']);
+        Route::post('/cash-setup/defaults', [\App\Http\Controllers\LedgerController::class, 'saveDefaultAccounts']);
+        Route::post('/cash-setup/count', [\App\Http\Controllers\LedgerController::class, 'saveCashCount']);
+        Route::post('/cash-setup/link', [\App\Http\Controllers\LedgerController::class, 'linkPayments']);
+        Route::get('/chart', [\App\Http\Controllers\LedgerController::class, 'chart']);
+        Route::post('/chart', [\App\Http\Controllers\LedgerController::class, 'storeAccount']);
+        Route::post('/chart/{id}/delete', [\App\Http\Controllers\LedgerController::class, 'destroyAccount']);
+        Route::get('/journals', [\App\Http\Controllers\LedgerController::class, 'journals']);
+        Route::get('/journals/create', [\App\Http\Controllers\LedgerController::class, 'createJournal']);
+        Route::post('/journals', [\App\Http\Controllers\LedgerController::class, 'storeJournal']);
+        Route::post('/journals/{id}/delete', [\App\Http\Controllers\LedgerController::class, 'destroyJournal']);
+        Route::get('/general-ledger', [\App\Http\Controllers\LedgerController::class, 'generalLedger']);
+        Route::get('/trial-balance', [\App\Http\Controllers\LedgerController::class, 'trialBalance']);
+        Route::get('/balance-sheet', [\App\Http\Controllers\LedgerController::class, 'balanceSheet']);
+        Route::get('/profit-loss', [\App\Http\Controllers\LedgerController::class, 'profitLoss']);
+        Route::get('/contacts', [\App\Http\Controllers\LedgerController::class, 'contactSearch']);
+    });
+
     // Zakat (App\Utils\ZakatUtil): yearly calculation, given in cash / goods (POS Zakat button), slip
     Route::get('/zakat', [\App\Http\Controllers\ZakatController::class, 'index']);
     Route::post('/zakat/year', [\App\Http\Controllers\ZakatController::class, 'saveYear']);

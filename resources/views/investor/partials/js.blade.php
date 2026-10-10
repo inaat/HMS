@@ -2,6 +2,7 @@
 <script type="text/javascript">
     $(document).on('shown.bs.modal', '.investor_modal', function() {
         $(this).find('.investor-date').datepicker({ autoclose: true, format: datepicker_date_format });
+        $(this).find('.investor-select2').select2({ dropdownParent: $(this), width: '100%' });
         __currency_convert_recursively($(this));
     });
 

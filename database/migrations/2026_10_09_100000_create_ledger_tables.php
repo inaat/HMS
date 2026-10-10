@@ -73,8 +73,14 @@ return new class extends Migration
                 $table->decimal('debit', 22, 4)->default(0);
                 $table->decimal('credit', 22, 4)->default(0);
                 $table->string('note', 191)->nullable();
+                // manual journal line on a payment account: the matching Payment Accounts entry it made
+                $table->unsignedInteger('account_transaction_id')->nullable()->index();
                 $table->index(['business_id', 'account_type_id']);
                 $table->index('account_id');
+            });
+        } elseif (! Schema::hasColumn('ledger_lines', 'account_transaction_id')) {
+            Schema::table('ledger_lines', function (Blueprint $table) {
+                $table->unsignedInteger('account_transaction_id')->nullable()->index();
             });
         }
     }

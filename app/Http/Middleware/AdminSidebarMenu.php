@@ -624,36 +624,40 @@ class AdminSidebarMenu
                   </svg>']
                 )->order(45);
             }
-            //Accounts dropdown
-            if (auth()->user()->can('account.access') && in_array('account', $enabled_modules)) {
+            //Accounts: payment accounts (cash / bank) and the double-entry books in one menu.
+            //The old simple Balance sheet / Trial balance (account/balance-sheet, account/trial-balance) are replaced
+            //by the Accounting ones; their pages still open by link.
+            if (auth()->user()->can('account.access')) {
                 $menu->dropdown(
-                    __('lang_v1.payment_accounts'),
-                    function ($sub) {
-                        $sub->url(
-                            action([\App\Http\Controllers\AccountController::class, 'index']),
-                            __('account.list_accounts'),
-                            ['icon' => '', 'active' => request()->segment(1) == 'account' && request()->segment(2) == 'account']
-                        );
-                        $sub->url(
-                            action([\App\Http\Controllers\AccountReportsController::class, 'balanceSheet']),
-                            __('account.balance_sheet'),
-                            ['icon' => '', 'active' => request()->segment(1) == 'account' && request()->segment(2) == 'balance-sheet']
-                        );
-                        $sub->url(
-                            action([\App\Http\Controllers\AccountReportsController::class, 'trialBalance']),
-                            __('account.trial_balance'),
-                            ['icon' => '', 'active' => request()->segment(1) == 'account' && request()->segment(2) == 'trial-balance']
-                        );
-                        $sub->url(
-                            action([\App\Http\Controllers\AccountController::class, 'cashFlow']),
-                            __('lang_v1.cash_flow'),
-                            ['icon' => '', 'active' => request()->segment(1) == 'account' && request()->segment(2) == 'cash-flow']
-                        );
-                        $sub->url(
-                            action([\App\Http\Controllers\AccountReportsController::class, 'paymentAccountReport']),
-                            __('account.payment_account_report'),
-                            ['icon' => '', 'active' => request()->segment(1) == 'account' && request()->segment(2) == 'payment-account-report']
-                        );
+                    'Accounts',
+                    function ($sub) use ($enabled_modules) {
+                        $module = in_array('account', $enabled_modules);
+                        if ($module) {
+                            $sub->url(
+                                action([\App\Http\Controllers\AccountController::class, 'index']),
+                                'Payment accounts',
+                                ['icon' => '', 'active' => request()->segment(1) == 'account' && request()->segment(2) == 'account']
+                            );
+                        }
+                        $L = \App\Http\Controllers\LedgerController::class;
+                        foreach ([['index', 'Update ledger & checks', ''], ['chart', 'Chart of accounts', 'chart'], ['journals', 'Journals', 'journals'],
+                            ['generalLedger', 'General ledger', 'general-ledger'], ['trialBalance', 'Trial balance', 'trial-balance'],
+                            ['balanceSheet', 'Balance sheet', 'balance-sheet'], ['profitLoss', 'Profit & loss', 'profit-loss']] as [$method, $label, $seg]) {
+                            $sub->url(action([$L, $method]), $label,
+                                ['icon' => '', 'active' => request()->segment(1) == 'accounting' && (string) request()->segment(2) == $seg]);
+                        }
+                        if ($module) {
+                            $sub->url(
+                                action([\App\Http\Controllers\AccountController::class, 'cashFlow']),
+                                __('lang_v1.cash_flow'),
+                                ['icon' => '', 'active' => request()->segment(1) == 'account' && request()->segment(2) == 'cash-flow']
+                            );
+                            $sub->url(
+                                action([\App\Http\Controllers\AccountReportsController::class, 'paymentAccountReport']),
+                                __('account.payment_account_report'),
+                                ['icon' => '', 'active' => request()->segment(1) == 'account' && request()->segment(2) == 'payment-account-report']
+                            );
+                        }
                     },
                     ['icon' => '<svg aria-hidden="true" class="tw-size-5 tw-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
                     <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
@@ -678,7 +682,7 @@ class AdminSidebarMenu
                             $sub->url(
                                 action([\App\Http\Controllers\ReportController::class, 'getProfitLoss']),
                                 __('report.profit_loss'),
-                                ['icon' => '', 'active' => request()->segment(2) == 'profit-loss']
+                                ['icon' => '', 'active' => request()->segment(1) == 'reports' && request()->segment(2) == 'profit-loss']
                             );
                         }
                         // Zakat (Settings > Business Settings > Zakat turns it on)

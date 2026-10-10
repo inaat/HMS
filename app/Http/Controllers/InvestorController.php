@@ -107,6 +107,9 @@ class InvestorController extends Controller
             return ['success' => false, 'msg' => 'This investor has settlements or payouts; set them inactive instead'];
         }
         DB::transaction(function () use ($investor) {
+            foreach ($investor->capitals()->get() as $capital) {
+                $this->unlinkAccount($capital);
+            }
             $investor->capitals()->delete();
             $investor->deals()->delete();
             $investor->delete();
@@ -126,7 +129,9 @@ class InvestorController extends Controller
         $entries = $investor->capitals()->orderByDesc('date')->orderByDesc('id')->get();
         $methods = static::$payment_methods;
 
-        return view('investor.capital', compact('investor', 'entries', 'methods'));
+        $accounts = $this->moneyAccounts($investor->business_id);
+
+        return view('investor.capital', compact('investor', 'entries', 'methods', 'accounts'));
     }
 
     public function storeCapital(Request $request, $id)
@@ -157,16 +162,21 @@ class InvestorController extends Controller
             }
         }
 
-        $investor->capitals()->create([
-            'business_id' => $investor->business_id,
-            'date' => $date,
-            'type' => $request->input('type'),
-            'amount' => $amount,
-            'method' => $request->input('method'),
-            'reference' => $request->input('reference'),
-            'note' => $request->input('note'),
-            'created_by' => auth()->id(),
-        ]);
+        DB::transaction(function () use ($request, $investor, $date, $amount) {
+            $entry = $investor->capitals()->create([
+                'business_id' => $investor->business_id,
+                'date' => $date,
+                'type' => $request->input('type'),
+                'amount' => $amount,
+                'method' => $request->input('method'),
+                'reference' => $request->input('reference'),
+                'note' => $request->input('note'),
+                'created_by' => auth()->id(),
+            ]);
+            // money into / out of a payment account: the account's balance shows it
+            $this->linkAccount($entry, $request, $request->input('type') == 'invest' ? 'credit' : 'debit', $date,
+                ($request->input('type') == 'invest' ? 'Investor capital from ' : 'Capital returned to ').$investor->name);
+        });
 
         return ['success' => true, 'msg' => $request->input('type') == 'invest' ? 'Capital added' : 'Withdrawal saved'];
     }
@@ -184,9 +194,43 @@ class InvestorController extends Controller
         if ($locked) {
             return ['success' => false, 'msg' => 'This entry is inside or before a locked settlement and cannot be deleted'];
         }
+        $this->unlinkAccount($entry);
         $entry->delete();
 
         return ['success' => true, 'msg' => 'Capital entry deleted'];
+    }
+
+    /** Payment accounts for the capital / payout forms (empty when the accounts module is off or not migrated). */
+    protected function moneyAccounts($business_id): array
+    {
+        if (! \Schema::hasColumn('investor_capitals', 'account_id')) {
+            return [];
+        }
+
+        return \App\Account::where('business_id', $business_id)->where('is_closed', 0)->orderBy('name')->pluck('name', 'id')->all();
+    }
+
+    /** Capital / payout paid through a payment account: an entry on that account, remembered on the record. */
+    protected function linkAccount($record, Request $request, string $type, $date, string $note): void
+    {
+        $account_id = (int) $request->input('account_id');
+        if (! $account_id || ! \Schema::hasColumn($record->getTable(), 'account_id')
+            || ! \App\Account::where('business_id', $record->business_id)->where('id', $account_id)->exists()) {
+            return;
+        }
+        $entry = \App\AccountTransaction::createAccountTransaction([
+            'amount' => $record->amount, 'account_id' => $account_id, 'type' => $type,
+            'operation_date' => \Carbon::parse($date)->format('Y-m-d').' '.date('H:i:s'), 'created_by' => auth()->id(),
+            'note' => trim($note.($record->reference ? ' - '.$record->reference : '')),
+        ]);
+        $record->forceFill(['account_id' => $account_id, 'account_transaction_id' => $entry->id])->save();
+    }
+
+    protected function unlinkAccount($record): void
+    {
+        if (! empty($record->account_transaction_id)) {
+            \App\AccountTransaction::where('id', $record->account_transaction_id)->delete();
+        }
     }
 
     //---------- deals ----------
@@ -358,7 +402,9 @@ class InvestorController extends Controller
         $period = $this->periodPayable($investor, $start, $end);
         $report = $this->investorUtil->report($investor->business_id, $investor->id, $start, $end);
 
-        return view('investor.pay', compact('investor', 'balance', 'methods', 'period', 'report'));
+        $accounts = $this->moneyAccounts($investor->business_id);
+
+        return view('investor.pay', compact('investor', 'balance', 'methods', 'period', 'report', 'accounts'));
     }
 
     /**
@@ -445,7 +491,7 @@ class InvestorController extends Controller
                     throw new \RuntimeException('Only '.$this->investorUtil->num_f(max($balance, 0), true).' is still due to '.$investor->name.' (earlier payouts included)');
                 }
             }
-            InvestorPayout::create([
+            $payout = InvestorPayout::create([
                 'business_id' => $investor->business_id,
                 'investor_id' => $investor->id,
                 'settlement_id' => $settlement_id,
@@ -456,6 +502,7 @@ class InvestorController extends Controller
                 'note' => $request->input('note'),
                 'created_by' => auth()->id(),
             ]);
+            $this->linkAccount($payout, $request, 'debit', $payout->paid_on, 'Profit share paid to '.$investor->name);
         });
     }
 
@@ -464,7 +511,9 @@ class InvestorController extends Controller
         if (! auth()->user()->can('investor.payout')) {
             abort(403, 'Unauthorized action.');
         }
-        $this->findInvestor($id)->payouts()->findOrFail($payout_id)->delete();
+        $payout = $this->findInvestor($id)->payouts()->findOrFail($payout_id);
+        $this->unlinkAccount($payout);
+        $payout->delete();
 
         return ['success' => true, 'msg' => 'Payout deleted'];
     }

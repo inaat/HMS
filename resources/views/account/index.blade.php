@@ -11,6 +11,14 @@
 
     <!-- Main content -->
     <section class="content">
+        {{-- Payment accounts are only the places money sits; every other account is in the chart of accounts --}}
+        @if (\App\Utils\LedgerUtil::installed())
+            <div class="alert alert-info" style="background:#eff6ff; color:#1e3a5f; border-color:#bfdbfe;">
+                <i class="fa fa-info-circle"></i> <b>Accounts</b> below are the places your money sits: cash boxes (type <b>Cash accounts</b>) and banks / wallets
+                (type <b>Bank accounts</b>); only these are chosen when paying. <b>Business accounts</b> (receivable, payable, stock, capital …)
+                are listed under them with their account book; all accounts: <a href="{{ action([\App\Http\Controllers\LedgerController::class, 'chart']) }}"><b>Chart of accounts</b></a>.
+            </div>
+        @endif
         @if (!empty($not_linked_payments))
             <div class="row">
                 <div class="col-sm-12">
@@ -108,6 +116,7 @@
                                             </div>
                                         </div>
                                     </div>
+                                    @include('account.partials.business_accounts')
                                 </div>
                                 {{--
                     <div class="tab-pane" id="capital_accounts">
@@ -138,18 +147,36 @@
                                         <div class="col-md-12">
                                             <table class="table table-striped table-bordered" id="account_types_table"
                                                 style="width: 100%;">
+                                                {{-- Same list as Accounts > Chart of accounts: accounts the books post to (or that are
+                                                     in use) can be edited but not deleted --}}
+                                                @php
+                                                    $detail_labels = collect(\App\Http\Controllers\LedgerController::DETAIL_TYPES)->collapse();
+                                                    $class_labels = \App\Http\Controllers\LedgerController::CLASS_LABELS;
+                                                    $has_chart = \Schema::hasColumn('account_types', 'system_key');
+                                                    $used_types = $has_chart && \Schema::hasTable('ledger_lines')
+                                                        ? \DB::table('ledger_lines')->where('business_id', session('user.business_id'))->distinct()->pluck('account_type_id')->flip() : collect();
+                                                    $with_accounts = \DB::table('accounts')->where('business_id', session('user.business_id'))->whereNull('deleted_at')->distinct()->pluck('account_type_id')->flip();
+                                                    $sort = fn ($types) => $types->sortBy(fn ($t) => ($t->code ?? 'zzzz').'|'.strtolower($t->name));
+                                                    $locked = fn ($t) => ! empty($t->system_key) || ! empty($t->expense_category_id) || isset($used_types[$t->id]) || isset($with_accounts[$t->id]);
+                                                @endphp
                                                 <thead>
                                                     <tr>
+                                                        @if ($has_chart)<th style="width:70px;">Code</th>@endif
                                                         <th>@lang('lang_v1.name')</th>
+                                                        @if ($has_chart)<th>Type</th><th>Normal side</th>@endif
                                                         <th>@lang('messages.action')</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    @foreach ($account_types as $account_type)
-                                                        <tr class="account_type_{{ $account_type->id }}">
+                                                    @foreach ($sort($account_types) as $account_type)
+                                                        <tr class="account_type_{{ $account_type->id }}" style="background:#e0f2fe;">
+                                                            @if ($has_chart)<th>{{ $account_type->code }}</th>@endif
                                                             <th>{{ $account_type->name }}</th>
+                                                            @if ($has_chart)
+                                                                <th>{{ $class_labels[$account_type->classification] ?? '' }}</th>
+                                                                <th>{{ $account_type->classification ? ($account_type->debit_increases ? 'Debit' : 'Credit') : '' }}</th>
+                                                            @endif
                                                             <td>
-
                                                                 {!! Form::open([
                                                                     'url' => action([\App\Http\Controllers\AccountTypeController::class, 'destroy'], $account_type->id),
                                                                     'method' => 'delete',
@@ -158,19 +185,23 @@
                                                                     data-href="{{ action([\App\Http\Controllers\AccountTypeController::class, 'edit'], $account_type->id) }}"
                                                                     data-container="#account_type_modal">
                                                                     <i class="fa fa-edit"></i> @lang('messages.edit')</button>
-
-                                                                <button type="button"
-                                                                    class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline  tw-dw-btn-error delete_account_type">
-                                                                    <i class="fa fa-trash"></i> @lang('messages.delete')</button>
+                                                                @if (! $locked($account_type) && $account_type->sub_types->isEmpty())
+                                                                    <button type="button"
+                                                                        class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline  tw-dw-btn-error delete_account_type">
+                                                                        <i class="fa fa-trash"></i> @lang('messages.delete')</button>
+                                                                @endif
                                                                 {!! Form::close() !!}
                                                             </td>
                                                         </tr>
-                                                        @foreach ($account_type->sub_types as $sub_type)
+                                                        @foreach ($sort($account_type->sub_types) as $sub_type)
                                                             <tr>
+                                                                @if ($has_chart)<td>{{ $sub_type->code }}</td>@endif
                                                                 <td>&nbsp;&nbsp;-- {{ $sub_type->name }}</td>
+                                                                @if ($has_chart)
+                                                                    <td>{{ $detail_labels[$sub_type->detail_type] ?? '' }}</td>
+                                                                    <td>{{ $sub_type->debit_increases === null ? '' : ($sub_type->debit_increases ? 'Debit' : 'Credit') }}</td>
+                                                                @endif
                                                                 <td>
-
-
                                                                     {!! Form::open([
                                                                         'url' => action([\App\Http\Controllers\AccountTypeController::class, 'destroy'], $sub_type->id),
                                                                         'method' => 'delete',
@@ -179,9 +210,13 @@
                                                                         data-href="{{ action([\App\Http\Controllers\AccountTypeController::class, 'edit'], $sub_type->id) }}"
                                                                         data-container="#account_type_modal">
                                                                         <i class="fa fa-edit"></i> @lang('messages.edit')</button>
-                                                                    <button type="button"
-                                                                        class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline  tw-dw-btn-error delete_account_type">
-                                                                        <i class="fa fa-trash"></i> @lang('messages.delete')</button>
+                                                                    @if ($locked($sub_type))
+                                                                        <span class="text-muted small" title="The books post to this account, or payment accounts use it">in use</span>
+                                                                    @else
+                                                                        <button type="button"
+                                                                            class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline  tw-dw-btn-error delete_account_type">
+                                                                            <i class="fa fa-trash"></i> @lang('messages.delete')</button>
+                                                                    @endif
                                                                     {!! Form::close() !!}
                                                                 </td>
                                                             </tr>
