@@ -65,6 +65,16 @@
 
     {{-- Cloud sync: status, Sync now and progress bar; layouts/partials/mobile_autosync also syncs every 2 minutes. --}}
     <div id="cloud-sync" class="no-print" style="background: #fff; border: 1px solid #e3e7ed; border-radius: 12px; padding: 12px 16px; margin-bottom: 12px;">
+        @if (config('mobile_sync.role') === 'single')
+        {{-- Single server: bookers send straight to this POS; no sync to run or wait for. --}}
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <span style="font-size: 22px;">✅</span>
+            <div>
+                <b>Live</b>
+                <div class="text-muted" style="font-size: 13px;">Bookers send straight to this POS: new orders and payments show as soon as you open or refresh this page. Phones get the latest stock, prices and customers when they sync.</div>
+            </div>
+        </div>
+        @else
         <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
             <span id="cs-icon" style="font-size: 22px;">☁️</span>
             <div style="flex: 1; min-width: 220px;">
@@ -76,6 +86,7 @@
         <div id="cs-bar-wrap" class="progress" style="margin: 10px 0 0; height: 18px; display: none;">
             <div id="cs-bar" class="progress-bar progress-bar-striped active" role="progressbar" style="width: 0%; min-width: 2em;">0%</div>
         </div>
+        @endif
         {{-- Booker app settings: reach the phones with the next sync --}}
         @can('business_settings.access')
             {!! Form::open(['url' => action([\App\Http\Controllers\MobileOrderController::class, 'saveSettings']), 'method' => 'post',
@@ -290,6 +301,7 @@
         @endif
         __currency_convert_recursively($('.content'));
 
+        @if (config('mobile_sync.role') !== 'single')
         var statusUrl = '{{ action([\App\Http\Controllers\MobileOrderController::class, 'syncStatus']) }}';
         var startUrl = '{{ action([\App\Http\Controllers\MobileOrderController::class, 'syncNow']) }}';
         var timer = null, wasRunning = false, shownWaiting = {{ (int) $counts->sum() }};
@@ -347,6 +359,7 @@
         });
 
         poll();
+        @endif
 
         // Bulk: show the button with the count of ticked rows; send the ticked ids.
         function bulkRefresh() {

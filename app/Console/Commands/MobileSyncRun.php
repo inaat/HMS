@@ -20,7 +20,9 @@ use Illuminate\Support\Facades\Http;
  */
 class MobileSyncRun extends Command
 {
-    protected $signature = 'mobile-sync:run';
+    protected $signature = 'mobile-sync:run
+        {--collect : only collect orders / payments and report statuses (single server: run when Mobile orders opens)}
+        {--push : only push bookers, products, stock and customers (single server: run when a phone syncs)}';
 
     protected $description = 'Order-booker sync with the cloud copy: collect orders and payments, report statuses, push stock and customers';
 
@@ -39,12 +41,24 @@ class MobileSyncRun extends Command
         }
 
         // One run at a time: the Task Scheduler, every open POS page and "Sync now" may all ask at once.
-        $lock = fopen(storage_path('app/mobile-sync-'.preg_replace('/\W/', '', DB::getDatabaseName()).'.lock'), 'c');
-        if (! flock($lock, LOCK_EX | LOCK_NB)) {
+        // Shared hosting may not let us write storage/app: fall back to the temp folder, and run unlocked if neither works.
+        $name = 'mobile-sync-'.preg_replace('/\W/', '', DB::getDatabaseName()).'.lock';
+        $lock = @fopen(storage_path('app/'.$name), 'c') ?: @fopen(sys_get_temp_dir().'/'.$name, 'c');
+        if ($lock && ! flock($lock, LOCK_EX | LOCK_NB)) {
             $this->line('A sync is already running.');
 
             return 0;
         }
+
+        // --collect / --push: one half only, run inline by the single server (no Sync panel progress for those).
+        $partial = $this->option('collect') || $this->option('push');
+        $collect = ! $this->option('push');
+        $push = ! $this->option('collect');
+        $progress = function ($step, $percent) use ($partial) {
+            if (! $partial) {
+                SyncStatus::progress($step, $percent);
+            }
+        };
 
         $business_id = config('mobile_sync.business_id');
         $location_id = config('mobile_sync.location_id');
@@ -53,9 +67,11 @@ class MobileSyncRun extends Command
 
         try {
             // 1. Collect.
-            SyncStatus::progress('Collecting orders and payments from bookers', 5);
-            $response = $this->send('GET', '/api/sync/inbox');
-            if ($response->successful()) {
+            $progress('Collecting orders and payments from bookers', 5);
+            $response = $collect ? $this->send('GET', '/api/sync/inbox') : null;
+            if (! $collect) {
+                // --push only
+            } elseif ($response->successful()) {
                 $added = $inbox->store((array) $response->json());
                 // Which phone each booker is logged in on (Sell > Mobile orders > Booker phones)
                 if (is_array($response->json('sessions'))) {
@@ -70,9 +86,9 @@ class MobileSyncRun extends Command
             }
 
             // 2. Report statuses (also marks orders whose sales order has been invoiced).
-            SyncStatus::progress('Sending order statuses to bookers', 15);
-            $inbox->markInvoiced();
-            $ack = $inbox->pendingAcks();
+            $progress('Sending order statuses to bookers', 15);
+            $collect && $inbox->markInvoiced();
+            $ack = $collect ? $inbox->pendingAcks() : ['ids' => []];
             if ($inbox->customerUpdateAcks) {
                 $ack['customer_updates'] = $inbox->customerUpdateAcks;
             }
@@ -92,10 +108,12 @@ class MobileSyncRun extends Command
             }
 
             // 3. Push.
-            SyncStatus::progress('Sending products, stock and customers to bookers', 25);
-            $snapshot = (new LocalSnapshot($business_id, $location_id))->all();
-            $response = $this->send('POST', '/api/sync/push', $snapshot);
-            if ($response->successful()) {
+            $progress('Sending products, stock and customers to bookers', 25);
+            $snapshot = $push ? (new LocalSnapshot($business_id, $location_id))->all() : [];
+            $response = $push ? $this->send('POST', '/api/sync/push', $snapshot) : null;
+            if (! $push) {
+                // --collect only
+            } elseif ($response->successful()) {
                 LocalSnapshot::logoutsDone((array) $response->json('result.logged_out'));
                 foreach (array_intersect_key((array) $response->json('result'), $snapshot) as $set => $counts) {
                     if (! is_array($snapshot[$set]) || ! isset($counts['inserted'])) {
@@ -110,7 +128,7 @@ class MobileSyncRun extends Command
 
             // 4. Copy every other local change to the cloud database (MOBILE_SYNC_MIRROR=true); it reports its own
             // progress from 40% to 100%.
-            if (config('mobile_sync.mirror') && ! $this->single) {
+            if (config('mobile_sync.mirror') && ! $this->single && ! $partial) {
                 SyncStatus::progress('Copying shop data to the cloud', 40);
                 if ($this->call('mobile-sync:mirror') !== 0) {
                     $this->errors[] = json_decode((string) DB::table('system')->where('key', 'mobile_sync_last_mirror')->value('value'), true)['what'] ?? 'Copy failed';
@@ -134,8 +152,12 @@ class MobileSyncRun extends Command
         DB::table('system')->updateOrInsert(['key' => 'mobile_sync_last_run'], ['value' => json_encode([
             'at' => now()->toDateTimeString(), 'ok' => $ok, 'offline' => $offline, 'error' => $ok ? null : implode(' | ', $this->errors),
         ])]);
-        SyncStatus::done($ok, $ok ? 'Everything is up to date.' : implode(' | ', $this->errors), $offline);
-        flock($lock, LOCK_UN);
+        if (! $partial) {
+            SyncStatus::done($ok, $ok ? 'Everything is up to date.' : implode(' | ', $this->errors), $offline);
+        }
+        if ($lock) {
+            flock($lock, LOCK_UN);
+        }
 
         return $ok ? 0 : 1;
     }

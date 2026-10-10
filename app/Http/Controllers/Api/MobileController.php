@@ -102,6 +102,15 @@ class MobileController extends Controller
      */
     public function sync(Request $request)
     {
+        // Single server: refresh the booker tables from the POS (stock, prices, customers) first, at most once a minute.
+        if (config('mobile_sync.role') === 'single' && \Cache::add('mobile_single_push', 1, 60)) {
+            try {
+                \Artisan::call('mobile-sync:run', ['--push' => true]);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
         $user = $request->attributes->get('mb_user');
         $server_time = now()->toDateTimeString();
         $since = $request->input('since');

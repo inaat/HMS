@@ -1,6 +1,6 @@
 {{-- Cloud sync without Task Scheduler or commands: while any POS page is open on the shop PC, ask for a sync every
      2 minutes. The server starts it in the background only when none is running (App\Services\MobileSync\SyncStatus). --}}
-@if (in_array(config('mobile_sync.role'), ['local', 'single'], true) && auth()->check())
+@if (config('mobile_sync.role') === 'local' && auth()->check())
 <script>
     (function () {
         var url = '{{ action([\App\Http\Controllers\MobileOrderController::class, 'syncNow']) }}';

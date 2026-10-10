@@ -41,6 +41,15 @@ class MobileOrderController extends Controller
     {
         $this->authorizeAccess();
 
+        // Single server: the bookers' orders are already in this database; pick them up now (no background sync).
+        if (config('mobile_sync.role') === 'single') {
+            try {
+                \Artisan::call('mobile-sync:run', ['--collect' => true]);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
         $kind = $request->input('kind') === 'payment' ? 'payment' : 'order';
         $status = $request->input('status', 'waiting');
 
