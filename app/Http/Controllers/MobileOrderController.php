@@ -41,13 +41,11 @@ class MobileOrderController extends Controller
     {
         $this->authorizeAccess();
 
-        // Single server: the bookers' orders are already in this database; pick them up now (no background sync).
+        // Single server: pick up the bookers' orders now; also refresh bookers / stock / customers once a minute
+        // (a new booker can log in on the phone right after this page opens).
         if (config('mobile_sync.role') === 'single') {
-            try {
-                \Artisan::call('mobile-sync:run', ['--collect' => true]);
-            } catch (\Throwable $e) {
-                report($e);
-            }
+            $empty = ! DB::table('mb_users')->exists();
+            SyncStatus::runSingle(($empty || \Cache::add('mobile_single_push', 1, 60)) ? '' : '--collect');
         }
 
         $kind = $request->input('kind') === 'payment' ? 'payment' : 'order';

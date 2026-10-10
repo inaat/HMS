@@ -17,6 +17,23 @@ class SyncStatus
     // A run that has not reported for this long has died (PC slept, PHP killed); a new one may start.
     const STALE_SECONDS = 300;
 
+    /**
+     * MOBILE_SYNC_ROLE=single: run mobile-sync:run inside this request ($option '--collect' / '--push' = one half).
+     * Fills the booker tables (bookers, products, stock, customers) and brings their orders into Mobile orders.
+     */
+    public static function runSingle(string $option = ''): bool
+    {
+        @set_time_limit(300);
+        try {
+            return \Illuminate\Support\Facades\Artisan::call('mobile-sync:run', $option ? [$option => true] : []) === 0;
+        } catch (\Throwable $e) {
+            report($e);
+            self::done(false, 'Sync stopped: '.mb_substr($e->getMessage(), 0, 200));
+
+            return false;
+        }
+    }
+
     public static function progress(string $step, int $percent, string $detail = ''): void
     {
         self::put(['running' => true, 'step' => $step, 'percent' => max(0, min(100, $percent)), 'detail' => $detail]);
@@ -44,7 +61,10 @@ class SyncStatus
     /** Start mobile-sync:run in the background unless one is running. Returns whether it started. */
     public static function start(): bool
     {
-        // single server: nothing runs in the background (Mobile orders and phone syncs do it inline)
+        // Single server: no background process (shared hosting); run it now, it takes a few seconds with no HTTP hop.
+        if (config('mobile_sync.role') === 'single') {
+            return self::runSingle();
+        }
         if (config('mobile_sync.role') !== 'local' || ! empty(self::get()['running'])) {
             return false;
         }

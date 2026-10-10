@@ -67,12 +67,17 @@
     <div id="cloud-sync" class="no-print" style="background: #fff; border: 1px solid #e3e7ed; border-radius: 12px; padding: 12px 16px; margin-bottom: 12px;">
         @if (config('mobile_sync.role') === 'single')
         {{-- Single server: bookers send straight to this POS; no sync to run or wait for. --}}
-        <div style="display: flex; gap: 10px; align-items: center;">
-            <span style="font-size: 22px;">✅</span>
-            <div>
-                <b>Live</b>
+        @php $last_run = json_decode((string) DB::table('system')->where('key', 'mobile_sync_last_run')->value('value'), true) ?: []; @endphp
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <span style="font-size: 22px;">{{ ($last_run['ok'] ?? true) ? '✅' : '⚠️' }}</span>
+            <div style="flex: 1; min-width: 220px;">
+                <b>Live</b> <span class="text-muted" style="font-size: 12px;">· last sync {{ ! empty($last_run['at']) ? \Carbon\Carbon::parse($last_run['at'])->diffForHumans() : 'never' }} · {{ DB::table('mb_users')->where('allow_login', 1)->count() }} booker(s), {{ DB::table('mb_products')->where('active', 1)->count() }} products on phones</span>
                 <div class="text-muted" style="font-size: 13px;">Bookers send straight to this POS: new orders and payments show as soon as you open or refresh this page. Phones get the latest stock, prices and customers when they sync.</div>
+                @if (empty($last_run['ok']) && ! empty($last_run['error']))
+                    <div class="text-danger" style="font-size: 13px;">{{ $last_run['error'] }}</div>
+                @endif
             </div>
+            <button type="button" id="cs-now-single" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-primary tw-text-white"><i class="fa fa-sync"></i> Sync now</button>
         </div>
         @else
         <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
@@ -359,6 +364,13 @@
         });
 
         poll();
+        @else
+        // Single server: the sync runs inside this request (a few seconds), then show the result.
+        $('#cs-now-single').on('click', function () {
+            $(this).prop('disabled', true).html('<i class="fa fa-sync fa-spin"></i> Syncing…');
+            $.post('{{ action([\App\Http\Controllers\MobileOrderController::class, 'syncNow']) }}',
+                {_token: $('meta[name="csrf-token"]').attr('content')}).always(function () { location.reload(); });
+        });
         @endif
 
         // Bulk: show the button with the count of ticked rows; send the ticked ids.

@@ -35,6 +35,11 @@ class MobileController extends Controller
         ]);
 
         $user = DB::table('mb_users')->where('username', $request->input('username'))->where('allow_login', 1)->first();
+        if (config('mobile_sync.role') === 'single' && (empty($user) || ! Hash::check($request->input('password'), $user->password))) {
+            // Single server: a booker just added (or password just changed) in the POS; bring the booker list up to date.
+            \App\Services\MobileSync\SyncStatus::runSingle('--push');
+            $user = DB::table('mb_users')->where('username', $request->input('username'))->where('allow_login', 1)->first();
+        }
         if (empty($user) || ! Hash::check($request->input('password'), $user->password)) {
             return response()->json(['message' => 'Wrong username or password'], 422);
         }
@@ -104,11 +109,7 @@ class MobileController extends Controller
     {
         // Single server: refresh the booker tables from the POS (stock, prices, customers) first, at most once a minute.
         if (config('mobile_sync.role') === 'single' && \Cache::add('mobile_single_push', 1, 60)) {
-            try {
-                \Artisan::call('mobile-sync:run', ['--push' => true]);
-            } catch (\Throwable $e) {
-                report($e);
-            }
+            \App\Services\MobileSync\SyncStatus::runSingle('--push');
         }
 
         $user = $request->attributes->get('mb_user');
