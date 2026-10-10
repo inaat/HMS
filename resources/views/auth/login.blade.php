@@ -106,16 +106,36 @@
     @endif
         </div>
         <div class="col-md-4">
-            <div
-                class="tw-p-5 md:tw-p-6 tw-mb-4 tw-rounded-2xl tw-transition-all tw-duration-200 tw-bg-white tw-shadow-sm tw-ring-1 tw-ring-gray-200">
-                <div class="tw-flex tw-flex-col tw-gap-4 tw-dw-rounded-box tw-dw-p-6 tw-dw-max-w-md">
-                    <div class="tw-flex tw-items-center tw-flex-col">
-                        <h1 class="tw-text-lg md:tw-text-xl tw-font-semibold tw-text-[#1e1e1e]">
-                            @lang('lang_v1.welcome_back')
-                        </h1>
-                        <h2 class="tw-text-sm tw-font-medium tw-text-gray-500">
-                            @lang('lang_v1.login_to_your') {{ config('app.name', 'ultimatePOS') }}
-                        </h2>
+            {{-- Fatoora Now login card (brand colours in layouts/partials/extracss_auth) --}}
+            <style>
+                .fn-card { background: #fff; border-radius: 22px; padding: 30px 28px 26px; box-shadow: 0 24px 60px rgba(8, 40, 25, .28); max-width: 440px; margin: 0 auto 16px; }
+                .fn-card h1 { color: var(--fn-ink); font-size: 22px; font-weight: 800; margin: 0; letter-spacing: -.01em; }
+                .fn-card h2 { color: var(--fn-muted); font-size: 14px; font-weight: 500; margin: 6px 0 0; }
+                .fn-card .fn-label { color: var(--fn-ink); font-size: 13px; font-weight: 600; }
+                .fn-card .fn-input { width: 100%; height: 48px; border: 1.5px solid #D5E2DA; border-radius: 12px; padding: 0 14px; background: var(--fn-surface); color: var(--fn-ink); font-size: 15px; font-weight: 500; outline: none; transition: border-color .15s, box-shadow .15s, background .15s; }
+                .fn-card .fn-input::placeholder { color: #8FA398; font-weight: 500; }
+                .fn-card .fn-input:focus { border-color: var(--fn-green); background: #fff; box-shadow: 0 0 0 4px rgba(46, 158, 106, .16); }
+                .fn-card .has-error .fn-input { border-color: #DC2626; }
+                .fn-card .help-block { color: #DC2626; font-size: 13px; margin: 6px 0 0; }
+                .fn-card .fn-pass { position: relative; }
+                .fn-card .fn-pass .fn-input { padding-right: 48px; }
+                .fn-card .show_hide_icon { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); background: none; border: 0; padding: 6px; opacity: .65; }
+                .fn-card .show_hide_icon:hover { opacity: 1; }
+                .fn-card .fn-link { color: var(--fn-green-700); font-size: 13px; font-weight: 600; }
+                .fn-card .fn-link:hover { color: var(--fn-green); text-decoration: underline; }
+                .fn-card .tw-dw-checkbox { --chkbg: var(--fn-green); --chkfg: #fff; border-color: #B9CCC1; }
+                .fn-card .fn-btn { width: 100%; height: 50px; border: 0; border-radius: 12px; background: var(--fn-green); color: var(--fn-on-brand); font-size: 16px; font-weight: 700; margin-top: 8px; box-shadow: 0 8px 20px rgba(46, 158, 106, .35); transition: background .15s, transform .05s; }
+                .fn-card .fn-btn:hover { background: var(--fn-green-700); }
+                .fn-card .fn-btn:active { transform: translateY(1px); }
+                .fn-card .fn-btn:focus-visible { outline: none; box-shadow: 0 0 0 4px rgba(46, 158, 106, .3); }
+                .fn-foot { text-align: center; color: rgba(255, 255, 255, .75); font-size: 12px; }
+                @media (max-width: 767px) { .fn-card { padding: 24px 18px 20px; border-radius: 18px; } }
+            </style>
+            <div class="fn-card">
+                <div class="tw-flex tw-flex-col tw-gap-4">
+                    <div class="tw-flex tw-items-center tw-flex-col tw-text-center">
+                        <h1>@lang('lang_v1.welcome_back')</h1>
+                        <h2>@lang('lang_v1.login_to_your') {{ config('app.name', 'Fatoora Now') }}</h2>
                     </div>
 
                     <form method="POST" action="{{ route('login') }}" id="login-form">
@@ -123,12 +143,10 @@
                         <div class="form-group has-feedback {{ $errors->has('username') ? ' has-error' : '' }}">
                             <label class="tw-dw-form-control">
                                 <div class="tw-dw-label">
-                                    <span
-                                        class="tw-text-xs md:tw-text-sm tw-font-medium tw-text-black">@lang('Username')</span>
+                                    <span class="fn-label">@lang('Username')</span>
                                 </div>
 
-                                <input
-                                    class="tw-border tw-border-[#D1D5DA] tw-outline-none tw-h-12 tw-bg-transparent tw-rounded-lg tw-px-3 tw-font-medium tw-text-black placeholder:tw-text-gray-500 placeholder:tw-font-medium"
+                                <input class="fn-input" autocomplete="username"
                                     name="username" required autofocus placeholder="@lang('lang_v1.username')"
                                     data-last-active-input="" id="username" type="text" name="username"
                                     value="{{ $username }}" />
@@ -143,27 +161,25 @@
                         <div class="form-group has-feedback {{ $errors->has('password') ? ' has-error' : '' }}">
                             <label class="tw-dw-form-control">
                                 <div class="tw-dw-label">
-                                    <span
-                                        class="tw-text-xs md:tw-text-sm tw-font-medium tw-text-black">@lang('Password')</span>
+                                    <span class="fn-label">@lang('Password')</span>
                                     @if (config('app.env') != 'demo')
-                                        <a href="{{ route('password.request') }}"
-                                            class="tw-text-xs md:tw-text-sm tw-font-medium tw-bg-gradient-to-r tw-from-indigo-500 tw-to-blue-500 tw-inline-block tw-text-transparent tw-bg-clip-text hover:tw-text-[#467BF5]"
+                                        <a href="{{ route('password.request') }}" class="fn-link"
                                             tabindex="-1">@lang('lang_v1.forgot_your_password')</a>
                                     @endif
                                 </div>
 
-                                <input
-                                    class="tw-border tw-border-[#D1D5DA] tw-outline-none tw-h-12 tw-bg-transparent tw-rounded-lg tw-px-3 tw-font-medium tw-text-black placeholder:tw-text-gray-500 placeholder:tw-font-medium"
+                                <div class="fn-pass">
+                                <input class="fn-input" autocomplete="current-password"
                                     id="password" type="password" name="password" value="{{ $password }}" required
                                     placeholder="@lang('lang_v1.password')" />
-                                <button type="button" id="show_hide_icon" class="show_hide_icon"
-                                    style="position: absolute; top:48px;right:5px;">
+                                <button type="button" id="show_hide_icon" class="show_hide_icon" aria-label="Show password">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-eye tw-w-6" viewBox="0 0 24 24" stroke-width="1.5" stroke="#000000" fill="none" stroke-linecap="round" stroke-linejoin="round">
                                         <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
                                         <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
                                         <path d="M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6" />
                                     </svg>
                                 </button>
+                                </div>
                             </label>
                             @if ($errors->has('password'))
                                 <span class="help-block">
@@ -177,8 +193,7 @@
                             <label class="tw-dw-cursor-pointer tw-dw-label tw-self-start tw-gap-2">
                                 <input type="checkbox" name="remember" {{ old('remember') ? 'checked' : '' }}
                                     class="tw-dw-checkbox">
-                                <span
-                                    class="tw-text-xs md:tw-text-sm tw-font-medium tw-text-black tw-mt-[0.2rem]">@lang('lang_v1.remember_me')</span>
+                                <span class="fn-label tw-mt-[0.2rem]" style="font-weight: 500;">@lang('lang_v1.remember_me')</span>
                             </label>
                         </div>
                         @if(config('constants.enable_recaptcha'))
@@ -193,10 +208,7 @@
                             </div>
                         </div>
                         @endif
-                        <button type="submit"
-                            class="tw-bg-gradient-to-r tw-from-indigo-500 tw-to-blue-500 tw-h-12 tw-rounded-xl tw-text-sm md:tw-text-base tw-text-white tw-font-semibold tw-w-full tw-max-w-full mt-2 hover:tw-from-indigo-600 hover:tw-to-blue-600 focus:tw-outline-none focus:tw-ring-2 focus:tw-ring-blue-500 focus:tw-ring-offset-2 active:tw-from-indigo-700 active:tw-to-blue-700">
-                            @lang('lang_v1.login')
-                        </button>
+                        <button type="submit" class="fn-btn">@lang('lang_v1.login')</button>
                     </form>
 
                     <div class="tw-flex tw-items-center tw-flex-col">
@@ -207,13 +219,13 @@
                             @if (config('constants.allow_registration'))
                                 <a href="{{ route('business.getRegister') }}@if (!empty(request()->lang)) {{ '?lang=' . request()->lang }} @endif"
                                     class="tw-text-sm tw-font-medium tw-text-gray-500 hover:tw-text-gray-500 tw-mt-2">{{ __('business.not_yet_registered') }}
-                                    <span
-                                        class="tw-text-sm tw-font-medium tw-bg-gradient-to-r tw-from-indigo-500 tw-to-blue-500 tw-inline-block tw-text-transparent tw-bg-clip-text hover:tw-text-[#467BF5] hover:tw-underline">{{ __('business.register_now') }}</span></a>
+                                    <span class="fn-link">{{ __('business.register_now') }}</span></a>
                             @endif
                         @endif
                     </div>
                 </div>
             </div>
+            <div class="fn-foot">© {{ date('Y') }} {{ config('app.name', 'Fatoora Now') }}</div>
         </div>
         <div class="col-md-4"></div>
     </div>

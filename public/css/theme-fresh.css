@@ -189,6 +189,33 @@ body.theme-fresh footer {
 /* dashboard: the light page now shows through behind the stat cards */
 body.theme-fresh .dash-v2 { background: transparent; }
 
+/* ---------- login / register pages (layouts/auth2: body.theme-fresh.fn-auth) ---------- */
+body.theme-fresh.fn-auth {
+    min-height: 100vh;
+    background:
+        radial-gradient(700px 420px at 50% -120px, rgba(47, 158, 110, .16), transparent 70%),
+        linear-gradient(180deg, #f6f9f3 0%, #eef5ef 100%) fixed !important;
+}
+/* app.css paints .right-col blue-violet; the light page shows through instead */
+body.theme-fresh.fn-auth .right-col { background: transparent !important; min-height: 100vh; }
+body.theme-fresh.fn-auth h1 { color: var(--tf-ink); }
+body.theme-fresh.fn-auth .fn-brand { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 0 auto 22px; text-align: center; }
+body.theme-fresh.fn-auth .fn-brand img { width: 76px; height: 76px; border-radius: 20px; box-shadow: 0 10px 26px rgba(31, 122, 80, .28); }
+body.theme-fresh.fn-auth .fn-brand .fn-name { color: var(--tf-ink); font-size: 26px; font-weight: 800; letter-spacing: -.02em; line-height: 1; }
+body.theme-fresh.fn-auth .fn-brand .fn-tag { color: var(--tf-muted); font-size: 14px; font-weight: 500; }
+/* language switch and top links: dark text on the light page */
+body.theme-fresh.fn-auth .tw-dw-dropdown > summary,
+body.theme-fresh.fn-auth .tw-absolute a.tw-text-white,
+body.theme-fresh.fn-auth .tw-absolute .tw-text-white { color: var(--tf-ink) !important; }
+body.theme-fresh.fn-auth .tw-absolute .tw-border-white { border-color: var(--tf-green) !important; }
+/* the login card: white, soft green-tinted shadow and border */
+body.theme-fresh.fn-auth .fn-card { border: 1px solid var(--tf-line); box-shadow: 0 18px 50px rgba(31, 45, 39, .10) !important; }
+body.theme-fresh.fn-auth .fn-foot { color: var(--tf-muted) !important; }
+@media (max-width: 767px) {
+    body.theme-fresh.fn-auth .fn-brand img { width: 64px; height: 64px; border-radius: 16px; }
+    body.theme-fresh.fn-auth .fn-brand .fn-name { font-size: 22px; }
+}
+
 /* ---------- responsive ---------- */
 /* tablets: header buttons a little tighter, cards a bit less rounded */
 @media (max-width: 991.98px) {

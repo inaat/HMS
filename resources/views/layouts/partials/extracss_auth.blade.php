@@ -77,13 +77,11 @@
             transform: rotate(315deg);
         }
     </style>
+    {{-- Login / register pages use the app's light "fresh" theme: public/css/theme-fresh.css (body.theme-fresh.fn-auth) --}}
     <style>
-        body {
-            background: linear-gradient(to right, #6366f1, #3b82f6);
-        }
-
-        h1 {
-            color: #fff;
+        :root {
+            --fn-surface: #F4F8F5; --fn-ink: #12261C; --fn-muted: #4A5E53;
+            --fn-green: #2E9E6A; --fn-green-700: #1F7A50; --fn-on-brand: #FFFFFF;
         }
     </style>
     <style>
