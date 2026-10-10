@@ -162,8 +162,135 @@ class ReportController extends Controller
         $location_id = $request->input('location_id');
         $rows = $this->transactionUtil->getMissingPurchases($business_id, $location_id);
         $business_locations = BusinessLocation::forDropdown($business_id, true);
+        $suppliers = \App\Contact::suppliersDropdown($business_id, false);
 
-        return view('report.missing_purchases', compact('rows', 'business_locations', 'location_id'));
+        return view('report.missing_purchases', compact('rows', 'business_locations', 'location_id', 'suppliers'));
+    }
+
+    /**
+     * Missing purchases > Create purchases automatically, step 1: the ticked products grouped into one purchase per
+     * supplier and location. A product goes to the supplier it was last bought from, else to the chosen supplier.
+     */
+    public function missingPurchasesPlan(Request $request)
+    {
+        if (! auth()->user()->can('purchase.create')) {
+            abort(403, 'Unauthorized action.');
+        }
+        $business_id = $request->session()->get('user.business_id');
+        $default_supplier = (int) $request->input('supplier_id');
+        $items = collect((array) $request->input('items', []));
+        $variation_ids = $items->pluck('variation_id')->map(fn ($v) => (int) $v)->unique()->all();
+
+        // last supplier per variation (latest received purchase)
+        $last_supplier = DB::table('purchase_lines as pl')->join('transactions as t', 't.id', '=', 'pl.transaction_id')
+            ->where('t.business_id', $business_id)->where('t.type', 'purchase')->whereNotNull('t.contact_id')
+            ->whereIn('pl.variation_id', $variation_ids ?: [0])
+            ->orderBy('t.transaction_date')->get(['pl.variation_id', 't.contact_id'])
+            ->pluck('contact_id', 'variation_id');
+        $names = DB::table('contacts')->where('business_id', $business_id)->pluck(DB::raw("COALESCE(NULLIF(supplier_business_name, ''), name)"), 'id');
+        $prices = DB::table('variations')->whereIn('id', $variation_ids ?: [0])->pluck('default_purchase_price', 'id');
+
+        $groups = [];
+        $no_supplier = 0;
+        foreach ($items as $item) {
+            // never purchased: one group with no supplier, the user picks it on the screen
+            $supplier = (int) ($last_supplier[(int) $item['variation_id']] ?? $default_supplier);
+            if (! $supplier) {
+                $no_supplier++;
+            }
+            $key = $supplier.'-'.(int) $item['location_id'];
+            $groups[$key] = $groups[$key] ?? ['supplier_id' => $supplier ?: null,
+                'supplier' => $supplier ? ($names[$supplier] ?? '#'.$supplier) : 'Never purchased before',
+                'location_id' => (int) $item['location_id'], 'items' => [], 'total' => 0];
+            $groups[$key]['items'][] = $item;
+            $groups[$key]['total'] += (float) $item['qty'] * (float) ($prices[(int) $item['variation_id']] ?? 0);
+        }
+
+        return ['groups' => array_values($groups), 'no_supplier' => $no_supplier];
+    }
+
+    /**
+     * Step 2 (one call per supplier): one received purchase with the missing quantities at the products' purchase
+     * price, dated just before the first sale that had no stock. The sales made without stock are then linked to it
+     * (adjustStockOverSelling, as when a purchase is saved): stock back to 0, profit uses the real cost, the supplier
+     * is owed the amount (or it uses up the advance already paid to them).
+     */
+    public function missingPurchasesCreate(Request $request)
+    {
+        if (! auth()->user()->can('purchase.create')) {
+            abort(403, 'Unauthorized action.');
+        }
+        $business_id = $request->session()->get('user.business_id');
+        $user_id = $request->session()->get('user.id');
+        $supplier = \App\Contact::where('business_id', $business_id)->whereIn('type', ['supplier', 'both'])->find((int) $request->input('supplier_id'));
+        $location_id = (int) $request->input('location_id');
+        if (empty($supplier) || ! array_key_exists($location_id, BusinessLocation::forDropdown($business_id)->toArray())) {
+            return ['success' => false, 'msg' => 'Supplier or location not found'];
+        }
+
+        $lines = [];
+        $skipped = [];
+        $first_sale = null;
+        foreach ((array) $request->input('items', []) as $item) {
+            $product = \App\Product::where('business_id', $business_id)->with('product_tax')->find((int) ($item['product_id'] ?? 0));
+            $variation = $product ? \App\Variation::where('product_id', $product->id)->find((int) ($item['variation_id'] ?? 0)) : null;
+            $qty = (float) ($item['qty'] ?? 0);
+            if (empty($variation) || $qty <= 0) {
+                continue;
+            }
+            $price = (float) $variation->default_purchase_price;
+            if ($price <= 0) {
+                $skipped[] = $product->name.' (no purchase price)';
+
+                continue;
+            }
+            $tax = $this->productUtil->calc_percentage($price, ! empty($product->product_tax->amount) ? $product->product_tax->amount : 0);
+            $lines[] = ['product_id' => $product->id, 'variation_id' => $variation->id, 'quantity' => $qty,
+                'pp_without_discount' => $price, 'discount_percent' => 0, 'purchase_price' => $price,
+                'purchase_price_inc_tax' => $price + $tax, 'item_tax' => $tax, 'tax_id' => $product->product_tax->id ?? null];
+            $sale = DB::table('transaction_sell_lines_purchase_lines as tspl')
+                ->join('transaction_sell_lines as tsl', 'tsl.id', '=', 'tspl.sell_line_id')
+                ->join('transactions as t', 't.id', '=', 'tsl.transaction_id')
+                ->where('tspl.purchase_line_id', 0)->where('tsl.variation_id', $variation->id)->where('t.location_id', $location_id)
+                ->min('t.transaction_date');
+            if ($sale && (! $first_sale || $sale < $first_sale)) {
+                $first_sale = $sale;
+            }
+        }
+        if (empty($lines)) {
+            return ['success' => false, 'msg' => 'Nothing to buy'.($skipped ? ': '.implode(', ', $skipped) : '')];
+        }
+        $date = $first_sale ? \Carbon::parse($first_sale)->subMinute()->toDateTimeString() : \Carbon::now()->toDateTimeString();
+        $total = array_sum(array_map(fn ($l) => $l['quantity'] * $l['purchase_price_inc_tax'], $lines));
+
+        try {
+            DB::beginTransaction();
+            $ref_count = $this->productUtil->setAndGetReferenceCount('purchase', $business_id);
+            $transaction = \App\Transaction::create([
+                'business_id' => $business_id, 'location_id' => $location_id, 'type' => 'purchase', 'status' => 'received',
+                'contact_id' => $supplier->id, 'transaction_date' => $date,
+                'ref_no' => $this->productUtil->generateReferenceNumber('purchase', $ref_count, $business_id),
+                'total_before_tax' => $total, 'final_total' => $total, 'payment_status' => 'due', 'exchange_rate' => 1,
+                'additional_notes' => 'Missing purchase entered from Reports > Missing purchases (stock sold before it was purchased)',
+                'created_by' => $user_id,
+            ]);
+            $transaction->purchase_lines()->createMany($lines);
+            foreach ($lines as $l) {
+                $this->productUtil->updateProductQuantity($location_id, $l['product_id'], $l['variation_id'], $l['quantity'], 0, null, false);
+            }
+            // the sales made without stock are linked to this purchase
+            $this->productUtil->adjustStockOverSelling($transaction->fresh('purchase_lines'));
+            $this->transactionUtil->updatePaymentStatus($transaction->id, $transaction->final_total);
+            $this->transactionUtil->activityLog($transaction, 'added');
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            \Log::emergency('Missing purchase create: '.$e->getFile().':'.$e->getLine().' '.$e->getMessage());
+
+            return ['success' => false, 'msg' => $supplier->name.': '.$e->getMessage()];
+        }
+
+        return ['success' => true, 'ref_no' => $transaction->ref_no, 'count' => count($lines), 'total' => $total, 'skipped' => $skipped];
     }
 
     /**

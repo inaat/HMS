@@ -275,6 +275,8 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::get('/reports/profit-loss', [ReportController::class, 'getProfitLoss']);
     Route::get('/reports/stock-link-check', [ReportController::class, 'stockLinkCheck']);
     Route::get('/reports/missing-purchases', [ReportController::class, 'missingPurchases']);
+    Route::post('/reports/missing-purchases/plan', [ReportController::class, 'missingPurchasesPlan']);
+    Route::post('/reports/missing-purchases/create', [ReportController::class, 'missingPurchasesCreate']);
     Route::get('/reports/return-advance-check', [\App\Http\Controllers\ReturnAdvanceCheckController::class, 'index']);
     Route::post('/reports/return-advance-check/settle/{id}', [\App\Http\Controllers\ReturnAdvanceCheckController::class, 'settle']);
     Route::post('/reports/return-advance-check/repair', [\App\Http\Controllers\ReturnAdvanceCheckController::class, 'repair']);
