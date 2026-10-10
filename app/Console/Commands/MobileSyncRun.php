@@ -110,6 +110,7 @@ class MobileSyncRun extends Command
             // 3. Push.
             $progress('Sending products, stock and customers to bookers', 25);
             $snapshot = $push ? (new LocalSnapshot($business_id, $location_id))->all() : [];
+            $progress('Updating bookers, products, stock and customers', 60);
             $response = $push ? $this->send('POST', '/api/sync/push', $snapshot) : null;
             if (! $push) {
                 // --collect only

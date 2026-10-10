@@ -79,6 +79,12 @@
             </div>
             <button type="button" id="cs-now-single" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-primary tw-text-white"><i class="fa fa-sync"></i> Sync now</button>
         </div>
+        <div id="cs-single-wrap" style="margin-top: 10px; display: none;">
+            <div id="cs-single-step" class="text-muted" style="font-size: 13px; margin-bottom: 4px;">Starting…</div>
+            <div class="progress" style="margin: 0; height: 18px;">
+                <div id="cs-single-bar" class="progress-bar progress-bar-striped active" role="progressbar" style="width: 2%; min-width: 2em;">2%</div>
+            </div>
+        </div>
         @else
         <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
             <span id="cs-icon" style="font-size: 22px;">☁️</span>
@@ -366,10 +372,31 @@
         poll();
         @else
         // Single server: the sync runs inside this request (a few seconds), then show the result.
+        // While it runs, read its progress (mobile-sync:run writes each step) every second.
         $('#cs-now-single').on('click', function () {
+            var done = false, statusUrl = '{{ action([\App\Http\Controllers\MobileOrderController::class, 'syncStatus']) }}';
+            function bar(pct, step) {
+                pct = Math.max(2, Math.min(100, pct || 2));
+                $('#cs-single-bar').css('width', pct + '%').text(pct + '%');
+                if (step) $('#cs-single-step').text(step + '…');
+            }
+            function poll() {
+                if (done) return;
+                $.getJSON(statusUrl, function (d) {
+                    var p = d.progress || {};
+                    if (!done && p.running) bar(p.percent, p.step);
+                }).always(function () { if (!done) setTimeout(poll, 1000); });
+            }
             $(this).prop('disabled', true).html('<i class="fa fa-sync fa-spin"></i> Syncing…');
+            $('#cs-single-wrap').show();
+            bar(2, 'Starting');
+            setTimeout(poll, 700);
             $.post('{{ action([\App\Http\Controllers\MobileOrderController::class, 'syncNow']) }}',
-                {_token: $('meta[name="csrf-token"]').attr('content')}).always(function () { location.reload(); });
+                {_token: $('meta[name="csrf-token"]').attr('content')}).always(function () {
+                    done = true;
+                    bar(100, 'Done');
+                    setTimeout(function () { location.reload(); }, 400);
+                });
         });
         @endif
 
