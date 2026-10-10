@@ -461,6 +461,10 @@ class MobileInbox
                 ];
             }
 
+            // Trade schemes ("12+1") are applied here, by the office, with the same rules as the POS; the phone
+            // only shows them (TradeSchemeUtil::forPhones) and never sends free lines or scheme discounts.
+            $lines = \App\Utils\TradeSchemeUtil::withSchemes($lines, $this->business_id, $row->location_id ?: $this->location_id, $row->booked_at ?: now());
+
             $invoice_total = (new ProductUtil())->calculateInvoiceTotal($lines, null, ['discount_type' => 'fixed', 'discount_amount' => 0], false);
             $booker = $this->bookerName($row->booker_id);
 
@@ -519,6 +523,8 @@ class MobileInbox
             $so = Transaction::with('sell_lines')->where('business_id', $this->business_id)->where('type', 'sales_order')->findOrFail($row->transaction_id);
             $products = DB::table('products')->whereIn('id', $so->sell_lines->pluck('product_id'))->get()->keyBy('id');
             $multipliers = DB::table('units')->pluck('base_unit_multiplier', 'id');
+            $schemes = \App\Utils\TradeSchemeUtil::installed()
+                ? DB::table('trade_schemes')->whereIn('id', $so->sell_lines->pluck('trade_scheme_id')->filter()->all() ?: [0])->get()->keyBy('id') : collect();
 
             // The sales order lines as Add Sale posts them: quantity and prices per unit ordered.
             $lines = [];
@@ -547,6 +553,15 @@ class MobileInbox
                     'so_line_id' => $sl->id,
                     'sell_line_note' => $sl->sell_line_note,
                 ];
+                // the scheme the sales order line got (the invoice re-checks it in createOrUpdateSellLines)
+                $scheme = ! empty($sl->trade_scheme_id) ? $schemes->get($sl->trade_scheme_id) : null;
+                if ($scheme) {
+                    $last = count($lines) - 1;
+                    $lines[$last]['trade_scheme_id'] = $scheme->id;
+                    if ($scheme->free_mode === 'other' && (int) $scheme->free_variation_id === (int) $sl->variation_id && (int) $scheme->product_id !== (int) $sl->product_id) {
+                        $lines[$last]['scheme_role'] = 'free';
+                    }
+                }
             }
             if (empty($lines)) {
                 throw new \Exception('Nothing left to invoice on sales order '.$so->invoice_no);

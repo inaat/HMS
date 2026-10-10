@@ -59,9 +59,16 @@
                 data-msg-abs_digit="{{__('lang_v1.decimal_value_not_allowed')}}"
                 @if(!empty($max_quantity))
                     data-rule-max-value="{{$max_quantity}}"
-                    data-msg-max-value="{{__('lang_v1.max_quantity_quantity_allowed', ['quantity' => $max_quantity])}}" 
+                    data-msg-max-value="{{__('lang_v1.max_quantity_quantity_allowed', ['quantity' => $max_quantity])}}"
                 @endif
             >
+            @if(empty($is_purchase_order))
+                {{-- supplier bonus: free qty in the same unit; stock in = qty + free, cost per unit = amount ÷ (qty + free) --}}
+                <div style="margin-top:4px;" title="Free stock from the supplier (bonus), e.g. buy 10 get 1 free">
+                    <small class="text-muted">Free qty:</small>
+                    <input type="text" name="purchases[{{$row_count}}][bonus_qty]" value="0" class="form-control input-sm input_number purchase_bonus_qty">
+                </div>
+            @endif
 
 
             <input type="hidden" class="base_unit_cost" value="{{$variation->default_purchase_price}}">

@@ -574,6 +574,25 @@ class PurchaseController extends Controller
             }
         }
 
+        // Supplier bonus: the form shows paid qty + free qty at the price paid (the line stores the total and the
+        // effective cost; ProductUtil::createOrUpdatePurchaseLines turns it back). Display only, never saved.
+        foreach ($purchase->purchase_lines as $line) {
+            $bonus = (float) ($line->bonus_qty ?? 0);
+            if ($bonus <= 0) {
+                continue;
+            }
+            $multiplier = ! empty($line->sub_unit_id) && ! empty($line->sub_unit) ? ((float) $line->sub_unit->base_unit_multiplier ?: 1) : 1;
+            $line->bonus_display = $bonus / $multiplier;
+            $paid = (float) $line->quantity - $line->bonus_display;
+            if ($paid > 0) {
+                $factor = (float) $line->quantity / $paid;
+                foreach (['pp_without_discount', 'purchase_price', 'purchase_price_inc_tax', 'item_tax'] as $field) {
+                    $line->{$field} = (float) $line->{$field} * $factor;
+                }
+                $line->quantity = $paid;
+            }
+        }
+
         $orderStatuses = $this->productUtil->orderStatuses();
 
         $business_locations = BusinessLocation::forDropdown($business_id);

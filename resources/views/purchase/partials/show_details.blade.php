@@ -205,6 +205,10 @@
                     @endif
                   @endforeach
                 @endif
+                @if((float) ($purchase_line->bonus_qty ?? 0) > 0)
+                  @php $bonus_mult = ! empty($purchase_line->sub_unit) ? ((float) $purchase_line->sub_unit->base_unit_multiplier ?: 1) : 1; @endphp
+                  <br><small class="text-success"><i class="fa fa-gift"></i> incl. {{ rtrim(rtrim(number_format((float) $purchase_line->bonus_qty / $bonus_mult, 4), '0'), '.') }} free (supplier bonus)</small>
+                @endif
                 @if(!empty($purchase_line->product->second_unit) && $purchase_line->secondary_unit_quantity != 0)
                     <br>
                     <span class="display_currency" data-is_quantity="true" data-currency_symbol="false">{{ $purchase_line->secondary_unit_quantity }}</span> {{$purchase_line->product->second_unit->actual_name}}

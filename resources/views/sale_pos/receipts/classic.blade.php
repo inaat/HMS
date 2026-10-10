@@ -207,6 +207,10 @@
                     <th class="quantity text-right">
                         QTY
                     </th>
+                    @php $has_scheme_free = collect($receipt_details->lines)->contains(fn ($l) => ! empty($l['scheme_free'])); @endphp
+                    @if($has_scheme_free)
+                    <th class="quantity text-right">Free qty</th>
+                    @endif
                     @if(empty($receipt_details->hide_price))
                     <th class="unit_price text-right">
                         <!-- {{$receipt_details->table_unit_price_label}} -->
@@ -236,6 +240,7 @@
                                 {{$line['name']}} {{$line['product_variation']}} {{$line['variation']}}
                                 @if(!empty($line['sub_sku'])), {{$line['sub_sku']}} @endif @if(!empty($line['brand'])), {{$line['brand']}} @endif @if(!empty($line['cat_code'])), {{$line['cat_code']}}@endif
                                 @if(!empty($line['sell_line_note']))({{$line['sell_line_note']}}) @endif
+                                @if(!empty($line['scheme_text']))<br><small style="font-weight:normal;">{{ $line['scheme_text'] }}</small> @endif
                                 @if(!empty($line['lot_number']))<br> {{$line['lot_number_label']}}: {{$line['lot_number']}} @endif
                                 @if(!empty($line['product_expiry'])), {{$line['product_expiry_label']}}: {{$line['product_expiry']}} @endif
 
@@ -243,6 +248,9 @@
 
                     </td>
                     <td style="border: 1px solid #242424; " class="quantity text-right">{{$line['quantity']}} {{$line['units']}}</td>
+                    @if($has_scheme_free)
+                    <td style="border: 1px solid #242424; " class="quantity text-right">{{ $line['scheme_free'] ?? '' }}</td>
+                    @endif
                     @if(empty($receipt_details->hide_price))
                     <td style="border: 1px solid #242424; " class="unit_price text-right">{{$line['unit_price_before_discount']}}</td>
                     <td class="text-right">
@@ -266,6 +274,7 @@
                         @if(!empty($modifier['sell_line_note']))({{$modifier['sell_line_note']}}) @endif
                     </td>
                     <td class="text-right">{{$modifier['quantity']}} {{$modifier['units']}} </td>
+                    @if($has_scheme_free)<td></td>@endif
                     @if(empty($receipt_details->hide_price))
                     <td class="text-right">{{$modifier['unit_price_inc_tax']}}</td>
 
@@ -286,7 +295,7 @@
                 </tr>
                 @endif
                 <tr>
-                    <td colspan="5">&nbsp;</td>
+                    <td colspan="{{ $has_scheme_free ? 6 : 5 }}">&nbsp;</td>
                 </tr>
 
             </tbody>

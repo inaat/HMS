@@ -184,6 +184,20 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
     Route::post('/products/bulk-update-location', [ProductController::class, 'updateProductLocation']);
     Route::get('/products/get-product-to-edit/{product_id}', [ProductController::class, 'getProductToEdit']);
 
+    // Trade schemes ("buy 12 get 1 free")
+    Route::get('/trade-schemes/active', [\App\Http\Controllers\TradeSchemeController::class, 'active']);
+    Route::get('/trade-schemes/products', [\App\Http\Controllers\TradeSchemeController::class, 'products']);
+    Route::get('/trade-schemes/units', [\App\Http\Controllers\TradeSchemeController::class, 'units']);
+    Route::get('/trade-schemes/{id}/copy', [\App\Http\Controllers\TradeSchemeController::class, 'copy']);
+    Route::post('/trade-schemes/{id}/toggle', [\App\Http\Controllers\TradeSchemeController::class, 'toggle']);
+    Route::resource('trade-schemes', \App\Http\Controllers\TradeSchemeController::class)->except(['show']);
+    Route::get('/reports/trade-schemes', [\App\Http\Controllers\TradeSchemeReportController::class, 'report']);
+    Route::get('/scheme-claims', [\App\Http\Controllers\TradeSchemeReportController::class, 'claims']);
+    Route::post('/scheme-claims', [\App\Http\Controllers\TradeSchemeReportController::class, 'storeClaim']);
+    Route::get('/scheme-claims/{id}', [\App\Http\Controllers\TradeSchemeReportController::class, 'showClaim']);
+    Route::post('/scheme-claims/{id}/settle', [\App\Http\Controllers\TradeSchemeReportController::class, 'settleClaim']);
+    Route::delete('/scheme-claims/{id}', [\App\Http\Controllers\TradeSchemeReportController::class, 'destroyClaim']);
+
     Route::post('/products/get_sub_categories', [ProductController::class, 'getSubCategories']);
     Route::get('/products/get_sub_units', [ProductController::class, 'getSubUnits']);
     Route::post('/products/product_form_part', [ProductController::class, 'getProductVariationFormPart']);

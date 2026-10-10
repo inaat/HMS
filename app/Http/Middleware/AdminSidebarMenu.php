@@ -244,6 +244,13 @@ class AdminSidebarMenu
                                 ['icon' => '', 'active' => request()->segment(1) == 'update-product-price']
                             );
                         }
+                        if (auth()->user()->can('product.create') || auth()->user()->can('product.update')) {
+                            $sub->url(
+                                action([\App\Http\Controllers\TradeSchemeController::class, 'index']),
+                                'Trade schemes',
+                                ['icon' => '', 'active' => request()->segment(1) == 'trade-schemes']
+                            );
+                        }
                         if (auth()->user()->can('product.view')) {
                             $sub->url(
                                 action([\App\Http\Controllers\LabelsController::class, 'show']),
@@ -785,6 +792,18 @@ class AdminSidebarMenu
                             }
                         }
 
+                        if (auth()->user()->can('purchase_n_sell_report.view') || auth()->user()->can('product.create')) {
+                            $sub->url(
+                                action([\App\Http\Controllers\TradeSchemeReportController::class, 'report']),
+                                'Trade scheme report',
+                                ['icon' => '', 'active' => request()->segment(2) == 'trade-schemes']
+                            );
+                            $sub->url(
+                                action([\App\Http\Controllers\TradeSchemeReportController::class, 'claims']),
+                                'Scheme claims',
+                                ['icon' => '', 'active' => request()->segment(1) == 'scheme-claims']
+                            );
+                        }
                         if (auth()->user()->can('trending_product_report.view')) {
                             $sub->url(
                                 action([\App\Http\Controllers\ReportController::class, 'getTrendingProducts']),

@@ -114,6 +114,13 @@ Omit `since` on the first sync (full download). Response 200:
   "outlet_types": ["Kiryana", "General store", "Wholesale", "Medical store", "Bakery", "Super store", "Hotel / Restaurant", "Other"],
   "visit_radius_m": 100,
   "allow_short_stock": true,
+  "schemes": [{
+    "id": 7, "code": "SCH-014", "name": "Hilal Candy 12+1", "label": "SCH-014 12+1",
+    "product_id": 120, "variation_id": null, "unit_id": 14, "unit_name": "CTN 12", "unit_mult": 12,
+    "slabs": [{"buy_qty": 12, "free_qty": 1}, {"buy_qty": 24, "free_qty": 3}], "repeat": true,
+    "free_mode": "same", "free_variation_id": null, "free_name": null, "free_unit_name": "CTN 12", "free_unit_mult": 12,
+    "location_ids": [], "starts_at": "2026-10-01", "ends_at": "2026-10-31", "budget_left": 85
+  }],
   "can_edit_shops": true,
   "invoices": [{
     "id": 15763, "contact_id": 57, "invoice_no": "15479", "transaction_date": "2025-12-20 08:49:00",
@@ -148,6 +155,8 @@ Rules for applying it (upsert into SQLite):
   `https://pos.explainerkhan.com/<photo_url>` (cache the image for offline). `mobile` may be null.
 - `outlet_types` and `visit_radius_m` (metres; a check-in further than this from the shop is flagged): replace.
 - `allow_short_stock` (office setting, Sell > Mobile orders): save it in SQLite and use it offline; missing → `true`.
+- `schemes` (trade offers, Products > Trade schemes): **always the full list running today for this booker's
+  locations; replace**. **Display only** — see §5 "Trade schemes". Missing → no schemes.
 - Save `server_time` and use it as the next `since`.
 
 ### 3.3 POST `/upload` — send the outbox
@@ -337,6 +346,23 @@ lost; turning airplane mode OFF uploads all 14 items once and the statuses updat
     location", show "🔒 Shop editing is locked by the office"; the server also refuses `customer_updates` with
     `error` "Shop editing is locked by the office".
 
+### Trade schemes ("buy 12 get 1 free") — display only
+
+The office applies schemes when it turns the order into a sales order, with the same rules as the POS. The phone
+**never** sends free lines, scheme discounts or a lower price because of a scheme — it only shows them so the booker
+can tell the shop.
+- A scheme applies to a product when `product_id` matches and (`variation_id` is null or matches the variation), and
+  `location_ids` is empty or contains the order's location. Dates are already filtered by the server; still hide it
+  after `ends_at` when offline.
+- Product list / search: badge with `label` (e.g. "🎁 12+1").
+- Cart line: quantity in the scheme unit = line qty × line unit multiplier ÷ `unit_mult`. Free = slabs, highest
+  `buy_qty` first; with `repeat` use a slab as many times as it fits, then the rest on lower slabs (12+1 repeating:
+  25 → 2); without `repeat` only the best slab once. If `budget_left` is not null, free ≤ `budget_left`.
+  Show under the line: "SCH-014 12+1: 1 CTN 12 free" (same product, `free_unit_name`) or
+  "SCH-020 5+2: 4 Pc CUP KAKE RS20 free" (`free_mode` other, `free_name`).
+- Order slip and WhatsApp slip: same text under the line, and "Free goods are confirmed by the office on the invoice."
+- Order total on the phone stays **without** the scheme (the office invoice shows the final amount).
+
 ## 6. Screens
 
 Bottom navigation on phones (top tabs on tablets ≥ 900 px): **Home · New order · Customers · My work · Account**.
@@ -424,6 +450,8 @@ pull-to-refresh, Sync button.
 13. Edit shop: every change (also an empty mobile or location) waits in Mobile orders → Shop edits until
     approved; the photo shows on the shop after sync.
 14. Airplane mode: a full visit with photo, an order inside it and a shop edit → all upload once when back online.
+15. Scheme 12+1 (CTN) on a product: 13 CTN shows "1 CTN free", 25 CTN shows "2 CTN free", 11 CTN shows nothing; the
+    uploaded order has no free line and no discount; after the office invoices it, the invoice has the free goods.
 
 ## 10. Deliverables
 

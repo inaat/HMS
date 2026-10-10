@@ -34,6 +34,8 @@ class LocalSnapshot
             'invoices' => $this->invoices(),
             'settings' => self::settings(),
             'logouts' => self::logouts(),
+            // running trade schemes ("12+1"), shown on the phones; the office applies them (MobileInbox)
+            'schemes' => \App\Utils\TradeSchemeUtil::forPhones($this->business_id),
         ];
     }
 

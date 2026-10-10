@@ -859,6 +859,8 @@
 
 @section('javascript')
 	<script src="{{ asset('js/pos.js?v=' . $asset_v) }}"></script>
+	<script>window.trade_scheme_active_url = "{{ action([\App\Http\Controllers\TradeSchemeController::class, 'active']) }}";</script>
+	<script src="{{ asset('js/trade_scheme.js?v=' . filemtime(public_path('js/trade_scheme.js'))) }}"></script>
 	<script src="{{ asset('js/product.js?v=' . $asset_v) }}"></script>
 	<script src="{{ asset('js/opening_stock.js?v=' . $asset_v) }}"></script>
 	<!-- Call restaurant module if defined -->

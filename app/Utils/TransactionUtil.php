@@ -308,6 +308,16 @@ class TransactionUtil extends Util
         $modifiers_formatted = [];
         $combo_lines = [];
         $products_modified_combo = [];
+
+        // Trade schemes: check each line's scheme and record its free quantity (TradeSchemeUtil)
+        $with_scheme = TradeSchemeUtil::installed();
+        if ($with_scheme && collect($products)->pluck('trade_scheme_id')->filter()->isNotEmpty()) {
+            $scheme_transaction = is_object($transaction) ? $transaction : Transaction::find($transaction);
+            if ($scheme_transaction) {
+                TradeSchemeUtil::applyToLines($products, $scheme_transaction, $location_id, fn ($v) => $uf_data ? $this->num_uf($v) : $v);
+            }
+        }
+
         foreach ($products as $product) {
             $multiplier = 1;
             if (isset($product['sub_unit_id']) && $product['sub_unit_id'] == $product['product_unit_id']) {
@@ -401,6 +411,10 @@ class TransactionUtil extends Util
                     'so_line_id' => ! empty($product['so_line_id']) ? $product['so_line_id'] : null,
                     'secondary_unit_quantity' => ! empty($product['secondary_unit_quantity']) ? $this->num_uf($product['secondary_unit_quantity']) : 0,
                 ];
+                if ($with_scheme) {
+                    $line['trade_scheme_id'] = ! empty($product['trade_scheme_id']) ? $product['trade_scheme_id'] : null;
+                    $line['scheme_free_qty'] = ! empty($product['trade_scheme_id']) ? (float) ($product['scheme_free_qty'] ?? 0) : 0;
+                }
 
                 foreach ($extra_line_parameters as $key => $value) {
                     $line[$key] = isset($product[$value]) ? $product[$value] : '';
@@ -620,6 +634,10 @@ class TransactionUtil extends Util
             'res_service_staff_id' => ! empty($product['res_service_staff_id']) ? $product['res_service_staff_id'] : null,
             'secondary_unit_quantity' => ! empty($product['secondary_unit_quantity']) ? $this->num_uf($product['secondary_unit_quantity']) : 0,
         ]);
+        if (TradeSchemeUtil::installed()) {
+            $sell_line->trade_scheme_id = ! empty($product['trade_scheme_id']) ? $product['trade_scheme_id'] : null;
+            $sell_line->scheme_free_qty = ! empty($product['trade_scheme_id']) ? (float) ($product['scheme_free_qty'] ?? 0) : 0;
+        }
         $sell_line->save();
 
         //Set warranty
@@ -2092,6 +2110,20 @@ class TransactionUtil extends Util
                 'line_total_exc_tax_uf' => $line->unit_price * $line->quantity,
                 'variation_id' => $variation->id,
             ];
+
+            // Trade scheme: "Scheme SCH-014 (12+1): 1 CTN free"
+            if (! empty($line->trade_scheme_id) && (float) $line->scheme_free_qty > 0) {
+                $scheme = DB::table('trade_schemes')->where('id', $line->trade_scheme_id)->first(['code', 'name', 'free_mode', 'unit_id', 'free_unit_id']);
+                if ($scheme) {
+                    $free_unit = $scheme->free_mode === 'same' ? ($scheme->free_unit_id ?: $scheme->unit_id) : $scheme->free_unit_id;
+                    $free_mult = TradeSchemeUtil::multiplier($free_unit);
+                    $free_unit_name = $free_unit ? DB::table('units')->where('id', $free_unit)->value('short_name') : $base_unit_name;
+                    $slabs = DB::table('trade_scheme_slabs')->where('trade_scheme_id', $line->trade_scheme_id)->orderBy('buy_qty')->get();
+                    $line_array['scheme_text'] = 'Scheme '.$scheme->code.' ('.TradeSchemeUtil::slabText((object) ['slabs' => $slabs]).')';
+                    // "Free qty" column of the invoice
+                    $line_array['scheme_free'] = $this->num_f((float) $line->scheme_free_qty / $free_mult, false, $business_details, true).' '.$free_unit_name;
+                }
+            }
 
             $temp = [];
 
@@ -5984,6 +6016,11 @@ class TransactionUtil extends Util
                 'transaction_type' => $transaction->type,
             ];
 
+            // Credit note of a trade scheme claim (Reports > Scheme claims): a ledger discount with the claim no as ref
+            if ($transaction->type == 'ledger_discount' && strpos((string) $transaction->ref_no, 'CLM-') === 0) {
+                $temp_array['type'] = 'Scheme claim credit note';
+            }
+
             if ($transaction->type == 'sell_return') {
                 if (! empty($transaction->return_parent_id)) {
                     $temp_array['others'] .= ' <span class="label bg-blue" style="background-color: #0073b7; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; display: inline-block; white-space: normal;">Return of invoice: '.e($return_parent_invoices[$transaction->return_parent_id] ?? '').'</span>';
@@ -6202,6 +6239,29 @@ class TransactionUtil extends Util
         $total_transactions_paid = $total_invoice_paid + $total_purchase_paid - $total_sell_return_paid - $total_purchase_return_paid;
 
         $curr_due = $total_invoice + $total_purchase - $total_transactions_paid + $beginning_balance + $opening_balance_due;
+
+        // Supplier: trade scheme claims sent but not yet accepted, shown for information only (no debit / credit, the
+        // balance does not change until the supplier gives the credit note) — like the supplier's own statement.
+        if (in_array($contact->type, ['supplier', 'both']) && \Illuminate\Support\Facades\Schema::hasTable('scheme_claims')) {
+            $pending = DB::table('scheme_claims')->where('supplier_id', $contact_id)->where('status', 'claimed')
+                ->whereDate('created_at', '<=', $end)->orderBy('created_at')->get();
+            foreach ($pending as $claim) {
+                $ledger[] = [
+                    'date' => max((string) $claim->created_at, $start.' 00:00:00'),
+                    'ref_no' => $claim->claim_no,
+                    'type' => 'Scheme claim (pending)',
+                    'location' => '',
+                    'payment_status' => '',
+                    'total' => '',
+                    'payment_method' => '',
+                    'debit' => '',
+                    'credit' => '',
+                    'others' => 'Claimed '.$this->num_f($claim->total_value, true).' for '.$this->format_date($claim->period_start).' – '.$this->format_date($claim->period_end)
+                        .' · not yet accepted, not in the balance',
+                    'transaction_type' => 'scheme_claim',
+                ];
+            }
+        }
 
         //Sort by date
         if (! empty($ledger)) {

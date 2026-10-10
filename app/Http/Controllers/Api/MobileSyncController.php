@@ -95,6 +95,10 @@ class MobileSyncController extends Controller
                 }
             }
 
+            if (is_array($request->input('schemes'))) {
+                DB::table('mb_meta')->updateOrInsert(['key' => 'schemes'], ['value' => json_encode($request->input('schemes')), 'updated_at' => now()]);
+            }
+
             if (is_array($request->input('settings'))) {
                 DB::table('mb_meta')->updateOrInsert(['key' => 'settings'], ['value' => json_encode($request->input('settings')), 'updated_at' => now()]);
             }

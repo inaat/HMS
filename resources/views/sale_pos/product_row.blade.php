@@ -21,9 +21,30 @@
 			value="{{$so_line->id}}">
 		@endif
 		@php
+			// Trade scheme kept when editing a sale / invoicing a sales order (public/js/trade_scheme.js re-checks it)
+			$ts_id = null;
+			$ts_role = '';
+			if (\App\Utils\TradeSchemeUtil::installed()) {
+				if (! empty($product->transaction_sell_lines_id)) {
+					$ts_id = \DB::table('transaction_sell_lines')->where('id', $product->transaction_sell_lines_id)->value('trade_scheme_id');
+				} elseif (! empty($so_line)) {
+					$ts_id = $so_line->trade_scheme_id ?? null;
+				}
+				if ($ts_id) {
+					$ts_row = \DB::table('trade_schemes')->where('id', $ts_id)->first(['product_id', 'free_mode', 'free_variation_id']);
+					if ($ts_row && $ts_row->free_mode === 'other' && (int) $ts_row->free_variation_id === (int) $product->variation_id && (int) $ts_row->product_id !== (int) $product->product_id) {
+						$ts_role = 'free';
+					}
+				}
+			}
+
 			$product_name = $product->product_name . '<br/>' . $product->sub_sku ;
 			if(!empty($product->brand)){ $product_name .= ' ' . $product->brand ;}
 		@endphp
+		@if($ts_id)
+			<input type="hidden" class="ts_trade_scheme_id" name="products[{{$row_count}}][trade_scheme_id]" value="{{$ts_id}}">
+			@if($ts_role)<input type="hidden" class="ts_scheme_role" name="products[{{$row_count}}][scheme_role]" value="{{$ts_role}}">@endif
+		@endif
 
 		@if( ($edit_price || $edit_discount) && empty($is_direct_sell) )
 		<div title="@lang('lang_v1.pos_edit_product_price_help')" style="display: inline">
@@ -39,6 +60,8 @@
 		@else
 			{!! $product_name !!}
 		@endif
+		{{-- trade scheme label goes here (public/js/trade_scheme.js) --}}
+		<div class="ts_label_slot"></div>
 		{{-- <img src="@if(count($product->media) > 0)
 						{{$product->media->first()->display_url}}
 					@elseif(!empty($product->product_image))

@@ -167,6 +167,7 @@ class MobileController extends Controller
             'outlet_types' => \App\Http\Controllers\BookerRouteController::OUTLET_TYPES,
             'visit_radius_m' => (int) config('mobile_sync.visit_radius_m', 100),
             'allow_short_stock' => $this->allowShortStock(),
+            'schemes' => $this->schemesFor($locations),
             'invoices' => $invoices,
             'orders' => $orders,
             'payments' => $payments,
@@ -507,6 +508,22 @@ class MobileController extends Controller
         $sent = $this->whatsappOrder(DB::table('mb_orders')->where('uuid', $uuid)->first());
 
         return ['uuid' => $uuid, 'result' => 'saved', 'status' => 'pending', 'short_stock' => $short, 'whatsapp' => $sent === true];
+    }
+
+    /**
+     * Running trade schemes for the booker's locations (pushed by the PC, LocalSnapshot::all → mb_meta "schemes").
+     * The phone only shows them; the office applies them when it makes the sales order (MobileInbox).
+     */
+    private function schemesFor(array $locations): array
+    {
+        $all = json_decode((string) DB::table('mb_meta')->where('key', 'schemes')->value('value'), true) ?: [];
+        $ids = array_map('intval', array_column($locations, 'id'));
+        $today = now()->format('Y-m-d');
+
+        return array_values(array_filter($all, function ($s) use ($ids, $today) {
+            return (empty($s['location_ids']) || array_intersect($ids, $s['location_ids']))
+                && (empty($s['starts_at']) || $s['starts_at'] <= $today) && (empty($s['ends_at']) || $s['ends_at'] >= $today);
+        }));
     }
 
     /** Sent up by the local PC with every push (LocalSnapshot::settings); allowed until the PC says otherwise. */

@@ -361,6 +361,33 @@
                         </div>
                     </div>
                 @endcan
+                {{-- Trade schemes near the end of their free-goods budget (HomeController) --}}
+                @if (! empty($schemes_near_budget) && $schemes_near_budget->count())
+                    <div class="tw-transition-all lg:tw-col-span-2 tw-duration-200 tw-bg-white tw-shadow-sm tw-rounded-xl tw-ring-1 hover:tw-shadow-md tw-ring-gray-200">
+                        <div class="tw-p-4 sm:tw-p-5">
+                            <div class="tw-flex tw-items-center tw-gap-2.5">
+                                <div class="tw-border-2 tw-flex tw-items-center tw-justify-center tw-rounded-full tw-w-10 tw-h-10">
+                                    <i class="fa fa-gift tw-text-yellow-500"></i>
+                                </div>
+                                <h3 class="tw-font-bold tw-text-base lg:tw-text-xl tw-flex-1">Schemes near budget
+                                    <span class="label label-warning">{{ $schemes_near_budget->count() }}</span></h3>
+                                <a href="{{ action([\App\Http\Controllers\TradeSchemeController::class, 'index']) }}" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-outline tw-dw-btn-primary">Trade schemes</a>
+                            </div>
+                            <table class="table table-bordered table-striped" style="margin:12px 0 0;">
+                                <thead><tr><th>Scheme</th><th>Budget</th><th>Left</th></tr></thead>
+                                <tbody>
+                                    @foreach ($schemes_near_budget as $s)
+                                        <tr>
+                                            <td>{{ $s->code }} <small class="text-muted">{{ $s->name }}</small></td>
+                                            <td>{{ (float) $s->budget_qty }} {{ $s->free_unit_name }}</td>
+                                            <td class="{{ (float) $s->budget_left <= 0 ? 'text-danger' : 'text-warning' }}"><b>{{ (float) $s->budget_left }} {{ $s->free_unit_name }}</b></td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                @endif
                 {{-- Customers who stopped buying (InactiveCustomerController::ALERT_DAYS) --}}
                 @if (! empty($inactive_customers) && $inactive_customers['count'] > 0)
                     <div

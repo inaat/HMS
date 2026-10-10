@@ -235,7 +235,15 @@ class HomeController extends Controller
             $inactive_customers = ['count' => (clone $query)->count(), 'top' => $query->limit(10)->get()];
         }
 
-        return view('home.index', compact('sells_chart_1', 'sells_chart_2', 'widgets', 'all_locations', 'common_settings', 'is_admin', 'inactive_customers'));
+        // Trade schemes that have used 80% or more of their free-goods budget
+        $schemes_near_budget = collect();
+        if (auth()->user()->can('product.create') || auth()->user()->can('product.update')) {
+            $schemes_near_budget = \App\Utils\TradeSchemeUtil::activeFor($business_id, null)
+                ->filter(fn ($s) => $s->budget_qty !== null && (float) $s->budget_qty > 0 && ((float) $s->budget_qty - (float) $s->budget_left) / (float) $s->budget_qty >= 0.8)
+                ->values();
+        }
+
+        return view('home.index', compact('sells_chart_1', 'sells_chart_2', 'widgets', 'all_locations', 'common_settings', 'is_admin', 'inactive_customers', 'schemes_near_budget'));
     }
 
     /**

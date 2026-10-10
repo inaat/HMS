@@ -1277,6 +1277,7 @@ class ProductUtil extends Util
         $updated_purchase_lines = [];
         $updated_purchase_line_ids = [0];
         $exchange_rate = ! empty($transaction->exchange_rate) ? $transaction->exchange_rate : 1;
+        $with_bonus = \Illuminate\Support\Facades\Schema::hasColumn('purchase_lines', 'bonus_qty');
 
         foreach ($input_data as $data) {
             $multiplier = 1;
@@ -1290,13 +1291,21 @@ class ProductUtil extends Util
             }
             $new_quantity = $this->num_uf($data['quantity']) * $multiplier;
 
+            // Supplier bonus (buy 10 get 1 free): free stock comes in with the paid stock and lowers the cost per
+            // unit to amount ÷ (paid + free). The line stores the total quantity and the effective prices.
+            $bonus_qty = $with_bonus && ! empty($data['bonus_qty']) && $transaction->type == 'purchase' ? max(0, $this->num_uf($data['bonus_qty']) * $multiplier) : 0;
+            $paid_quantity = $new_quantity;
+            $cost_factor = ($new_quantity + $bonus_qty) > 0 ? $new_quantity / ($new_quantity + $bonus_qty) : 1;
+            $new_quantity += $bonus_qty;
+
             $new_quantity_f = $this->num_f($new_quantity);
             $old_qty = 0;
             //update existing purchase line
             if (isset($data['purchase_line_id'])) {
                 $purchase_line = PurchaseLine::findOrFail($data['purchase_line_id']);
                 $updated_purchase_line_ids[] = $purchase_line->id;
-                $old_qty = $purchase_line->quantity;
+                // purchase orders are counted in paid quantity
+                $old_qty = $purchase_line->quantity - ($with_bonus ? (float) $purchase_line->bonus_qty : 0);
 
                 $this->updateProductStock($before_status, $transaction, $data['product_id'], $data['variation_id'], $new_quantity, $purchase_line->quantity, $currency_details);
             } else {
@@ -1312,11 +1321,14 @@ class ProductUtil extends Util
             }
 
             $purchase_line->quantity = $new_quantity;
-            $purchase_line->pp_without_discount = ($this->num_uf($data['pp_without_discount'], $currency_details) * $exchange_rate) / $multiplier;
+            $purchase_line->pp_without_discount = ($this->num_uf($data['pp_without_discount'], $currency_details) * $exchange_rate) / $multiplier * $cost_factor;
             $purchase_line->discount_percent = $this->num_uf($data['discount_percent'], $currency_details);
-            $purchase_line->purchase_price = ($this->num_uf($data['purchase_price'], $currency_details) * $exchange_rate) / $multiplier;
-            $purchase_line->purchase_price_inc_tax = ($this->num_uf($data['purchase_price_inc_tax'], $currency_details) * $exchange_rate) / $multiplier;
-            $purchase_line->item_tax = ($this->num_uf($data['item_tax'], $currency_details) * $exchange_rate) / $multiplier;
+            $purchase_line->purchase_price = ($this->num_uf($data['purchase_price'], $currency_details) * $exchange_rate) / $multiplier * $cost_factor;
+            $purchase_line->purchase_price_inc_tax = ($this->num_uf($data['purchase_price_inc_tax'], $currency_details) * $exchange_rate) / $multiplier * $cost_factor;
+            $purchase_line->item_tax = ($this->num_uf($data['item_tax'], $currency_details) * $exchange_rate) / $multiplier * $cost_factor;
+            if ($with_bonus) {
+                $purchase_line->bonus_qty = $bonus_qty;
+            }
             $purchase_line->tax_id = $data['purchase_line_tax_id'];
             $purchase_line->lot_number = ! empty($data['lot_number']) ? $data['lot_number'] : null;
             $purchase_line->mfg_date = ! empty($data['mfg_date']) ? $this->uf_date($data['mfg_date']) : null;
@@ -1348,8 +1360,8 @@ class ProductUtil extends Util
                 $this->updatePurchaseOrderLine($purchase_line->purchase_requisition_line_id, $purchase_line->quantity, $old_qty);
             }
 
-            //Update purchase order line quantity received
-            $this->updatePurchaseOrderLine($purchase_line->purchase_order_line_id, $purchase_line->quantity, $old_qty);
+            //Update purchase order line quantity received (paid quantity; free stock is not part of the order)
+            $this->updatePurchaseOrderLine($purchase_line->purchase_order_line_id, $paid_quantity, $old_qty);
         }
 
         //unset deleted purchase lines
