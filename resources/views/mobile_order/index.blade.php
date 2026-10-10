@@ -4,6 +4,8 @@
 @section('content')
 @php
     $badge = ['waiting' => 'label-warning', 'approved' => 'label-info', 'invoiced' => 'label-success', 'rejected' => 'label-danger'];
+    // ?kind=phones: the Booker phones tab (who is logged in where; log out)
+    $phones_tab = request('kind') === 'phones' && auth()->user()->can('business_settings.access');
 @endphp
 <section class="content-header no-print">
     <h1 class="tw-text-xl md:tw-text-3xl tw-font-bold tw-text-black">Mobile orders
@@ -13,7 +15,7 @@
 
 <section class="content">
     <div class="no-print" style="margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-        <a href="?{{ http_build_query(['kind' => 'order'] + $filters) }}" class="tw-dw-btn tw-dw-btn-sm {{ $kind == 'order' ? 'tw-dw-btn-primary tw-text-white' : 'tw-dw-btn-outline tw-dw-btn-primary' }}">
+        <a href="?{{ http_build_query(['kind' => 'order'] + $filters) }}" class="tw-dw-btn tw-dw-btn-sm {{ $kind == 'order' && ! $phones_tab ? 'tw-dw-btn-primary tw-text-white' : 'tw-dw-btn-outline tw-dw-btn-primary' }}">
             <i class="fa fa-shopping-cart"></i> Orders
             @if (! empty($counts['order'])) <span class="label label-warning">{{ $counts['order'] }}</span> @endif
         </a>
@@ -27,8 +29,15 @@
             @if (! empty($shop_edits)) <span class="label label-warning">{{ $shop_edits }}</span> @endif
         </a>
         @endcan
+        @can('business_settings.access')
+        <a href="?kind=phones" class="tw-dw-btn tw-dw-btn-sm {{ $phones_tab ? 'tw-dw-btn-primary tw-text-white' : 'tw-dw-btn-outline tw-dw-btn-primary' }}">
+            <i class="fa fa-mobile-alt"></i> Booker phones
+            @if ($phones->count()) <span class="label label-success">{{ $phones->count() }}</span> @endif
+        </a>
+        @endcan
     </div>
 
+    @unless ($phones_tab)
     @component('components.filters', ['title' => __('report.filters')])
         {!! Form::open(['url' => action([\App\Http\Controllers\MobileOrderController::class, 'index']), 'method' => 'get', 'id' => 'mobile_orders_filter_form']) !!}
         <input type="hidden" name="kind" value="{{ $kind }}">
@@ -62,6 +71,7 @@
         @endif
         {!! Form::close() !!}
     @endcomponent
+    @endunless
 
     {{-- Cloud sync: status, Sync now and progress bar; layouts/partials/mobile_autosync also syncs every 2 minutes. --}}
     <div id="cloud-sync" class="no-print" style="background: #fff; border: 1px solid #e3e7ed; border-radius: 12px; padding: 12px 16px; margin-bottom: 12px;">
@@ -109,9 +119,12 @@
                 </div>
                 <button type="submit" class="tw-dw-btn tw-dw-btn-sm tw-dw-btn-success tw-text-white"><i class="fa fa-save"></i> Save</button>
             {!! Form::close() !!}
+        @endcan
+    </div>
 
-            {{-- Booker phones: one phone per booker; "Log out" frees the login (lost / changed phone). As of the last sync. --}}
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #eef1f5;">
+    @if ($phones_tab)
+            {{-- Booker phones tab: one phone per booker; "Log out" frees the login (lost / changed phone). As of the last sync. --}}
+            <div class="no-print" style="background: #fff; border: 1px solid #e3e7ed; border-radius: 12px; padding: 12px 16px; margin-bottom: 12px;">
                 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px;">
                     <b><i class="fa fa-mobile-alt"></i> Booker phones logged in ({{ $phones->count() }})</b>
                     <span class="text-muted" style="font-size: 12px;">one phone per booker — log out here to let them log in on another phone</span>
@@ -153,8 +166,7 @@
                     <span class="text-muted" style="font-size: 12px;">No booker phone logged in (or not synced yet — press Sync now).</span>
                 @endif
             </div>
-        @endcan
-    </div>
+    @else
 
     @component('components.widget')
         {{-- Totals of everything the filters match (all pages), per booker; Print = same filters, all rows --}}
@@ -283,6 +295,7 @@
         </div>
         {{ $rows->links() }}
     @endcomponent
+    @endif
 </section>
 @endsection
 
