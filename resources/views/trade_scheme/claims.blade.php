@@ -86,7 +86,16 @@
                                     @endif
                                 @endif
                             </td>
-                            <td><a href="{{ action([\App\Http\Controllers\TradeSchemeReportController::class, 'showClaim'], [$c->id]) }}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary"><i class="fa fa-eye"></i> Open</a></td>
+                            <td style="white-space:nowrap;">
+                                <a href="{{ action([\App\Http\Controllers\TradeSchemeReportController::class, 'showClaim'], [$c->id]) }}" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary"><i class="fa fa-eye"></i> Open</a>
+                                @if ($c->status === 'claimed')
+                                    {{-- a settled claim is undone first (Open → Undo settlement), so its credit note / deposit / stock is reversed --}}
+                                    {!! Form::open(['url' => action([\App\Http\Controllers\TradeSchemeReportController::class, 'destroyClaim'], [$c->id]), 'method' => 'delete', 'style' => 'display:inline;',
+                                        'onsubmit' => "return confirm('Delete claim ".e($c->claim_no)."? The free goods can be claimed again afterwards.')"]) !!}
+                                        <button type="submit" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-error"><i class="fa fa-trash"></i> Delete</button>
+                                    {!! Form::close() !!}
+                                @endif
+                            </td>
                         </tr>
                     @endforeach
                 </tbody>
