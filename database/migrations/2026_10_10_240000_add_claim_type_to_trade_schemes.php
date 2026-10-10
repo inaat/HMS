@@ -9,6 +9,9 @@ return new class extends Migration
 {
     public function up()
     {
+        if (Schema::hasColumn('trade_schemes', 'claim_type')) {
+            return;
+        }
         Schema::table('trade_schemes', function (Blueprint $table) {
             $table->enum('claim_type', ['cash', 'credit_note', 'stock'])->default('credit_note');
         });

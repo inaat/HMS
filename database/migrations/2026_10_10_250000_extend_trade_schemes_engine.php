@@ -18,23 +18,45 @@ return new class extends Migration
     public function up()
     {
         DB::statement('ALTER TABLE trade_schemes MODIFY product_id INT UNSIGNED NULL');
-        Schema::table('trade_schemes', function (Blueprint $table) {
-            $table->enum('scope', ['product', 'products', 'brand'])->default('product');
-            $table->text('product_ids')->nullable()->comment('JSON list of "v<variation_id>" / "p<product_id>" for scope products');
-            $table->unsignedInteger('brand_id')->nullable();
-            $table->enum('condition_type', ['qty', 'value'])->default('qty');
-            $table->enum('count_unit', ['unit', 'big', 'base'])->default('unit')
-                ->comment('qty counted in: unit = unit_id (one product), big = each product box/carton, base = pieces');
-            $table->enum('reward_type', ['free', 'percent'])->default('free');
-            $table->enum('channel', ['all', 'retail', 'wholesale'])->default('all');
+        // each column guarded: some may already exist on a server where an earlier run stopped half way
+        $has = fn ($t, $c) => Schema::hasColumn($t, $c);
+        Schema::table('trade_schemes', function (Blueprint $table) use ($has) {
+            if (! $has('trade_schemes', 'scope')) {
+                $table->enum('scope', ['product', 'products', 'brand'])->default('product');
+            }
+            if (! $has('trade_schemes', 'product_ids')) {
+                $table->text('product_ids')->nullable()->comment('JSON list of "v<variation_id>" / "p<product_id>" for scope products');
+            }
+            if (! $has('trade_schemes', 'brand_id')) {
+                $table->unsignedInteger('brand_id')->nullable();
+            }
+            if (! $has('trade_schemes', 'condition_type')) {
+                $table->enum('condition_type', ['qty', 'value'])->default('qty');
+            }
+            if (! $has('trade_schemes', 'count_unit')) {
+                $table->enum('count_unit', ['unit', 'big', 'base'])->default('unit')
+                    ->comment('qty counted in: unit = unit_id (one product), big = each product box/carton, base = pieces');
+            }
+            if (! $has('trade_schemes', 'reward_type')) {
+                $table->enum('reward_type', ['free', 'percent'])->default('free');
+            }
+            if (! $has('trade_schemes', 'channel')) {
+                $table->enum('channel', ['all', 'retail', 'wholesale'])->default('all');
+            }
         });
-        Schema::table('trade_scheme_slabs', function (Blueprint $table) {
-            $table->decimal('percent', 8, 4)->nullable()->comment('reward % (reward_type percent)');
-            $table->text('class_percents')->nullable()->comment('JSON {"A":1.5,"B":1.5,"C":1,...}: % by customer class');
+        Schema::table('trade_scheme_slabs', function (Blueprint $table) use ($has) {
+            if (! $has('trade_scheme_slabs', 'percent')) {
+                $table->decimal('percent', 8, 4)->nullable()->comment('reward % (reward_type percent)');
+            }
+            if (! $has('trade_scheme_slabs', 'class_percents')) {
+                $table->text('class_percents')->nullable()->comment('JSON {"A":1.5,"B":1.5,"C":1,...}: % by customer class');
+            }
         });
-        Schema::table('transaction_sell_lines', function (Blueprint $table) {
-            $table->text('scheme_data')->nullable()->comment('JSON [{id, free_qty (base), discount (Rs)}] of the schemes this line got');
-        });
+        if (! $has('transaction_sell_lines', 'scheme_data')) {
+            Schema::table('transaction_sell_lines', function (Blueprint $table) {
+                $table->text('scheme_data')->nullable()->comment('JSON [{id, free_qty (base), discount (Rs)}] of the schemes this line got');
+            });
+        }
     }
 
     public function down()

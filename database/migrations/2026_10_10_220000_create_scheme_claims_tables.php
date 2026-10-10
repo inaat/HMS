@@ -12,6 +12,7 @@ return new class extends Migration
 {
     public function up()
     {
+        if (! Schema::hasTable('scheme_claims')) {
         Schema::create('scheme_claims', function (Blueprint $table) {
             $table->id();
             $table->unsignedInteger('business_id')->index();
@@ -32,7 +33,11 @@ return new class extends Migration
             $table->unsignedInteger('created_by')->nullable();
             $table->timestamps();
         });
+        }
 
+        if (Schema::hasTable('scheme_claim_lines')) {
+            return;
+        }
         Schema::create('scheme_claim_lines', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('scheme_claim_id')->index();

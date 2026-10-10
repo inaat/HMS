@@ -12,6 +12,8 @@ return new class extends Migration
 {
     public function up()
     {
+        // guarded: the tables may already exist on a server where an earlier run stopped half way
+        if (! Schema::hasTable('trade_schemes')) {
         Schema::create('trade_schemes', function (Blueprint $table) {
             $table->id();
             $table->unsignedInteger('business_id')->index();
@@ -39,17 +41,24 @@ return new class extends Migration
             $table->timestamps();
             $table->unique(['business_id', 'code']);
         });
+        }
 
+        if (! Schema::hasTable('trade_scheme_slabs')) {
         Schema::create('trade_scheme_slabs', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('trade_scheme_id')->index();
             $table->decimal('buy_qty', 22, 4)->comment('in the scheme unit');
             $table->decimal('free_qty', 22, 4)->comment('in the free unit');
         });
+        }
 
         Schema::table('transaction_sell_lines', function (Blueprint $table) {
-            $table->unsignedBigInteger('trade_scheme_id')->nullable()->index();
-            $table->decimal('scheme_free_qty', 22, 4)->default(0)->comment('free quantity in base units given by the scheme on this line');
+            if (! Schema::hasColumn('transaction_sell_lines', 'trade_scheme_id')) {
+                $table->unsignedBigInteger('trade_scheme_id')->nullable()->index();
+            }
+            if (! Schema::hasColumn('transaction_sell_lines', 'scheme_free_qty')) {
+                $table->decimal('scheme_free_qty', 22, 4)->default(0)->comment('free quantity in base units given by the scheme on this line');
+            }
         });
     }
 

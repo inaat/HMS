@@ -12,6 +12,9 @@ return new class extends Migration
 {
     public function up()
     {
+        if (Schema::hasColumn('purchase_lines', 'bonus_qty')) {
+            return;
+        }
         Schema::table('purchase_lines', function (Blueprint $table) {
             $table->decimal('bonus_qty', 22, 4)->default(0)->comment('free (bonus) quantity in base units, included in quantity');
         });

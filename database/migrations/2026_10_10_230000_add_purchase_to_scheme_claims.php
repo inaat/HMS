@@ -9,6 +9,9 @@ return new class extends Migration
 {
     public function up()
     {
+        if (Schema::hasColumn('scheme_claims', 'purchase_transaction_id')) {
+            return;
+        }
         Schema::table('scheme_claims', function (Blueprint $table) {
             $table->unsignedInteger('purchase_transaction_id')->nullable()->comment('free stock received for the claim');
         });
