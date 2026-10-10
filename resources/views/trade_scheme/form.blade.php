@@ -4,8 +4,25 @@
     $title = $editing ? 'Edit scheme '.$scheme->code : (! empty($scheme->copy_of) ? 'Copy of scheme '.$scheme->code : 'Add trade scheme');
     $val = fn ($field, $default = null) => old($field, $scheme->{$field} ?? $default);
     $num = fn ($v) => $v === null || $v === '' ? '' : rtrim(rtrim(number_format((float) $v, 4, '.', ''), '0'), '.');
-    $slab_rows = old('slab_buy') ? collect(old('slab_buy'))->map(fn ($b, $i) => (object) ['buy_qty' => $b, 'free_qty' => old('slab_free')[$i] ?? ''])
-        : ($slabs->isNotEmpty() ? $slabs : collect([(object) ['buy_qty' => '', 'free_qty' => '']]));
+    $classes = ['A', 'B', 'C', 'D', 'E'];
+    if (old('slab_buy')) {
+        $slab_rows = collect(old('slab_buy'))->map(function ($b, $i) use ($classes) {
+            $row = (object) ['buy_qty' => $b, 'free_qty' => old('slab_free')[$i] ?? '', 'percent' => old('slab_percent')[$i] ?? '', 'class_percents' => []];
+            foreach ($classes as $c) {
+                $row->class_percents[$c] = old('slab_class_'.$c)[$i] ?? '';
+            }
+
+            return $row;
+        });
+    } else {
+        $slab_rows = $slabs->isNotEmpty()
+            ? $slabs->map(function ($s) {
+                $s->class_percents = json_decode((string) ($s->class_percents ?? ''), true) ?: [];
+
+                return $s;
+            })
+            : collect([(object) ['buy_qty' => '', 'free_qty' => '', 'percent' => '', 'class_percents' => []]]);
+    }
     $locations_picked = old('location_ids', json_decode((string) ($scheme->location_ids ?? ''), true) ?: []);
     $date_val = fn ($field) => old($field, ! empty($scheme->{$field}) && $editing ? \Carbon::parse($scheme->{$field})->format(session('business.date_format')) : '');
 @endphp
@@ -31,7 +48,7 @@
             <div class="col-md-5">
                 <div class="form-group">
                     {!! Form::label('name', 'Name:*') !!}
-                    {!! Form::text('name', $val('name'), ['class' => 'form-control', 'required', 'placeholder' => 'e.g. Hilal Candy Ramzan 12+1']) !!}
+                    {!! Form::text('name', $val('name'), ['class' => 'form-control', 'required', 'placeholder' => 'e.g. CandyLand Power Play Oct']) !!}
                 </div>
             </div>
             <div class="col-md-2">
@@ -57,54 +74,88 @@
 
     @component('components.widget', ['class' => 'box-primary', 'title' => 'What is bought'])
         <div class="row">
-            <div class="col-md-6">
+            <div class="col-md-3">
+                <div class="form-group">
+                    {!! Form::label('scope', 'Applies to:*') !!}
+                    {!! Form::select('scope', ['product' => 'One product', 'products' => 'A group of products', 'brand' => 'A whole brand (all its products)'], $val('scope', 'product'),
+                        ['class' => 'form-control select2', 'style' => 'width:100%', 'id' => 'scope']) !!}
+                </div>
+            </div>
+            <div class="col-md-6 scope_product">
                 <div class="form-group">
                     {!! Form::label('buy_item', 'Product:*') !!}
-                    <select name="buy_item" id="buy_item" class="form-control" style="width:100%" required>
+                    <select name="buy_item" id="buy_item" class="form-control" style="width:100%">
                         @if ($buy_pick && ! old('buy_item'))<option value="{{ $buy_pick['id'] }}" selected>{{ $buy_pick['text'] }}</option>@endif
                     </select>
                     <p class="help-block">A product with variations can be picked whole ("all variations") or one variation.</p>
                 </div>
             </div>
+            <div class="col-md-9 scope_products">
+                <div class="form-group">
+                    {!! Form::label('group_items', 'Products of the group:*') !!}
+                    <select name="group_items[]" id="group_items" class="form-control" style="width:100%" multiple>
+                        @foreach (old('group_items') ? [] : $group_picks as $g)<option value="{{ $g['id'] }}" selected>{{ $g['text'] }}</option>@endforeach
+                    </select>
+                    <p class="help-block">E.g. all "Candies Rs.5": type and pick each product. Quantities of all of them add up.</p>
+                </div>
+            </div>
+            <div class="col-md-4 scope_brand">
+                <div class="form-group">
+                    {!! Form::label('brand_id', 'Brand:*') !!}
+                    {!! Form::select('brand_id', $brands, $val('brand_id'), ['class' => 'form-control select2', 'style' => 'width:100%', 'placeholder' => __('messages.please_select')]) !!}
+                </div>
+            </div>
+        </div>
+        <div class="row">
             <div class="col-md-3">
+                <div class="form-group">
+                    {!! Form::label('condition_type', 'Condition:*') !!}
+                    {!! Form::select('condition_type', ['qty' => 'Quantity bought', 'value' => 'Bill value (Rs) of these products'], $val('condition_type', 'qty'),
+                        ['class' => 'form-control select2', 'style' => 'width:100%', 'id' => 'condition_type']) !!}
+                </div>
+            </div>
+            <div class="col-md-3 cond_qty scope_product">
                 <div class="form-group">
                     {!! Form::label('unit_id', 'Counted in unit:') !!}
                     <select name="unit_id" id="unit_id" class="form-control select2" style="width:100%" data-value="{{ $val('unit_id') }}"></select>
                     <p class="help-block">Slabs count this unit, e.g. CTN.</p>
                 </div>
             </div>
-        </div>
-
-        <label>Slabs</label>
-        <table class="table table-bordered" id="slab_table" style="max-width:520px;">
-            <thead><tr><th>Buy qty</th><th>Free qty</th><th style="width:40px;"></th></tr></thead>
-            <tbody>
-                @foreach ($slab_rows as $s)
-                    <tr>
-                        <td><input type="text" name="slab_buy[]" class="form-control input_number" value="{{ $num($s->buy_qty) }}" placeholder="12"></td>
-                        <td><input type="text" name="slab_free[]" class="form-control input_number" value="{{ $num($s->free_qty) }}" placeholder="1"></td>
-                        <td class="text-center"><i class="fa fa-times text-danger cursor-pointer remove_slab" style="margin-top:10px;"></i></td>
-                    </tr>
-                @endforeach
-            </tbody>
-        </table>
-        <button type="button" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary" id="add_slab"><i class="fa fa-plus"></i> Add slab</button>
-        <div class="checkbox" style="margin-top:12px;">
-            <label>{!! Form::checkbox('repeat', 1, (bool) $val('repeat', 1), ['class' => 'input-icheck']) !!}
-                <b>Repeat</b> — 12+1 gives 2 free for 24, 3 for 36 … (off: only once per line)</label>
+            <div class="col-md-3 cond_qty scope_many">
+                <div class="form-group">
+                    {!! Form::label('count_unit', 'Counted in:') !!}
+                    {!! Form::select('count_unit', ['big' => 'Boxes / cartons (each product\'s big unit)', 'base' => 'Pieces'], $val('count_unit', 'big') === 'base' ? 'base' : 'big',
+                        ['class' => 'form-control select2', 'style' => 'width:100%']) !!}
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="form-group">
+                    {!! Form::label('channel', 'For customers:*') !!}
+                    {!! Form::select('channel', ['all' => 'All customers', 'retail' => 'Retail only', 'wholesale' => 'Wholesale only'], $val('channel', 'all'),
+                        ['class' => 'form-control select2', 'style' => 'width:100%']) !!}
+                    <p class="help-block">From the customer's Outlet type ("Wholesale" = wholesale).</p>
+                </div>
+            </div>
         </div>
     @endcomponent
 
-    @component('components.widget', ['class' => 'box-primary', 'title' => 'What is free'])
+    @component('components.widget', ['class' => 'box-primary', 'title' => 'Reward'])
         <div class="row">
             <div class="col-md-3">
+                <div class="form-group">
+                    {!! Form::label('reward_type', 'Reward:*') !!}
+                    {!! Form::select('reward_type', ['free' => 'Free goods', 'percent' => '% discount on these products'], $val('reward_type', 'free'),
+                        ['class' => 'form-control select2', 'style' => 'width:100%', 'id' => 'reward_type']) !!}
+                </div>
+            </div>
+            <div class="col-md-3 reward_free free_mode_box">
                 <div class="form-group">
                     {!! Form::label('free_mode', 'Free item:*') !!}
                     {!! Form::select('free_mode', ['same' => 'Same product (discount on its line)', 'other' => 'Another product (free line)'], $val('free_mode', 'same'),
                         ['class' => 'form-control select2', 'style' => 'width:100%', 'id' => 'free_mode']) !!}
                 </div>
             </div>
-            <div class="col-md-5" id="free_item_box">
+            <div class="col-md-4 reward_free" id="free_item_box">
                 <div class="form-group">
                     {!! Form::label('free_item', 'Free product:*') !!}
                     <select name="free_item" id="free_item" class="form-control" style="width:100%">
@@ -112,13 +163,46 @@
                     </select>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2 reward_free">
                 <div class="form-group">
                     {!! Form::label('free_unit_id', 'Free qty unit:') !!}
                     <select name="free_unit_id" id="free_unit_id" class="form-control select2" style="width:100%" data-value="{{ $val('free_unit_id') }}"></select>
-                    <p class="help-block">Same product: empty = same unit as bought.</p>
                 </div>
             </div>
+        </div>
+
+        <label>Slabs</label>
+        <p class="help-block reward_percent" style="margin-top:0;">Give one % for everybody, or a % per customer class (Outlet class A–E; customers without a class get the lowest %).</p>
+        <div class="table-responsive">
+        <table class="table table-bordered" id="slab_table" style="max-width:900px;">
+            <thead>
+                <tr>
+                    <th id="buy_head">Buy qty</th>
+                    <th class="reward_free">Free qty</th>
+                    <th class="reward_percent">% (all)</th>
+                    @foreach ($classes as $c)<th class="reward_percent">Class {{ $c }} %</th>@endforeach
+                    <th style="width:40px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach ($slab_rows as $s)
+                    <tr>
+                        <td><input type="text" name="slab_buy[]" class="form-control input_number" value="{{ $num($s->buy_qty) }}" placeholder="12"></td>
+                        <td class="reward_free"><input type="text" name="slab_free[]" class="form-control input_number" value="{{ $num($s->free_qty) }}" placeholder="1"></td>
+                        <td class="reward_percent"><input type="text" name="slab_percent[]" class="form-control input_number" value="{{ $num($s->percent ?? '') }}" placeholder="2"></td>
+                        @foreach ($classes as $c)
+                            <td class="reward_percent"><input type="text" name="slab_class_{{ $c }}[]" class="form-control input_number" value="{{ $num($s->class_percents[$c] ?? '') }}"></td>
+                        @endforeach
+                        <td class="text-center"><i class="fa fa-times text-danger cursor-pointer remove_slab" style="margin-top:10px;"></i></td>
+                    </tr>
+                @endforeach
+            </tbody>
+        </table>
+        </div>
+        <button type="button" class="tw-dw-btn tw-dw-btn-xs tw-dw-btn-outline tw-dw-btn-primary" id="add_slab"><i class="fa fa-plus"></i> Add slab</button>
+        <div class="checkbox reward_free" style="margin-top:12px;">
+            <label>{!! Form::checkbox('repeat', 1, (bool) $val('repeat', 1), ['class' => 'input-icheck']) !!}
+                <b>Repeat</b> — 12+1 gives 2 free for 24, 3 for 36 … (off: once per bill / line, e.g. "not for multiple purchases")</label>
         </div>
     @endcomponent
 
@@ -148,7 +232,7 @@
                     {!! Form::select('claim_type', ['cash' => 'Money (cash / bank)', 'credit_note' => 'Credit note', 'stock' => 'Stock (free goods)'], $val('claim_type', 'credit_note'), ['class' => 'form-control select2', 'style' => 'width:100%']) !!}
                 </div>
             </div>
-            <div class="col-md-2">
+            <div class="col-md-2 reward_free">
                 <div class="form-group">
                     {!! Form::label('budget_qty', 'Budget (total free qty):') !!}
                     {!! Form::text('budget_qty', $num($val('budget_qty')), ['class' => 'form-control input_number', 'placeholder' => 'no limit']) !!}
@@ -182,20 +266,21 @@
 <script type="text/javascript">
     $(document).ready(function () {
         var unitsUrl = "{{ action([\App\Http\Controllers\TradeSchemeController::class, 'units']) }}";
+        var productsUrl = "{{ action([\App\Http\Controllers\TradeSchemeController::class, 'products']) }}";
 
         $('.scheme_date').datepicker({ autoclose: true, format: datepicker_date_format, clearBtn: true });
 
         // product pickers: products and variations, typed search
-        $('#buy_item, #free_item').select2({
+        var pickerOptions = {
             placeholder: 'Type product name or SKU',
             minimumInputLength: 1,
             ajax: {
-                url: "{{ action([\App\Http\Controllers\TradeSchemeController::class, 'products']) }}",
-                dataType: 'json', delay: 250,
+                url: productsUrl, dataType: 'json', delay: 250,
                 data: function (params) { return { q: params.term }; },
                 processResults: function (data) { return data; }
             }
-        });
+        };
+        $('#buy_item, #free_item, #group_items').select2(pickerOptions);
 
         // unit boxes follow the chosen product
         function loadUnits(item, $select, emptyText) {
@@ -218,21 +303,42 @@
         $('#free_item').on('change', function () {
             if ($('#free_mode').val() === 'other') { loadUnits(freeUnitSource(), $('#free_unit_id'), null); }
         });
+
+        // show only what the chosen scope / condition / reward needs
+        function refresh() {
+            var scope = $('#scope').val(), cond = $('#condition_type').val(), reward = $('#reward_type').val();
+            $('.scope_product').not('.cond_qty').toggle(scope === 'product');
+            $('.scope_products').toggle(scope === 'products');
+            $('.scope_brand').toggle(scope === 'brand');
+            $('.cond_qty.scope_product').toggle(scope === 'product' && cond === 'qty');
+            $('.cond_qty.scope_many').toggle(scope !== 'product' && cond === 'qty');
+            $('.reward_free').toggle(reward === 'free');
+            $('.reward_percent').toggle(reward === 'percent');
+            // free goods of the same product only for one product counted by quantity
+            var sameAllowed = scope === 'product' && cond === 'qty';
+            if (! sameAllowed && $('#free_mode').val() === 'same') { $('#free_mode').val('other').trigger('change.select2'); }
+            $('.free_mode_box').toggle(reward === 'free' && sameAllowed);
+            var other = $('#free_mode').val() === 'other';
+            $('#free_item_box').toggle(reward === 'free' && other);
+            $('#buy_head').text(cond === 'value' ? 'Bill value Rs' : 'Buy qty');
+        }
+        $('#scope, #condition_type, #reward_type').on('change', refresh);
         $('#free_mode').on('change', function () {
-            var other = $(this).val() === 'other';
-            $('#free_item_box').toggle(other);
-            $('#free_item').prop('required', other);
-            loadUnits(freeUnitSource(), $('#free_unit_id'), other ? null : 'Same as bought');
-        }).trigger('change');
+            refresh();
+            loadUnits(freeUnitSource(), $('#free_unit_id'), $(this).val() === 'other' ? null : 'Same as bought');
+        });
+        refresh();
+        loadUnits(freeUnitSource(), $('#free_unit_id'), $('#free_mode').val() === 'other' ? null : 'Same as bought');
         loadUnits($('#buy_item').val(), $('#unit_id'), null);
 
         $('#funded_by').on('change', function () { $('.supplier_box').toggle($(this).val() === 'supplier'); }).trigger('change');
 
         // slabs
         $('#add_slab').on('click', function () {
-            $('#slab_table tbody').append('<tr><td><input type="text" name="slab_buy[]" class="form-control input_number" placeholder="24"></td>'
-                + '<td><input type="text" name="slab_free[]" class="form-control input_number" placeholder="3"></td>'
-                + '<td class="text-center"><i class="fa fa-times text-danger cursor-pointer remove_slab" style="margin-top:10px;"></i></td></tr>');
+            var row = $('#slab_table tbody tr').first().clone();
+            row.find('input').val('');
+            $('#slab_table tbody').append(row);
+            refresh();
         });
         $(document).on('click', '.remove_slab', function () {
             if ($('#slab_table tbody tr').length > 1) { $(this).closest('tr').remove(); }

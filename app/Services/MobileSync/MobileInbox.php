@@ -560,6 +560,8 @@ class MobileInbox
                     $lines[$last]['trade_scheme_id'] = $scheme->id;
                     if ($scheme->free_mode === 'other' && (int) $scheme->free_variation_id === (int) $sl->variation_id && (int) $scheme->product_id !== (int) $sl->product_id) {
                         $lines[$last]['scheme_role'] = 'free';
+                    } else {
+                        $lines[$last]['trade_scheme_ids'] = implode(',', array_column(\App\Utils\TradeSchemeUtil::lineSchemes($sl), 'id'));
                     }
                 }
             }

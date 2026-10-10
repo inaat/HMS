@@ -186,6 +186,7 @@ Route::middleware(['setData', 'auth', 'SetSessionData', 'language', 'timezone', 
 
     // Trade schemes ("buy 12 get 1 free")
     Route::get('/trade-schemes/active', [\App\Http\Controllers\TradeSchemeController::class, 'active']);
+    Route::get('/trade-schemes/customer', [\App\Http\Controllers\TradeSchemeController::class, 'customer']);
     Route::get('/trade-schemes/products', [\App\Http\Controllers\TradeSchemeController::class, 'products']);
     Route::get('/trade-schemes/units', [\App\Http\Controllers\TradeSchemeController::class, 'units']);
     Route::get('/trade-schemes/{id}/copy', [\App\Http\Controllers\TradeSchemeController::class, 'copy']);

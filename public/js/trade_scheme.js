@@ -1,20 +1,19 @@
 /*
  * Trade schemes on the sale screens (POS, Add Sale, their edit pages). Loaded after pos.js.
  *
- * Running schemes come from /trade-schemes/active (TradeSchemeController@active) for the sale's location. When a
- * line's quantity reaches a slab:
- *  - same product: the line gets a fixed discount worth the free quantity ("13 CTN, 1 CTN free" = 1 CTN off);
- *  - another product: a free line of that product is added at 100% discount and kept in step with the bought line.
- * Hidden fields products[i][trade_scheme_id] / [scheme_role] go with the form; the server checks them again and
- * records the free quantity (TradeSchemeUtil::applyToLines). Staff can drop the scheme from a line (×), and a
- * discount typed by hand replaces it.
+ * Running schemes come from /trade-schemes/active (TradeSchemeController@active) and the customer's class / channel
+ * from /trade-schemes/customer. After every change of a line or the customer the whole bill is worked out again,
+ * the same way as TradeSchemeUtil::evaluate on the server:
+ *  - one product, free goods of the same product: a line discount worth the free quantity ("13 CTN, 1 CTN free");
+ *  - a group / brand / bill value reaching a slab: a free line of the free product (100% discount), or
+ *  - a % discount on the matching lines (by customer class when the slab has class %).
+ * Discounts of several schemes on one line are combined into one fixed discount per unit. Hidden fields
+ * products[i][trade_scheme_ids] (bought lines) and products[i][trade_scheme_id] + [scheme_role]=free (free lines) go
+ * with the form; the server checks them again and records what each line got. Staff can drop the schemes of a line
+ * (×), and a discount typed by hand replaces them.
  */
 (function ($) {
-    var TS = { byVariation: {}, byProduct: {}, busy: 0, loadedFor: null };
-
-    function activeUrl() {
-        return window.trade_scheme_active_url || '/trade-schemes/active';
-    }
+    var TS = { schemes: [], customer: { 'class': null, channel: 'retail' }, busy: 0, timer: null };
 
     function num(v) {
         v = parseFloat(v);
@@ -26,107 +25,136 @@
     }
 
     // ---- loading ----------------------------------------------------------------------------------------------
-    function load(force) {
+    function load() {
         var location_id = $('input#location_id').val() || $('select#select_location_id').val() || '';
-        if (!force && TS.loadedFor === location_id) {
+        $.getJSON(window.trade_scheme_active_url || '/trade-schemes/active', { location_id: location_id }, function (list) {
+            TS.schemes = list || [];
+            linkSavedRows();
+            schedule();
+        });
+    }
+
+    function loadCustomer() {
+        var id = $('select#customer_id').val();
+        if (!id) {
+            TS.customer = { 'class': null, channel: 'retail' };
+            schedule();
             return;
         }
-        TS.loadedFor = location_id;
-        $.getJSON(activeUrl(), { location_id: location_id }, function (list) {
-            TS.byVariation = {};
-            TS.byProduct = {};
-            $.each(list || [], function (i, s) {
-                if (s.variation_id) {
-                    TS.byVariation[s.variation_id] = s;
-                } else {
-                    TS.byProduct[s.product_id] = s;
-                }
-            });
-            linkSavedFreeRows();
-            $('#pos_table tbody tr.product_row').each(function () {
-                apply($(this));
-            });
+        $.getJSON(window.trade_scheme_customer_url || '/trade-schemes/customer', { contact_id: id }, function (c) {
+            TS.customer = c || { 'class': null, channel: 'retail' };
+            schedule();
         });
     }
 
-    function schemeFor(tr) {
-        var v = num(tr.find('input.row_variation_id').val());
-        var p = num(tr.find('input.product_id').val());
-        return TS.byVariation[v] || TS.byProduct[p] || null;
+    function schedule() {
+        clearTimeout(TS.timer);
+        TS.timer = setTimeout(applyAll, 60);
     }
 
-    function schemeById(id) {
-        var found = null;
-        $.each([TS.byVariation, TS.byProduct], function (i, map) {
-            $.each(map, function (k, s) {
-                if (String(s.id) === String(id)) {
-                    found = s;
-                }
-            });
-        });
-        return found;
+    // ---- the rules (TradeSchemeUtil) --------------------------------------------------------------------------
+    function matches(s, product_id, variation_id) {
+        if ((s.scope || 'product') === 'product') {
+            return num(product_id) === num(s.product_id) && (!s.variation_id || num(variation_id) === num(s.variation_id));
+        }
+        return (s.p_ids || []).indexOf(num(product_id)) >= 0 || (s.v_ids || []).indexOf(num(variation_id)) >= 0;
     }
 
-    // ---- helpers ----------------------------------------------------------------------------------------------
-    function freeQty(s, qty) {
-        var slabs = (s.slabs || []).slice().sort(function (a, b) { return num(b.buy_qty) - num(a.buy_qty); });
+    function freeQty(slabs, qty, repeat) {
+        slabs = (slabs || []).slice().sort(function (a, b) { return num(b.buy_qty) - num(a.buy_qty); });
         var free = 0, left = qty + 0.00001;
         for (var i = 0; i < slabs.length; i++) {
             var buy = num(slabs[i].buy_qty);
             if (buy <= 0 || left < buy) {
                 continue;
             }
-            var times = s.repeat ? Math.floor(left / buy) : 1;
+            var times = repeat ? Math.floor(left / buy) : 1;
             free += times * num(slabs[i].free_qty);
             left -= times * buy;
-            if (!s.repeat) {
+            if (!repeat) {
                 break;
             }
         }
         return Math.round(free * 10000) / 10000;
     }
 
-    function rowIndex(tr) {
-        return tr.attr('data-row_index');
+    function bestSlab(slabs, measure) {
+        var best = null;
+        $.each(slabs || [], function (i, s) {
+            if (num(s.buy_qty) > 0 && measure + 0.00001 >= num(s.buy_qty) && (!best || num(s.buy_qty) > num(best.buy_qty))) {
+                best = s;
+            }
+        });
+        return best;
     }
 
-    function rowMultiplier(tr) {
-        return num(tr.find('input.base_unit_multiplier').val()) || 1;
+    function slabPercent(slab, cls) {
+        var byClass = {}, any = false;
+        $.each(slab.class_percents || {}, function (k, v) {
+            if (v !== null && v !== '') { byClass[k] = num(v); any = true; }
+        });
+        if (any) {
+            if (cls && byClass.hasOwnProperty(cls)) { return byClass[cls]; }
+            return Math.min.apply(null, $.map(byClass, function (v) { return v; }));
+        }
+        return num(slab.percent);
     }
 
-    function setHidden(tr, s, role) {
-        var idx = rowIndex(tr);
-        var cell = tr.find('td:first');
-        var id_input = tr.find('input.ts_trade_scheme_id');
-        if (!id_input.length) {
-            id_input = $('<input type="hidden" class="ts_trade_scheme_id">').attr('name', 'products[' + idx + '][trade_scheme_id]').appendTo(cell);
-        }
-        id_input.val(s.id);
-        tr.find('input.ts_scheme_role').remove();
-        if (role) {
-            $('<input type="hidden" class="ts_scheme_role">').attr('name', 'products[' + idx + '][scheme_role]').val(role).appendTo(cell);
-        }
+    function evaluate(lines) {
+        var out = { lines: {}, free: {} };
+        $.each(TS.schemes, function (i, s) {
+            if (s.channel && s.channel !== 'all' && s.channel !== TS.customer.channel) {
+                return;
+            }
+            var hit = lines.filter(function (l) { return matches(s, l.product_id, l.variation_id); });
+            if (!hit.length) {
+                return;
+            }
+            var add = function (idx, e) { (out.lines[idx] = out.lines[idx] || []).push(e); };
+            if (s.reward_type !== 'percent' && s.free_mode === 'same') {
+                $.each(hit, function (j, l) {
+                    var free = freeQty(s.slabs, l.base_qty / (num(s.unit_mult) || 1), s.repeat);
+                    if (s.budget_left !== null && s.budget_left !== undefined) { free = Math.min(free, num(s.budget_left)); }
+                    var free_base = Math.min(free * (num(s.free_unit_mult) || 1), l.base_qty);
+                    if (free_base > 0) { add(l.idx, { s: s, type: 'same', free: free, free_base: free_base, pct: 0 }); }
+                });
+                return;
+            }
+            var measure = 0;
+            $.each(hit, function (j, l) {
+                if (s.condition_type === 'value') {
+                    measure += l.value;
+                } else {
+                    var factor = (s.scope || 'product') === 'product' ? (num(s.unit_mult) || 1) : (s.count_unit === 'base' ? 1 : l.big);
+                    measure += l.base_qty / (factor || 1);
+                }
+            });
+            if (s.reward_type === 'percent') {
+                var slab = bestSlab(s.slabs, measure), pct = slab ? slabPercent(slab, TS.customer['class']) : 0;
+                if (pct > 0) {
+                    $.each(hit, function (j, l) { add(l.idx, { s: s, type: 'percent', free_base: 0, pct: pct }); });
+                }
+            } else {
+                var free = freeQty(s.slabs, measure, s.repeat);
+                if (s.budget_left !== null && s.budget_left !== undefined) { free = Math.min(free, num(s.budget_left)); }
+                if (free > 0 && s.free_variation_id) {
+                    out.free[s.id] = { s: s, qty: free };
+                    $.each(hit, function (j, l) { add(l.idx, { s: s, type: 'earn', free_base: 0, pct: 0 }); });
+                }
+            }
+        });
+        return out;
     }
 
-    function setLabel(tr, html, removable) {
-        var label = tr.find('.ts_label');
-        if (!html) {
-            label.remove();
-            return;
-        }
-        if (!label.length) {
-            // under the product name (product_row.blade.php), else at the end of the first cell
-            var slot = tr.find('.ts_label_slot').first();
-            label = $('<div class="ts_label" style="margin:3px 0;"></div>').appendTo(slot.length ? slot : tr.find('td:first'));
-        }
-        label.html('<span class="label" style="background:#2e9e6a;white-space:normal;text-align:left;display:inline-block;">'
-            + '<i class="fa fa-gift"></i> ' + html + '</span>'
-            + (removable ? ' <i class="fa fa-times text-danger cursor-pointer ts_off" title="Remove the scheme from this line"></i>' : ''));
+    // ---- rows -------------------------------------------------------------------------------------------------
+    function rows() {
+        return $('#pos_table tbody tr.product_row');
     }
 
-    function clearRow(tr) {
-        tr.find('input.ts_trade_scheme_id, input.ts_scheme_role').remove();
-        setLabel(tr, null);
+    function bigMultiplier(tr) {
+        var max = 1;
+        tr.find('select.sub_unit option').each(function () { max = Math.max(max, num($(this).data('multiplier'))); });
+        return max;
     }
 
     function setDiscount(tr, type, amount) {
@@ -138,57 +166,69 @@
         tr.data('ts_discount', amount);
     }
 
-    // ---- same product: discount on the line ------------------------------------------------------------------
-    function dropSameDiscount(tr) {
-        if (tr.data('ts_discount') === undefined) {
+    function hidden(tr, cls, field, value) {
+        var input = tr.find('input.' + cls);
+        if (value === null) {
+            input.remove();
             return;
         }
-        var current = num(__read_number(tr.find('input.row_discount_amount')));
-        if (Math.abs(current - num(tr.data('ts_discount'))) < 0.01) {
-            setDiscount(tr, 'fixed', 0);
+        if (!input.length) {
+            input = $('<input type="hidden">').addClass(cls).attr('name', 'products[' + tr.attr('data-row_index') + '][' + field + ']').appendTo(tr.find('td:first'));
         }
-        tr.removeData('ts_discount');
-        clearRow(tr);
+        input.val(value);
     }
 
-    // ---- another product: a free line --------------------------------------------------------------------
-    function freeRowOf(tr) {
-        return $('#pos_table tbody tr.ts_free_row[data-ts_parent="' + rowIndex(tr) + '"]');
-    }
-
-    function removeFreeRow(tr) {
-        var free = freeRowOf(tr);
-        if (free.length) {
-            free.remove();
-            pos_total_row();
-        }
-    }
-
-    function syncFreeRow(tr, s, free) {
-        var row = freeRowOf(tr);
-        if (free <= 0) {
-            removeFreeRow(tr);
-            clearRow(tr);
+    function setLabel(tr, html, removable) {
+        var label = tr.find('.ts_label');
+        if (!html) {
+            label.remove();
             return;
         }
+        if (!label.length) {
+            var slot = tr.find('.ts_label_slot').first();
+            label = $('<div class="ts_label" style="margin:3px 0;"></div>').appendTo(slot.length ? slot : tr.find('td:first'));
+        }
+        label.html('<span class="label" style="background:#2e9e6a;white-space:normal;text-align:left;display:inline-block;">'
+            + '<i class="fa fa-gift"></i> ' + html + '</span>'
+            + (removable ? ' <i class="fa fa-times text-danger cursor-pointer ts_off" title="Remove the schemes from this line"></i>' : ''));
+    }
+
+    function clearRow(tr) {
+        if (tr.data('ts_discount') !== undefined) {
+            var current = num(__read_number(tr.find('input.row_discount_amount')));
+            if (Math.abs(current - num(tr.data('ts_discount'))) < 0.01) {
+                setDiscount(tr, 'fixed', 0);
+            }
+            tr.removeData('ts_discount');
+        }
+        hidden(tr, 'ts_ids', 'trade_scheme_ids', null);
+        setLabel(tr, null);
+    }
+
+    function slabText(s) {
+        return $.map(s.slabs || [], function (x) {
+            var buy = s.condition_type === 'value' ? 'Rs ' + __number_f(x.buy_qty, false, false, 0) : fmtQty(x.buy_qty);
+            return s.reward_type === 'percent' ? buy + '→%' : buy + (s.condition_type === 'value' ? '→' : '+') + fmtQty(x.free_qty);
+        }).join(', ');
+    }
+
+    // ---- free lines of another product (one per scheme) --------------------------------------------------------
+    function syncFreeRow(s, qty) {
+        var row = $('#pos_table tbody tr.ts_free_row[data-ts_parent="S' + s.id + '"]');
         if (!row.length) {
-            // add the free product as a new line (never merged into an existing line of the same product)
-            var method = $('#item_addition_method');
-            var keep = method.val();
+            var method = $('#item_addition_method'), keep = method.val(), before = rows().length;
             TS.busy++;
             method.val(0);
-            var before = $('#pos_table tbody tr.product_row').length;
             pos_product_row(s.free_variation_id);
             method.val(keep);
             TS.busy--;
-            if ($('#pos_table tbody tr.product_row').length === before) {
+            if (rows().length === before) {
                 return;
             }
-            row = $('#pos_table tbody tr.product_row').last();
-            row.addClass('ts_free_row').attr('data-ts_parent', rowIndex(tr));
+            row = rows().last();
+            row.addClass('ts_free_row').attr('data-ts_parent', 'S' + s.id);
         }
         TS.busy++;
-        // free quantity is in the scheme's free unit; no free unit = base unit (multiplier 1), whatever the line opened in
         var unit = row.find('select.sub_unit');
         if (unit.length) {
             var target = s.free_unit_id && unit.find('option[value="' + s.free_unit_id + '"]').length
@@ -198,79 +238,101 @@
                 unit.val(target).trigger('change');
             }
         }
-        var qty_input = row.find('input.pos_quantity');
-        __write_number(qty_input, free);
-        qty_input.prop('readonly', true).trigger('change');
+        var q = row.find('input.pos_quantity');
+        if (Math.abs(num(__read_number(q)) - qty) > 0.00001) {
+            __write_number(q, qty);
+            q.trigger('change');
+        }
+        q.prop('readonly', true);
         row.find('.quantity-up, .quantity-down').prop('disabled', true);
         TS.busy--;
-        setDiscount(row, 'percentage', 100);
-        setHidden(row, s, 'free');
+        if (row.find('select.row_discount_type').val() !== 'percentage' || num(__read_number(row.find('input.row_discount_amount'))) !== 100) {
+            setDiscount(row, 'percentage', 100);
+        }
+        hidden(row, 'ts_free_id', 'trade_scheme_id', s.id);
+        hidden(row, 'ts_role', 'scheme_role', 'free');
         setLabel(row, 'FREE — ' + s.code + ' (' + slabText(s) + ')', false);
-        setHidden(tr, s, '');
-        var free_unit = s.free_unit_name || $.trim(row.find('select.sub_unit option:selected').text()) || '';
-        setLabel(tr, s.code + ' (' + slabText(s) + '): ' + fmtQty(free) + (free_unit ? ' ' + free_unit : '') + ' ' + (s.free_name || '') + ' free', true);
-    }
-
-    function slabText(s) {
-        return (s.slabs || []).map(function (x) { return fmtQty(x.buy_qty) + '+' + fmtQty(x.free_qty); }).join(', ');
     }
 
     // ---- main ------------------------------------------------------------------------------------------------
-    function apply(tr) {
-        if (!tr || !tr.length || tr.hasClass('ts_free_row') || !tr.closest('body').length) {
+    function applyAll() {
+        if (TS.busy || !$('#pos_table').length) {
             return;
         }
-        var s = schemeFor(tr);
-        if (!s || tr.data('ts_off')) {
-            dropSameDiscount(tr);
-            removeFreeRow(tr);
-            if (!s) {
+        var lines = [];
+        rows().not('.ts_free_row').each(function () {
+            var tr = $(this), qty = num(__read_number(tr.find('input.pos_quantity')));
+            lines.push({
+                idx: tr.attr('data-row_index'), tr: tr,
+                product_id: num(tr.find('input.product_id').val()), variation_id: num(tr.find('input.row_variation_id').val()),
+                base_qty: qty * (num(tr.find('input.base_unit_multiplier').val()) || 1),
+                value: qty * num(__read_number(tr.find('input.pos_unit_price'))),
+                big: bigMultiplier(tr)
+            });
+        });
+        var result = evaluate(lines);
+
+        $.each(lines, function (i, l) {
+            var tr = l.tr, effects = result.lines[l.idx] || [];
+            if (tr.data('ts_off') || !effects.length) {
                 clearRow(tr);
+                return;
             }
-            return;
-        }
-        var qty = num(__read_number(tr.find('input.pos_quantity')));
-        var base_qty = qty * rowMultiplier(tr);
-        var free = freeQty(s, base_qty / (num(s.unit_mult) || 1));
-        if (s.budget_left !== null && s.budget_left !== undefined) {
-            free = Math.min(free, num(s.budget_left));
-        }
+            var fs = 0, pct = 0, ids = [], texts = [];
+            $.each(effects, function (j, e) {
+                ids.push(e.s.id);
+                if (e.type === 'same') {
+                    fs = Math.max(fs, l.base_qty > 0 ? e.free_base / l.base_qty : 0);
+                    texts.push(e.s.code + ' (' + slabText(e.s) + '): ' + fmtQty(e.free) + ' ' + (e.s.free_unit_name || '') + ' free');
+                } else if (e.type === 'percent') {
+                    pct += e.pct;
+                    texts.push(e.s.code + ' ' + fmtQty(e.pct) + '%');
+                } else {
+                    texts.push(e.s.code + ': ' + (e.s.free_name || 'free goods') + ' earned');
+                }
+            });
+            var d = 1 - (1 - fs) * (1 - pct / 100);
+            var price = num(__read_number(tr.find('input.pos_unit_price')));
+            var per_unit = Math.round(price * d * 10000) / 10000;
+            if (d > 0) {
+                var current = num(__read_number(tr.find('input.row_discount_amount')));
+                if (tr.find('select.row_discount_type').val() !== 'fixed' || Math.abs(current - per_unit) > 0.00009) {
+                    setDiscount(tr, 'fixed', per_unit);
+                } else {
+                    tr.data('ts_discount', per_unit);
+                }
+            } else if (tr.data('ts_discount') !== undefined) {
+                // the line only earns a free item now: take back the discount the schemes had put on it
+                var was = num(__read_number(tr.find('input.row_discount_amount')));
+                if (Math.abs(was - num(tr.data('ts_discount'))) < 0.01) {
+                    setDiscount(tr, 'fixed', 0);
+                }
+                tr.removeData('ts_discount');
+            }
+            hidden(tr, 'ts_ids', 'trade_scheme_ids', ids.join(','));
+            var qty = num(__read_number(tr.find('input.pos_quantity')));
+            setLabel(tr, texts.join(' · ') + (d > 0 ? ' = ' + __currency_trans_from_en(per_unit * qty, true) + ' off' : ''), true);
+        });
 
-        if (s.free_mode === 'other') {
-            dropSameDiscount(tr);
-            syncFreeRow(tr, s, free);
-            return;
-        }
-
-        var free_base = Math.min(free * (num(s.free_unit_mult) || 1), base_qty);
-        if (free_base <= 0 || base_qty <= 0) {
-            dropSameDiscount(tr);
-            return;
-        }
-        var price = num(__read_number(tr.find('input.pos_unit_price')));
-        var per_unit = Math.round(price * free_base / base_qty * 10000) / 10000;
-        setDiscount(tr, 'fixed', per_unit);
-        setHidden(tr, s, '');
-        setLabel(tr, s.code + ' (' + slabText(s) + '): ' + fmtQty(free) + ' ' + (s.free_unit_name || '') + ' free = '
-            + __currency_trans_from_en(per_unit * qty, true) + ' off', true);
+        // free lines: add / update the earned ones, remove the rest
+        $.each(result.free, function (id, f) { syncFreeRow(f.s, f.qty); });
+        $('#pos_table tbody tr.ts_free_row').each(function () {
+            var id = String($(this).attr('data-ts_parent') || '').replace('S', '');
+            if (!result.free[id]) {
+                $(this).remove();
+            }
+        });
+        pos_total_row();
     }
 
-    // rows saved with a scheme (edit, sales order → invoice): free lines find their bought line again
-    function linkSavedFreeRows() {
-        $('#pos_table tbody tr.product_row').each(function () {
+    // rows saved with schemes (edit, sales order → invoice)
+    function linkSavedRows() {
+        rows().each(function () {
             var tr = $(this);
-            if (tr.find('input.ts_scheme_role').val() === 'free' && !tr.hasClass('ts_free_row')) {
-                var id = tr.find('input.ts_trade_scheme_id').val();
-                var parent = $('#pos_table tbody tr.product_row').filter(function () {
-                    return $(this).find('input.ts_trade_scheme_id').val() === id && $(this).find('input.ts_scheme_role').val() !== 'free';
-                }).first();
-                if (parent.length) {
-                    tr.addClass('ts_free_row').attr('data-ts_parent', rowIndex(parent));
-                    tr.find('input.pos_quantity').prop('readonly', true);
-                } else {
-                    clearRow(tr);
-                }
-            } else if (tr.find('input.ts_trade_scheme_id').length && tr.data('ts_discount') === undefined) {
+            if (tr.find('input.ts_role').val() === 'free' && !tr.hasClass('ts_free_row')) {
+                tr.addClass('ts_free_row').attr('data-ts_parent', 'S' + tr.find('input.ts_free_id').val());
+                tr.find('input.pos_quantity').prop('readonly', true);
+            } else if (tr.find('input.ts_ids').length && tr.data('ts_discount') === undefined) {
                 tr.data('ts_discount', num(__read_number(tr.find('input.row_discount_amount'))));
             }
         });
@@ -283,68 +345,42 @@
         var tbody = $('#pos_table tbody');
 
         tbody.on('change', 'input.pos_quantity, select.sub_unit, input.pos_unit_price', function () {
-            if (TS.busy) {
-                return;
-            }
-            var tr = $(this).closest('tr');
-            setTimeout(function () { apply(tr); }, 0);
+            if (!TS.busy) { schedule(); }
         });
 
-        // a discount typed by hand replaces the scheme on that line
+        // a discount typed by hand replaces the schemes of that line
         tbody.on('change', 'input.row_discount_amount, select.row_discount_type', function () {
             if (TS.busy) {
                 return;
             }
             var tr = $(this).closest('tr');
-            if (tr.find('input.ts_trade_scheme_id').length && !tr.hasClass('ts_free_row')) {
+            if (tr.find('input.ts_ids').length && !tr.hasClass('ts_free_row')) {
                 tr.data('ts_off', true).removeData('ts_discount');
-                removeFreeRow(tr);
-                clearRow(tr);
+                hidden(tr, 'ts_ids', 'trade_scheme_ids', null);
+                setLabel(tr, null);
+                schedule();
             }
         });
 
         tbody.on('click', '.ts_off', function () {
-            var tr = $(this).closest('tr');
-            tr.data('ts_off', true);
-            apply(tr);
+            $(this).closest('tr').data('ts_off', true);
+            schedule();
         });
 
-        // removing a bought line removes its free line
-        tbody.on('click', 'i.pos_remove_row', function () {
-            setTimeout(function () {
-                tbody.find('tr.ts_free_row').each(function () {
-                    var parent = tbody.find('tr.product_row[data-row_index="' + $(this).attr('data-ts_parent') + '"]');
-                    if (!parent.length) {
-                        $(this).remove();
-                    }
-                });
-                pos_total_row();
-            }, 0);
-        });
+        tbody.on('click', 'i.pos_remove_row', function () { setTimeout(schedule, 0); });
 
         // new lines (search, barcode, sales order)
-        var observer = new MutationObserver(function (mutations) {
-            if (TS.busy) {
-                return;
+        new MutationObserver(function () {
+            if (!TS.busy) {
+                linkSavedRows();
+                schedule();
             }
-            mutations.forEach(function (m) {
-                $(m.addedNodes).filter('tr.product_row').each(function () {
-                    var tr = $(this);
-                    setTimeout(function () {
-                        if (tr.find('input.ts_trade_scheme_id').length) {
-                            linkSavedFreeRows();
-                        }
-                        apply(tr);
-                    }, 0);
-                });
-            });
-        });
-        observer.observe(tbody[0], { childList: true });
+        }).observe(tbody[0], { childList: true });
 
-        $(document).on('change', 'select#select_location_id', function () {
-            setTimeout(function () { load(true); }, 300);
-        });
+        $(document).on('change', 'select#customer_id', loadCustomer);
+        $(document).on('change', 'select#select_location_id', function () { setTimeout(load, 300); });
 
-        load(true);
+        load();
+        loadCustomer();
     });
 })(jQuery);

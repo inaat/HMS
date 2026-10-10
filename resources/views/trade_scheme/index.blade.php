@@ -43,16 +43,30 @@
                             <td><b>{{ $s->code }}</b></td>
                             <td>{{ $s->name }}</td>
                             <td>
-                                {{ $s->product_name }}@if ($s->variation_id && $s->product_type === 'variable') - {{ $s->variation_name }}@endif
-                                @if (! $s->variation_id && $s->product_type === 'variable') <small class="text-muted">(all variations)</small>@endif
-                                <br><small class="text-muted">counted in {{ $s->unit_name ?: 'base unit' }}</small>
+                                @if (($s->scope ?? 'product') === 'brand')
+                                    <b>All {{ $s->brand_name }}</b> <small class="text-muted">(brand)</small>
+                                @elseif (($s->scope ?? 'product') === 'products')
+                                    <b>Group of {{ $s->group_count }} products</b>
+                                @else
+                                    {{ $s->product_name }}@if ($s->variation_id && $s->product_type === 'variable') - {{ $s->variation_name }}@endif
+                                    @if (! $s->variation_id && $s->product_type === 'variable') <small class="text-muted">(all variations)</small>@endif
+                                @endif
+                                <br><small class="text-muted">
+                                    @if (($s->condition_type ?? 'qty') === 'value') bill value (Rs)
+                                    @elseif (($s->scope ?? 'product') === 'product') counted in {{ $s->unit_name ?: 'base unit' }}
+                                    @else counted in {{ ($s->count_unit ?? 'big') === 'base' ? 'pieces' : 'boxes / cartons' }}
+                                    @endif
+                                    @if (($s->channel ?? 'all') !== 'all') · {{ ucfirst($s->channel) }} only @endif
+                                </small>
                             </td>
                             <td style="white-space:nowrap;">
                                 <b>{{ $s->slab_text }}</b>
                                 @if ($s->repeat) <br><small class="text-muted">repeats</small>@endif
                             </td>
                             <td>
-                                @if ($s->free_mode === 'same')
+                                @if (($s->reward_type ?? 'free') === 'percent')
+                                    <b>% discount</b> <small class="text-muted">on the bought lines</small>
+                                @elseif ($s->free_mode === 'same')
                                     same product <small class="text-muted">({{ $s->free_unit_name ?: 'base unit' }})</small>
                                 @else
                                     {{ $s->free_product_name }}@if ($s->free_product_type === 'variable') - {{ $s->free_variation_name }}@endif

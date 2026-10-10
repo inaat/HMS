@@ -87,7 +87,7 @@
 
 @section('javascript')
 	<script src="{{ asset('js/pos.js?v=' . $asset_v) }}"></script>
-	<script>window.trade_scheme_active_url = "{{ action([\App\Http\Controllers\TradeSchemeController::class, 'active']) }}";</script>
+	<script>window.trade_scheme_active_url = "{{ action([\App\Http\Controllers\TradeSchemeController::class, 'active']) }}"; window.trade_scheme_customer_url = "{{ action([\App\Http\Controllers\TradeSchemeController::class, 'customer']) }}";</script>
 	<script src="{{ asset('js/trade_scheme.js?v=' . filemtime(public_path('js/trade_scheme.js'))) }}"></script>
 	<script src="{{ asset('js/printer.js?v=' . $asset_v) }}"></script>
 	<script src="{{ asset('js/product.js?v=' . $asset_v) }}"></script>

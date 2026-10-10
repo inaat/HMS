@@ -49,14 +49,15 @@ class TradeSchemeController extends Controller
         $business_id = $request->session()->get('user.business_id');
 
         $schemes = DB::table('trade_schemes as s')
-            ->join('products as p', 'p.id', '=', 's.product_id')
+            ->leftJoin('products as p', 'p.id', '=', 's.product_id')
             ->leftJoin('variations as v', 'v.id', '=', 's.variation_id')
             ->leftJoin('variations as fv', 'fv.id', '=', 's.free_variation_id')
             ->leftJoin('products as fp', 'fp.id', '=', 'fv.product_id')
             ->leftJoin('contacts as c', 'c.id', '=', 's.supplier_id')
+            ->leftJoin('brands as b', 'b.id', '=', 's.brand_id')
             ->where('s.business_id', $business_id)
             ->orderByDesc('s.is_active')->orderByDesc('s.id')
-            ->select('s.*', 'p.name as product_name', 'p.type as product_type', 'v.name as variation_name', 'fp.name as free_product_name',
+            ->select('s.*', 'p.name as product_name', 'p.type as product_type', 'v.name as variation_name', 'fp.name as free_product_name', 'b.name as brand_name',
                 'fv.name as free_variation_name', 'fp.type as free_product_type', DB::raw("COALESCE(NULLIF(c.supplier_business_name, ''), c.name) as supplier_name"))
             ->get();
         $slabs = DB::table('trade_scheme_slabs')->whereIn('trade_scheme_id', $schemes->pluck('id')->all() ?: [0])->orderBy('buy_qty')->get()->groupBy('trade_scheme_id');
@@ -66,8 +67,13 @@ class TradeSchemeController extends Controller
         $today = now()->format('Y-m-d');
 
         foreach ($schemes as $s) {
-            $s->slabs = $slabs->get($s->id, collect());
+            $s->slabs = $slabs->get($s->id, collect())->map(function ($x) {
+                $x->class_percents = json_decode((string) ($x->class_percents ?? ''), true) ?: [];
+
+                return $x;
+            });
             $s->slab_text = TradeSchemeUtil::slabText($s);
+            $s->group_count = count(json_decode((string) ($s->product_ids ?? ''), true) ?: []);
             $free_unit = $s->free_mode === 'same' ? ($s->free_unit_id ?: $s->unit_id) : $s->free_unit_id;
             $s->unit_name = $units[$s->unit_id] ?? '';
             $s->free_unit_name = $units[$free_unit] ?? '';
@@ -131,8 +137,20 @@ class TradeSchemeController extends Controller
         $free_pick = $scheme && $scheme->free_variation_id
             ? $picked(DB::table('variations')->where('id', $scheme->free_variation_id)->value('product_id'), $scheme->free_variation_id) : null;
         $next_code = 'SCH-'.str_pad((string) ((int) DB::table('trade_schemes')->where('business_id', $business_id)->max('id') + 1), 3, '0', STR_PAD_LEFT);
+        $brands = DB::table('brands')->where('business_id', $business_id)->whereNull('deleted_at')->orderBy('name')->pluck('name', 'id');
+        // group of products: the tokens ("v12" / "p5") with their names, for the multi-select
+        $group_picks = [];
+        foreach (json_decode((string) ($scheme->product_ids ?? ''), true) ?: [] as $token) {
+            if (preg_match('/^([vp])(\d+)$/', (string) $token, $m)) {
+                $pid = $m[1] === 'v' ? DB::table('variations')->where('id', $m[2])->value('product_id') : (int) $m[2];
+                $pick = $picked($pid, $m[1] === 'v' ? (int) $m[2] : null);
+                if ($pick) {
+                    $group_picks[] = ['id' => $token, 'text' => $pick['text']];
+                }
+            }
+        }
 
-        return view('trade_scheme.form', compact('scheme', 'locations', 'suppliers', 'slabs', 'buy_pick', 'free_pick', 'next_code'));
+        return view('trade_scheme.form', compact('scheme', 'locations', 'suppliers', 'slabs', 'buy_pick', 'free_pick', 'next_code', 'brands', 'group_picks'));
     }
 
     public function store(Request $request)
@@ -156,20 +174,47 @@ class TradeSchemeController extends Controller
         $request->validate([
             'code' => 'required|string|max:40',
             'name' => 'required|string|max:191',
-            'buy_item' => 'required|string',
+            'scope' => 'required|in:product,products,brand',
+            'condition_type' => 'required|in:qty,value',
+            'reward_type' => 'required|in:free,percent',
+            'channel' => 'required|in:all,retail,wholesale',
             'free_mode' => 'required|in:same,other',
             'funded_by' => 'required|in:own,supplier',
         ]);
         if (DB::table('trade_schemes')->where('business_id', $business_id)->where('code', $request->input('code'))->when($id, fn ($q) => $q->where('id', '!=', $id))->exists()) {
             return back()->withInput()->with('status', ['success' => 0, 'msg' => 'Code '.$request->input('code').' is already used by another scheme']);
         }
+        $scope = $request->input('scope');
+        $reward = $request->input('reward_type');
+        $condition = $request->input('condition_type');
 
-        [$product_id, $variation_id] = $this->item($request->input('buy_item'), $business_id);
-        if (! $product_id) {
-            return back()->withInput()->with('status', ['success' => 0, 'msg' => 'Choose the product that is bought']);
+        // what is bought
+        $product_id = null;
+        $variation_id = null;
+        $product_ids = null;
+        $brand_id = null;
+        if ($scope === 'product') {
+            [$product_id, $variation_id] = $this->item($request->input('buy_item'), $business_id);
+            if (! $product_id) {
+                return back()->withInput()->with('status', ['success' => 0, 'msg' => 'Choose the product that is bought']);
+            }
+        } elseif ($scope === 'products') {
+            $tokens = array_values(array_filter((array) $request->input('group_items'), fn ($t) => preg_match('/^[vp]\d+$/', (string) $t)));
+            if (count($tokens) < 1) {
+                return back()->withInput()->with('status', ['success' => 0, 'msg' => 'Choose the products of the group']);
+            }
+            $product_ids = json_encode($tokens);
+        } else {
+            $brand_id = DB::table('brands')->where('business_id', $business_id)->where('id', $request->input('brand_id'))->value('id');
+            if (! $brand_id) {
+                return back()->withInput()->with('status', ['success' => 0, 'msg' => 'Choose the brand']);
+            }
         }
+        // free goods of the same product only make sense for one product counted by quantity
+        $free_mode = $reward === 'free' && ($scope !== 'product' || $condition === 'value') ? 'other' : $request->input('free_mode');
+
         $free_variation_id = null;
-        if ($request->input('free_mode') === 'other') {
+        if ($reward === 'free' && $free_mode === 'other') {
             [$free_product_id, $free_variation_id] = $this->item($request->input('free_item'), $business_id);
             if (! $free_product_id) {
                 return back()->withInput()->with('status', ['success' => 0, 'msg' => 'Choose the free product']);
@@ -179,15 +224,35 @@ class TradeSchemeController extends Controller
         }
 
         $slabs = [];
+        $classes = ['A', 'B', 'C', 'D', 'E'];
         foreach ((array) $request->input('slab_buy') as $i => $buy) {
             $buy = (float) $this->util->num_uf((string) $buy);
-            $free = (float) $this->util->num_uf((string) ($request->input('slab_free')[$i] ?? 0));
-            if ($buy > 0 && $free > 0) {
-                $slabs[] = ['buy_qty' => $buy, 'free_qty' => $free];
+            if ($buy <= 0) {
+                continue;
+            }
+            if ($reward === 'percent') {
+                $pct = $request->input('slab_percent')[$i] ?? '';
+                $by_class = [];
+                foreach ($classes as $c) {
+                    $v = $request->input('slab_class_'.$c)[$i] ?? '';
+                    if ($v !== '' && $v !== null) {
+                        $by_class[$c] = (float) $this->util->num_uf((string) $v);
+                    }
+                }
+                if ($pct === '' && empty($by_class)) {
+                    continue;
+                }
+                $slabs[] = ['buy_qty' => $buy, 'free_qty' => 0, 'percent' => $pct === '' ? null : (float) $this->util->num_uf((string) $pct),
+                    'class_percents' => empty($by_class) ? null : json_encode($by_class)];
+            } else {
+                $free = (float) $this->util->num_uf((string) ($request->input('slab_free')[$i] ?? 0));
+                if ($free > 0) {
+                    $slabs[] = ['buy_qty' => $buy, 'free_qty' => $free, 'percent' => null, 'class_percents' => null];
+                }
             }
         }
         if (empty($slabs)) {
-            return back()->withInput()->with('status', ['success' => 0, 'msg' => 'Add at least one slab, e.g. buy 12 â†’ 1 free']);
+            return back()->withInput()->with('status', ['success' => 0, 'msg' => 'Add at least one slab, e.g. buy 12 → 1 free, or 2 boxes → 2%']);
         }
 
         $date = fn ($v) => empty($v) ? null : $this->util->uf_date($v);
@@ -198,12 +263,19 @@ class TradeSchemeController extends Controller
             'starts_at' => $date($request->input('starts_at')),
             'ends_at' => $date($request->input('ends_at')),
             'is_active' => $request->boolean('is_active') ? 1 : 0,
+            'scope' => $scope,
             'product_id' => $product_id,
             'variation_id' => $variation_id,
-            'unit_id' => $request->input('unit_id') ?: null,
-            'free_mode' => $request->input('free_mode'),
-            'free_variation_id' => $free_variation_id,
-            'free_unit_id' => $request->input('free_unit_id') ?: null,
+            'product_ids' => $product_ids,
+            'brand_id' => $brand_id,
+            'condition_type' => $condition,
+            'count_unit' => $scope === 'product' ? 'unit' : ($request->input('count_unit') === 'base' ? 'base' : 'big'),
+            'reward_type' => $reward,
+            'channel' => $request->input('channel'),
+            'unit_id' => $scope === 'product' ? ($request->input('unit_id') ?: null) : null,
+            'free_mode' => $free_mode,
+            'free_variation_id' => $reward === 'free' ? $free_variation_id : null,
+            'free_unit_id' => $reward === 'free' ? ($request->input('free_unit_id') ?: null) : null,
             'repeat' => $request->boolean('repeat') ? 1 : 0,
             'location_ids' => json_encode(array_values(array_map('intval', array_filter((array) $request->input('location_ids'))))),
             'funded_by' => $request->input('funded_by'),
@@ -231,7 +303,7 @@ class TradeSchemeController extends Controller
         return redirect()->action([self::class, 'index'])->with('status', ['success' => 1, 'msg' => 'Scheme '.$data['code'].' saved']);
     }
 
-    /** "v123" = one variation, "p45" = a product (all its variations) â†’ [product_id, variation_id|null] */
+    /** "v123" = one variation, "p45" = a product (all its variations) → [product_id, variation_id|null] */
     private function item($value, $business_id): array
     {
         $value = (string) $value;
@@ -287,6 +359,8 @@ class TradeSchemeController extends Controller
 
         return response()->json($schemes->map(fn ($s) => [
             'id' => $s->id, 'code' => $s->code, 'name' => $s->name, 'label' => $s->label,
+            'scope' => $s->scope, 'p_ids' => $s->p_ids, 'v_ids' => $s->v_ids,
+            'condition_type' => $s->condition_type, 'count_unit' => $s->count_unit, 'reward_type' => $s->reward_type, 'channel' => $s->channel,
             'product_id' => (int) $s->product_id, 'variation_id' => $s->variation_id ? (int) $s->variation_id : null,
             'unit_mult' => $s->unit_mult, 'unit_name' => $s->unit_name, 'repeat' => (bool) $s->repeat,
             'slabs' => $s->slabs, 'free_mode' => $s->free_mode,
@@ -294,6 +368,15 @@ class TradeSchemeController extends Controller
             'free_unit_id' => $s->free_mode === 'same' ? ($s->free_unit_id ?: $s->unit_id) : $s->free_unit_id,
             'free_unit_mult' => $s->free_unit_mult, 'free_unit_name' => $s->free_unit_name, 'budget_left' => $s->budget_left,
         ])->values());
+    }
+
+    /** The sale's customer for the schemes: class (Outlet class) and channel (retail / wholesale). */
+    public function customer(Request $request)
+    {
+        $business_id = $request->session()->get('user.business_id');
+        $id = DB::table('contacts')->where('business_id', $business_id)->where('id', $request->input('contact_id'))->value('id');
+
+        return response()->json(TradeSchemeUtil::customer($id));
     }
 
     /** Product search for the scheme form: products and their variations, select2 format. */
@@ -315,7 +398,7 @@ class TradeSchemeController extends Controller
         foreach ($rows->groupBy('id') as $product_id => $variations) {
             $first = $variations->first();
             if ($first->type === 'variable') {
-                $results[] = ['id' => 'p'.$product_id, 'text' => $first->name.' â€” all variations ('.$first->sku.')'];
+                $results[] = ['id' => 'p'.$product_id, 'text' => $first->name.' — all variations ('.$first->sku.')'];
                 foreach ($variations as $v) {
                     $results[] = ['id' => 'v'.$v->variation_id, 'text' => $first->name.' - '.$v->variation.' ('.$v->sub_sku.')'];
                 }

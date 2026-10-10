@@ -23,16 +23,20 @@
 		@php
 			// Trade scheme kept when editing a sale / invoicing a sales order (public/js/trade_scheme.js re-checks it)
 			$ts_id = null;
+			$ts_ids = '';
 			$ts_role = '';
 			if (\App\Utils\TradeSchemeUtil::installed()) {
-				if (! empty($product->transaction_sell_lines_id)) {
-					$ts_id = \DB::table('transaction_sell_lines')->where('id', $product->transaction_sell_lines_id)->value('trade_scheme_id');
-				} elseif (! empty($so_line)) {
-					$ts_id = $so_line->trade_scheme_id ?? null;
+				$ts_line = ! empty($product->transaction_sell_lines_id)
+					? \DB::table('transaction_sell_lines')->where('id', $product->transaction_sell_lines_id)->first()
+					: (! empty($so_line) ? $so_line : null);
+				if ($ts_line) {
+					$ts_got = \App\Utils\TradeSchemeUtil::lineSchemes($ts_line);
+					$ts_ids = implode(',', array_unique(array_column($ts_got, 'id')));
+					$ts_id = $ts_line->trade_scheme_id ?? null;
 				}
 				if ($ts_id) {
-					$ts_row = \DB::table('trade_schemes')->where('id', $ts_id)->first(['product_id', 'free_mode', 'free_variation_id']);
-					if ($ts_row && $ts_row->free_mode === 'other' && (int) $ts_row->free_variation_id === (int) $product->variation_id && (int) $ts_row->product_id !== (int) $product->product_id) {
+					$ts_row = \DB::table('trade_schemes')->where('id', $ts_id)->first(['product_id', 'free_mode', 'free_variation_id', 'reward_type']);
+					if ($ts_row && $ts_row->free_mode === 'other' && ($ts_row->reward_type ?? 'free') === 'free' && (int) $ts_row->free_variation_id === (int) $product->variation_id && (int) $ts_row->product_id !== (int) $product->product_id) {
 						$ts_role = 'free';
 					}
 				}
@@ -41,9 +45,11 @@
 			$product_name = $product->product_name . '<br/>' . $product->sub_sku ;
 			if(!empty($product->brand)){ $product_name .= ' ' . $product->brand ;}
 		@endphp
-		@if($ts_id)
-			<input type="hidden" class="ts_trade_scheme_id" name="products[{{$row_count}}][trade_scheme_id]" value="{{$ts_id}}">
-			@if($ts_role)<input type="hidden" class="ts_scheme_role" name="products[{{$row_count}}][scheme_role]" value="{{$ts_role}}">@endif
+		@if($ts_role)
+			<input type="hidden" class="ts_free_id" name="products[{{$row_count}}][trade_scheme_id]" value="{{$ts_id}}">
+			<input type="hidden" class="ts_role" name="products[{{$row_count}}][scheme_role]" value="free">
+		@elseif($ts_ids !== '')
+			<input type="hidden" class="ts_ids" name="products[{{$row_count}}][trade_scheme_ids]" value="{{$ts_ids}}">
 		@endif
 
 		@if( ($edit_price || $edit_discount) && empty($is_direct_sell) )

@@ -311,7 +311,8 @@ class TransactionUtil extends Util
 
         // Trade schemes: check each line's scheme and record its free quantity (TradeSchemeUtil)
         $with_scheme = TradeSchemeUtil::installed();
-        if ($with_scheme && collect($products)->pluck('trade_scheme_id')->filter()->isNotEmpty()) {
+        $with_scheme_data = $with_scheme && \Illuminate\Support\Facades\Schema::hasColumn('transaction_sell_lines', 'scheme_data');
+        if ($with_scheme && (collect($products)->pluck('trade_scheme_id')->filter()->isNotEmpty() || collect($products)->pluck('trade_scheme_ids')->filter()->isNotEmpty())) {
             $scheme_transaction = is_object($transaction) ? $transaction : Transaction::find($transaction);
             if ($scheme_transaction) {
                 TradeSchemeUtil::applyToLines($products, $scheme_transaction, $location_id, fn ($v) => $uf_data ? $this->num_uf($v) : $v);
@@ -414,6 +415,9 @@ class TransactionUtil extends Util
                 if ($with_scheme) {
                     $line['trade_scheme_id'] = ! empty($product['trade_scheme_id']) ? $product['trade_scheme_id'] : null;
                     $line['scheme_free_qty'] = ! empty($product['trade_scheme_id']) ? (float) ($product['scheme_free_qty'] ?? 0) : 0;
+                    if ($with_scheme_data) {
+                        $line['scheme_data'] = $product['scheme_data'] ?? null;
+                    }
                 }
 
                 foreach ($extra_line_parameters as $key => $value) {
@@ -637,6 +641,9 @@ class TransactionUtil extends Util
         if (TradeSchemeUtil::installed()) {
             $sell_line->trade_scheme_id = ! empty($product['trade_scheme_id']) ? $product['trade_scheme_id'] : null;
             $sell_line->scheme_free_qty = ! empty($product['trade_scheme_id']) ? (float) ($product['scheme_free_qty'] ?? 0) : 0;
+            if (\Illuminate\Support\Facades\Schema::hasColumn('transaction_sell_lines', 'scheme_data')) {
+                $sell_line->scheme_data = $product['scheme_data'] ?? null;
+            }
         }
         $sell_line->save();
 
@@ -2111,17 +2118,27 @@ class TransactionUtil extends Util
                 'variation_id' => $variation->id,
             ];
 
-            // Trade scheme: "Scheme SCH-014 (12+1): 1 CTN free"
-            if (! empty($line->trade_scheme_id) && (float) $line->scheme_free_qty > 0) {
-                $scheme = DB::table('trade_schemes')->where('id', $line->trade_scheme_id)->first(['code', 'name', 'free_mode', 'unit_id', 'free_unit_id']);
-                if ($scheme) {
-                    $free_unit = $scheme->free_mode === 'same' ? ($scheme->free_unit_id ?: $scheme->unit_id) : $scheme->free_unit_id;
-                    $free_mult = TradeSchemeUtil::multiplier($free_unit);
-                    $free_unit_name = $free_unit ? DB::table('units')->where('id', $free_unit)->value('short_name') : $base_unit_name;
-                    $slabs = DB::table('trade_scheme_slabs')->where('trade_scheme_id', $line->trade_scheme_id)->orderBy('buy_qty')->get();
-                    $line_array['scheme_text'] = 'Scheme '.$scheme->code.' ('.TradeSchemeUtil::slabText((object) ['slabs' => $slabs]).')';
-                    // "Free qty" column of the invoice
-                    $line_array['scheme_free'] = $this->num_f((float) $line->scheme_free_qty / $free_mult, false, $business_details, true).' '.$free_unit_name;
+            // Trade schemes: "Scheme SCH-014 (12+1) · SCH-020 2%" under the product, free goods in the "Free qty" column
+            $line_schemes = TradeSchemeUtil::installed() ? TradeSchemeUtil::lineSchemes($line) : [];
+            if (! empty($line_schemes)) {
+                $texts = [];
+                foreach ($line_schemes as $got) {
+                    $scheme = DB::table('trade_schemes')->where('id', $got['id'])->first(['code', 'free_mode', 'unit_id', 'free_unit_id']);
+                    if (! $scheme) {
+                        continue;
+                    }
+                    if ((float) ($got['free_qty'] ?? 0) > 0) {
+                        $free_unit = $scheme->free_mode === 'same' ? ($scheme->free_unit_id ?: $scheme->unit_id) : $scheme->free_unit_id;
+                        $free_unit_name = $free_unit ? DB::table('units')->where('id', $free_unit)->value('short_name') : $base_unit_name;
+                        $line_array['scheme_free'] = $this->num_f((float) $got['free_qty'] / TradeSchemeUtil::multiplier($free_unit), false, $business_details, true).' '.$free_unit_name;
+                        $slabs = DB::table('trade_scheme_slabs')->where('trade_scheme_id', $got['id'])->orderBy('buy_qty')->get();
+                        $texts[] = $scheme->code.' ('.TradeSchemeUtil::slabText((object) ['slabs' => $slabs]).')';
+                    } elseif ((float) ($got['discount'] ?? 0) > 0) {
+                        $texts[] = $scheme->code.' '.rtrim(rtrim(number_format((float) ($got['pct'] ?? 0), 2, '.', ''), '0'), '.').'%';
+                    }
+                }
+                if (! empty($texts)) {
+                    $line_array['scheme_text'] = 'Scheme '.implode(' · ', $texts);
                 }
             }
 
