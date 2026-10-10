@@ -381,7 +381,7 @@ class AdminSidebarMenu
                     __('sale.sale'),
                     function ($sub) use ($enabled_modules, $is_admin, $pos_settings) {
                         // Order-booker app inbox (config/mobile_sync.php), only on the local copy.
-                        if (config('mobile_sync.role') === 'local' && ($is_admin || auth()->user()->hasAnyPermission(['sell.create', 'so.create', 'direct_sell.access']))) {
+                        if (in_array(config('mobile_sync.role'), ['local', 'single'], true) && ($is_admin || auth()->user()->hasAnyPermission(['sell.create', 'so.create', 'direct_sell.access']))) {
                             $sub->url(
                                 action([\App\Http\Controllers\MobileOrderController::class, 'index']),
                                 'Mobile orders',

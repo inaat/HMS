@@ -26,12 +26,13 @@ class MobileSyncRun extends Command
 
     public function handle()
     {
-        if (config('mobile_sync.role') !== 'local') {
-            $this->error('MOBILE_SYNC_ROLE is not "local" on this copy; nothing to do.');
+        $this->single = config('mobile_sync.role') === 'single';
+        if (config('mobile_sync.role') !== 'local' && ! $this->single) {
+            $this->error('MOBILE_SYNC_ROLE is not "local" or "single" on this copy; nothing to do.');
 
             return 1;
         }
-        if (empty(config('mobile_sync.cloud_url')) || strlen((string) config('mobile_sync.sync_key')) < 20) {
+        if (! $this->single && (empty(config('mobile_sync.cloud_url')) || strlen((string) config('mobile_sync.sync_key')) < 20)) {
             $this->error('Set MOBILE_SYNC_CLOUD_URL and MOBILE_SYNC_KEY (20+ characters) in .env');
 
             return 1;
@@ -53,7 +54,7 @@ class MobileSyncRun extends Command
         try {
             // 1. Collect.
             SyncStatus::progress('Collecting orders and payments from bookers', 5);
-            $response = $this->cloud()->get('/api/sync/inbox');
+            $response = $this->send('GET', '/api/sync/inbox');
             if ($response->successful()) {
                 $added = $inbox->store((array) $response->json());
                 // Which phone each booker is logged in on (Sell > Mobile orders > Booker phones)
@@ -61,7 +62,9 @@ class MobileSyncRun extends Command
                     DB::table('system')->updateOrInsert(['key' => 'mobile_sessions'], ['value' => json_encode($response->json('sessions'))]);
                 }
                 $this->line(sprintf('collected  customers %d  orders %d  payments %d  shop edits %d  visits %d', $added['customers'], $added['orders'], $added['payments'], $added['shop_edits'], $added['visits']));
-                $this->downloadPhotos($inbox->missingPhotos());
+                if (! $this->single) {
+                    $this->downloadPhotos($inbox->missingPhotos());   // single: the photos are already on this server
+                }
             } else {
                 $this->failed('Collect', $response);
             }
@@ -79,7 +82,7 @@ class MobileSyncRun extends Command
             if (! empty($ack['ids']) || ! empty($ack['customer_updates']) || ! empty($ack['visits'])) {
                 $ids = $ack['ids'];
                 unset($ack['ids']);
-                $response = $this->cloud()->post('/api/sync/ack', $ack);
+                $response = $this->send('POST', '/api/sync/ack', $ack);
                 if ($response->successful()) {
                     $inbox->ackDone($ids);
                     $this->line('reported   '.count($ids).' status change(s)');
@@ -91,7 +94,7 @@ class MobileSyncRun extends Command
             // 3. Push.
             SyncStatus::progress('Sending products, stock and customers to bookers', 25);
             $snapshot = (new LocalSnapshot($business_id, $location_id))->all();
-            $response = $this->cloud()->post('/api/sync/push', $snapshot);
+            $response = $this->send('POST', '/api/sync/push', $snapshot);
             if ($response->successful()) {
                 LocalSnapshot::logoutsDone((array) $response->json('result.logged_out'));
                 foreach (array_intersect_key((array) $response->json('result'), $snapshot) as $set => $counts) {
@@ -107,7 +110,7 @@ class MobileSyncRun extends Command
 
             // 4. Copy every other local change to the cloud database (MOBILE_SYNC_MIRROR=true); it reports its own
             // progress from 40% to 100%.
-            if (config('mobile_sync.mirror')) {
+            if (config('mobile_sync.mirror') && ! $this->single) {
                 SyncStatus::progress('Copying shop data to the cloud', 40);
                 if ($this->call('mobile-sync:mirror') !== 0) {
                     $this->errors[] = json_decode((string) DB::table('system')->where('key', 'mobile_sync_last_mirror')->value('value'), true)['what'] ?? 'Copy failed';
@@ -138,6 +141,57 @@ class MobileSyncRun extends Command
     }
 
     private $errors = [];
+
+    /** MOBILE_SYNC_ROLE=single: this server is also the bookers' server (no shop PC, no HTTP hop). */
+    private $single = false;
+
+    /**
+     * One step of the sync: an HTTP call to the cloud copy, or — single server — the same API code run here directly
+     * (App\Http\Controllers\Api\MobileSyncController), returned in the same shape (successful / json / status / body).
+     */
+    private function send(string $method, string $path, array $data = [])
+    {
+        if (! $this->single) {
+            return $method === 'GET' ? $this->cloud()->get($path, $data) : $this->cloud()->post($path, $data);
+        }
+        $action = ['/api/sync/inbox' => 'inbox', '/api/sync/ack' => 'ack', '/api/sync/push' => 'push'][$path];
+        $request = \Illuminate\Http\Request::create($path, $method, $data);
+        $response = app(\App\Http\Controllers\Api\MobileSyncController::class)->{$action}($request);
+        $body = $response instanceof \Illuminate\Http\JsonResponse ? $response->getData(true) : [];
+
+        return new class($body, $response->getStatusCode())
+        {
+            private $body;
+
+            private $status;
+
+            public function __construct($body, $status)
+            {
+                $this->body = $body;
+                $this->status = $status;
+            }
+
+            public function successful()
+            {
+                return $this->status >= 200 && $this->status < 300;
+            }
+
+            public function status()
+            {
+                return $this->status;
+            }
+
+            public function body()
+            {
+                return json_encode($this->body);
+            }
+
+            public function json($key = null)
+            {
+                return $key === null ? $this->body : data_get($this->body, $key);
+            }
+        };
+    }
 
     /** Shop photos bookers took are kept on the cloud; the PC keeps its own copy under public/uploads/booker. */
     private function downloadPhotos(array $paths): void

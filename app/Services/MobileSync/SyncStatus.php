@@ -44,7 +44,7 @@ class SyncStatus
     /** Start mobile-sync:run in the background unless one is running. Returns whether it started. */
     public static function start(): bool
     {
-        if (config('mobile_sync.role') !== 'local' || ! empty(self::get()['running'])) {
+        if (! in_array(config('mobile_sync.role'), ['local', 'single'], true) || ! empty(self::get()['running'])) {
             return false;
         }
         self::progress('Starting', 1);

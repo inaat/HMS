@@ -9,7 +9,10 @@
  *    until the local PC collects them. It never makes invoices or changes stock.
  */
 return [
-    // local | cloud | off
+    // local | cloud | single | off
+    //  - local + cloud: shop PC is the main copy, the cloud copy only serves the phones (two servers)
+    //  - single: cloud-only business — one server is the POS and the bookers' server (no shop PC, no sync key,
+    //    no cloud URL; the phones use this server's address)
     'role' => env('MOBILE_SYNC_ROLE', 'off'),
 
     // Shared secret between the local PC and the cloud (header X-Sync-Key). Long random string, same on both.

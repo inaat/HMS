@@ -13,13 +13,14 @@ use Illuminate\Support\Facades\DB;
  *   mobile.sync:mobile - booker app calls; needs "Authorization: Bearer <token>" from /api/mobile/login
  *   mobile.sync:login  - only checks this copy is the cloud
  *
- * Every mode answers 404 unless this copy runs with MOBILE_SYNC_ROLE=cloud.
+ * Every mode answers 404 unless this copy serves the phones: MOBILE_SYNC_ROLE=cloud (post office for a shop PC) or
+ * single (cloud-only business: this one server is the POS and the bookers' server).
  */
 class MobileSync
 {
     public function handle(Request $request, Closure $next, string $mode = 'mobile')
     {
-        if (config('mobile_sync.role') !== 'cloud') {
+        if (! in_array(config('mobile_sync.role'), ['cloud', 'single'], true)) {
             abort(404);
         }
 
